@@ -9317,7 +9317,6 @@ if(typeof doPushCloud==='function')await doPushCloud();
 try{if(typeof render==='function')render()}catch(e){}
 TX.draft=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Confirmed. Changes saved to the app and synced to Firebase (thar_factory).');}
 catch(e){if(typeof say==='function')say('Could not commit the draft: '+String(e.message||e)+'. No success was reported.');}}
-function downloadLive(){const blob=new Blob(['<!DOCTYPE html>\n'+document.documentElement.outerHTML],{type:'text/html;charset=utf-8'});const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='thar-factory-live-'+new Date().toISOString().slice(0,10)+'.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
 const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
@@ -9328,7 +9327,6 @@ window.__tharDynamicSend=function(text){if(!cfg())return false;sendDynamic(text)
 window.__tharDynamicSend.active=function(){return !!cfg()};
 function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
 const sendBtn=form.querySelector('button[aria-label="Send"]');
-const download=document.createElement('button');download.type='button';download.className='btn smallbtn';download.textContent='Download Live HTML';download.title='Export the current page HTML';download.onclick=downloadLive;form.parentElement.insertBefore(download,form);
 const waves=document.createElement('span');waves.id='aiVoiceWaves';for(let i=0;i<9;i++)waves.appendChild(document.createElement('i'));form.insertBefore(waves,sendBtn);
 const SEND_ICON=sendBtn?sendBtn.innerHTML:'➤';
 const MIC_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z" fill="currentColor"/></svg>';
@@ -9364,7 +9362,7 @@ input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();}
 
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
-window.THAR_AI_TX={state:TX,downloadLiveHTML:downloadLive};
+window.THAR_AI_TX={state:TX};
 })();
 </script>
 
