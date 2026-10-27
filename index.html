@@ -9437,7 +9437,7 @@ TX.draft=TX.draft||{summary:'',changes:[]};if(a.reason)TX.draft.summary=a.reason
 const same=z=>z.store===change.store&&z.index===change.index;
 if(change.op==='update'){const prior=TX.draft.changes.find(z=>z.op==='update'&&same(z));if(prior){prior.fields=Object.assign({},prior.fields,change.fields);change=prior;}else TX.draft.changes.push(change);}
 else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split'&&same(z)&&z.stage===change.stage);if(k>=0)TX.draft.changes[k]=change;else TX.draft.changes.push(change);}
-else if(change.op==='add'){const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store);if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
+else if(change.op==='add'){const sk=String((change.record||{}).subOrder||'').toLowerCase();const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store&&(!sk||String((z.record||{}).subOrder||'').toLowerCase()===sk));if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
 async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
@@ -9509,7 +9509,7 @@ input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();}
 
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
-window.THAR_AI_TX={state:TX};
+window.THAR_AI_TX={state:TX,provisional:provisional,showDraft:showDraft,commit:commit};
 })();
 </script>
 
@@ -9525,8 +9525,8 @@ window.THAR_AI_TX={state:TX};
 
 /* 1 · Thinking / Personalising capsule */
 #taeLog>.taeDots{display:none!important}
-#aiThinkSlot{position:relative;height:0;z-index:6;pointer-events:none}
-.aiThink{position:absolute;left:0;right:0;bottom:12px;margin:auto;width:max-content;max-width:calc(100% - 32px);padding:1.5px;border-radius:9999px;isolation:isolate;opacity:0;
+.aiThinkRow{align-self:flex-start;display:flex;padding:6px 8px;margin:-4px 0 0 -2px;max-width:100%}
+.aiThink{position:relative;width:max-content;max-width:100%;padding:1.5px;border-radius:9999px;isolation:isolate;opacity:0;
   background:conic-gradient(from var(--angle),transparent 60%,#ec4899 80%,#a855f7 95%,transparent 100%),rgba(255,255,255,.08);
   box-shadow:0 0 16px rgba(236,72,153,.45);will-change:transform,opacity}
 .aiThink[hidden]{display:none}
@@ -9566,6 +9566,30 @@ body.light #taeForm.taeF{--aiBar:#fff;border-color:rgba(15,23,42,.12)}
 body.light #taeForm.taeF:focus-within{background:#fff}
 body.light #taeForm.taeF .aiIc,body.light #taeForm.taeF [aria-label="Send"]{color:#475569}
 
+
+/* mic: no green bars */
+#aiVoiceWaves,#taeForm #aiVoiceWaves,#aiVoiceWaves.on{display:none!important}
+
+/* unified dark theme (header, chat, bubbles, input) */
+body:not(.light) #taeBox{--aiBg:#0f1015;--aiSurf:#191b24;--aiSurf2:#1f2230;--aiLine:rgba(255,255,255,.08);
+  background:radial-gradient(120% 60% at 50% 0%,rgba(124,58,237,.12),transparent 60%),color-mix(in srgb,#0f1015 calc(var(--tbBg,100)*1%),transparent)!important}
+body:not(.light) #taeBox .taeH{background:linear-gradient(180deg,#181a26,#12131a)!important;border-bottom:1px solid var(--aiLine)!important}
+body:not(.light) #taeBox .taeH button{background:var(--aiSurf2)!important;border:1px solid var(--aiLine)!important;color:#e6e8f2!important}
+body:not(.light) #taeBox .taeH .taeNm{background:linear-gradient(90deg,#38bdf8,#a855f7)!important;-webkit-background-clip:text!important;background-clip:text!important;-webkit-text-fill-color:transparent!important}
+body:not(.light) #taeBox .taeH .taeOn{background:#38bdf8!important;box-shadow:0 0 8px #38bdf8!important}
+body:not(.light) #taeBox .taeCaps{background:transparent!important;border-bottom:1px solid var(--aiLine)!important}
+body:not(.light) #taeBox .taeCp{background:var(--aiSurf)!important;border-color:var(--aiLine)!important;color:#a9aec2!important}
+body:not(.light) #taeBox .taeCp.cur{border-color:rgba(56,189,248,.6)!important;color:#fff!important}
+body:not(.light) #taeLog .taeM.b{background:var(--aiSurf)!important;border:1px solid var(--aiLine);color:#e9ebf5}
+body:not(.light) #taeLog .taeM.b.erp,body:not(.light) #taeLog .taeM.b.taeDots{background:transparent!important;border:0}
+body:not(.light) #taeLog .taeM.u{background:linear-gradient(135deg,rgba(56,189,248,.18),rgba(168,85,247,.22)),color-mix(in srgb,var(--tbAcc,#7c3aed) 30%,#1c1e2b)!important;
+  border:1px solid rgba(124,140,255,.28);color:#fff}
+body:not(.light) #taeLog .taeM .mdCard{background:var(--aiSurf2);border-color:var(--aiLine)}
+body:not(.light) #taeLog .taeM table.mdT th{background:var(--aiSurf2)}
+body:not(.light) #taeLog .taeM code{background:rgba(255,255,255,.08)}
+body:not(.light) #taeBox .taeC button{border-color:rgba(56,189,248,.55);color:#7dd3fc}
+body:not(.light) #aiTxnPanel{background:var(--aiSurf)!important;border-color:var(--aiLine)!important}
+
 /* 3 · Cascading reveal (bottom → top, staggered) */
 .aiSf{opacity:0;animation:slideUpFade .38s ease forwards;animation-delay:calc(var(--i) * 0.05s)}
 #taeLog{overscroll-behavior:contain}
@@ -9579,6 +9603,7 @@ body.light #taeForm.taeF .aiIc,body.light #taeForm.taeF [aria-label="Send"]{colo
 if(window.__aiFx)return;window.__aiFx=1;
 var PLUS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 var LENS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.2"/></svg>';
+var CLIP='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.4-8.4"/></svg>';
 var USER='<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7z"/></svg>';
 var SEL='.mdH,.mdP,.mdCard,.mdHr,tr,li,.erpCard>*,.taeC button';
 
@@ -9600,21 +9625,22 @@ function wire(form,ti){
   var plus=btn('aiPlus','More options',PLUS);
   plus.onclick=function(){var off=caps&&caps.classList.toggle('aiCapsOff');plus.classList.toggle('on',!off);ti.focus()};
   form.insertBefore(plus,ti);
-  var lens=btn('aiLens','Lens',LENS),file=document.createElement('input');
-  file.type='file';file.accept='image/*';file.setAttribute('capture','environment');file.hidden=true;
-  lens.onclick=function(){file.click()};
-  file.onchange=function(){var f=file.files&&file.files[0];file.value='';if(f&&window.TAE_ASSISTANT)window.TAE_ASSISTANT.say('📷 '+f.name+' received. Image input is not connected to the ERP assistant yet — please type or speak the details.')};
-  form.insertBefore(lens,send);form.appendChild(file);
-  /* thinking capsule */
-  var slot=document.createElement('div');slot.id='aiThinkSlot';
-  slot.innerHTML='<div class="aiThink" hidden role="status" aria-live="polite"><span class="aiT-in"><span class="aiT-av">'+USER+'</span><span class="aiT-lbl"></span></span></div>';
-  form.parentNode.insertBefore(slot,form);
-  var th=slot.firstChild,lbl=th.querySelector('.aiT-lbl'),on=false,hT,lT,eT;
+  var lens=btn('aiLens','Camera: scan order sheet',LENS),clip=btn('aiFile','Upload photo or PDF',CLIP);
+  lens.onclick=function(){if(window.__aiScan)window.__aiScan.camera()};
+  clip.onclick=function(){if(window.__aiScan)window.__aiScan.pick()};
+  form.insertBefore(clip,send);form.insertBefore(lens,send);
+  /* thinking capsule: lives inside the chat, right where the reply will appear */
+  var row=document.createElement('div');row.className='aiThinkRow';
+  row.innerHTML='<div class="aiThink" role="status" aria-live="polite"><span class="aiT-in"><span class="aiT-av">'+USER+'</span><span class="aiT-lbl"></span></span></div>';
+  var th=row.firstChild,lbl=th.querySelector('.aiT-lbl'),on=false,hT,lT,eT;
   function setLbl(t){lbl.textContent=t;lbl.classList.remove('sw');void lbl.offsetWidth;lbl.classList.add('sw')}
-  function show(){clearTimeout(hT);on=true;th.hidden=false;th.classList.remove('out');void th.offsetWidth;th.classList.add('in');
-    setLbl('Personalising');clearTimeout(lT);lT=setTimeout(function(){setLbl('Thinking…')},1600)}
-  function hide(){on=false;clearTimeout(lT);th.classList.remove('in');th.classList.add('out');
-    hT=setTimeout(function(){th.hidden=true;th.classList.remove('out')},340)}
+  function place(){var d=log.querySelector(':scope>.taeDots');if(d){if(row.nextSibling!==d)log.insertBefore(row,d)}else if(!row.parentNode)log.appendChild(row)}
+  function show(){clearTimeout(hT);on=true;row.style.cssText='';place();th.classList.remove('out');void th.offsetWidth;th.classList.add('in');
+    setLbl('Personalising');clearTimeout(lT);lT=setTimeout(function(){setLbl('Thinking…')},1600);log.scrollTop=log.scrollHeight}
+  function hide(){on=false;clearTimeout(lT);var h=row.offsetHeight;row.style.maxHeight=h+'px';row.style.overflow='hidden';void row.offsetHeight;
+    row.style.transition='max-height .32s cubic-bezier(.4,0,.2,1),margin .32s';row.style.maxHeight='0px';row.style.marginBottom='-9px';
+    th.classList.remove('in');th.classList.add('out');
+    hT=setTimeout(function(){if(row.parentNode)row.parentNode.removeChild(row);row.style.cssText='';th.classList.remove('out')},340)}
   function evalState(){var has=!!log.querySelector(':scope>.taeDots');if(has&&!on)show();else if(!has&&on)hide()}
   /* log observer: capsule state (debounced vs. flicker between queued messages) + cascade */
   new MutationObserver(function(ms){
@@ -9628,6 +9654,157 @@ var t=setInterval(function(){
   var f=document.getElementById('taeForm'),i=document.getElementById('taeIn');
   if(f&&i&&document.getElementById('taeLog')&&!f.dataset.aiFx){f.dataset.aiFx='1';clearInterval(t);wire(f,i)}
 },50);
+})();
+</script>
+
+<!-- ===== Order-sheet scan: in-app camera + photo/PDF upload -> AI -> draft entries ===== -->
+<style id="aiScanStyle">
+#aiCam{position:fixed;inset:0;z-index:9200;background:#000;display:flex;flex-direction:column;color:#fff;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+#aiCam video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
+#aiCam .hint{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:12px;right:12px;text-align:center;font-size:12.5px;background:rgba(0,0,0,.55);padding:7px 10px;border-radius:12px}
+#aiCam .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px 18px;background:#0b0c10}
+#aiCam .bar button{border:0;border-radius:9999px;font-weight:700;font-size:14px;color:#fff;background:rgba(255,255,255,.12);padding:12px 18px;min-width:84px}
+#aiCam .bar .shot{width:68px;height:68px;min-width:68px;padding:0;background:#fff;box-shadow:0 0 0 4px rgba(255,255,255,.35);transition:transform .15s}
+#aiCam .bar .shot:active{transform:scale(.9)}
+#aiCam .bar .go{background:linear-gradient(135deg,#38bdf8,#a855f7)}
+#aiCam .bar .go:disabled{opacity:.35}
+#aiCam .tray{display:flex;gap:6px;padding:8px 12px;background:#0b0c10;overflow-x:auto;min-height:0}
+#aiCam .tray:empty{display:none}
+#aiCam .tray img{height:54px;border-radius:8px;border:1px solid rgba(255,255,255,.25)}
+</style>
+<script id="aiScanJs">
+(function(){
+if(window.__aiScan)return;
+var SYS='You read photos/PDFs of THAR furniture factory ORDER SHEETS (pages may be rotated 90 degrees, skewed, or photographed on a table: read them in the correct orientation). '+
+'Return ONLY one JSON object, no prose: {"orderNo":"TAE/2927","buyer":"C-3","exfactoryDate":"DD/MM/YYYY or empty","anyMarks":false,"sheetTotalQty":105,"sheetTotalCbm":62.70,'+
+'"items":[{"subOrder":"TAE/2927/1","itemCode":"","itemName":"","size":"141x43x80","qty":55,"cbmPerPc":0.71,"totalCbm":39.04,"vendors":["Shree Hanuman Art"],"marked":false,"markedItemCode":"","markedVendor":""}]}. '+
+'Rules: one item per table row (SNo). orderNo = header "Order No." (TAE/xxxx). subOrder = Sub-Order No. column (TAE/xxxx/n). buyer = header "Buyer :" value. '+
+'itemCode = the Alias Code / Buyer Sku cell text on one line, exactly as printed (e.g. "09-350-877-0021/AM-120" or "TAE-5419 (C-3)/08.60.51.42"). '+
+'itemName = first bold line of Description (e.g. "Mumbai 6 Drawer Chest"). size = the L x W x H numbers from "Size :" in cm written like 141x43x80 (drop .0 and units). '+
+'qty = Total Qty. cbmPerPc = CBM column. totalCbm = Total CBM column exactly as printed (if unreadable, leave 0). '+
+'vendors = supplier NAMES only from the "Vendor / Mfg PO Detail" cell: the text after "#" up to the next "#" (e.g. from "VO/26-27/916 23/09/2026 #Shree Hanuman Art #55" give "Shree Hanuman Art"; drop PO numbers, dates and the trailing #quantity). One entry per vendor line. '+
+'MARKS: if anything on the sheet is underlined, highlighted, circled or ticked by hand/pen, set anyMarks=true. For a row that is marked set marked=true. If only an item code is marked, put exactly that marked text in markedItemCode; if only one vendor name is marked, put that name in markedVendor. Use only the marked parts, never the whole cell, when marks exist. Printed table lines and printed underlines are NOT marks. '+
+'sheetTotalQty / sheetTotalCbm = the TOTAL row. Never invent values; use empty string or 0 when not visible. If several pages are given, merge all rows in order.';
+
+var PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',PDFW='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+function A(){return window.TAE_ASSISTANT}
+function P(){return window.THAR_AI_TX}
+function say(t){if(A())A().say(t)}
+function num(v){var n=parseFloat(String(v==null?'':v).replace(/,/g,'').replace(/[^0-9.\-]/g,''));return isFinite(n)?n:0}
+function r2(n){return Math.round(n*100)/100}
+function today(){try{if(typeof todayStr==='function')return todayStr()}catch(e){}var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)}
+function openAssistant(){var b=document.getElementById('taeBox');if(b&&b.classList.contains('hidden')){var f=document.getElementById('taeFab');if(f)f.click()}}
+
+/* ---------- files -> images ---------- */
+function toJpeg(src,w,h,max){var s=Math.min(1,max/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.round(w*s);c.height=Math.round(h*s);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.88)}
+async function imgFile(f){var bm=await createImageBitmap(f,{imageOrientation:'from-image'});var u=toJpeg(bm,bm.width,bm.height,2000);if(bm.close)bm.close();return u}
+function loadPdfJs(){return new Promise(function(res,rej){if(window.pdfjsLib)return res(window.pdfjsLib);var s=document.createElement('script');s.src=PDFJS;s.onload=function(){res(window.pdfjsLib)};s.onerror=function(){rej(Error('PDF reader load nahi hua (internet check karo)'))};document.head.appendChild(s)})}
+async function pdfFile(f){
+  var lib=await loadPdfJs();
+  try{var w=await (await fetch(PDFW)).blob();lib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(w)}catch(e){lib.GlobalWorkerOptions.workerSrc=PDFW}
+  var doc=await lib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise,imgs=[],txt='';
+  for(var p=1;p<=Math.min(doc.numPages,6);p++){
+    var pg=await doc.getPage(p),vp0=pg.getViewport({scale:1}),sc=Math.min(2.4,1800/vp0.width),vp=pg.getViewport({scale:sc}),cv=document.createElement('canvas');
+    cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+    await pg.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    imgs.push(cv.toDataURL('image/jpeg',.88));
+    try{var tc=await pg.getTextContent();txt+='\n[PDF page '+p+' text]\n'+tc.items.map(function(i){return i.str}).join(' ')}catch(e){}
+  }
+  return {imgs:imgs,txt:txt};
+}
+
+/* ---------- AI ---------- */
+async function askAI(imgs,txt){
+  var c=typeof llmCfg==='function'?llmCfg():null;if(!c)throw Error('NOAI');
+  var content=[{type:'text',text:'Read these order sheet page(s) and return the JSON.'+(txt?'\nExtra text layer from the PDF (use to double-check digits):'+txt.slice(0,9000):'')}];
+  imgs.forEach(function(u){content.push({type:'image_url',image_url:{url:u}})});
+  var r=await fetch(c.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.key},body:JSON.stringify({model:c.model,messages:[{role:'system',content:SYS},{role:'user',content:content}]})});
+  if(!r.ok)throw Error('AI error '+r.status);
+  var j=await r.json(),m=j.choices&&j.choices[0]&&j.choices[0].message,t=String((m&&m.content)||'').replace(/```json|```/g,'');
+  var a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<a)throw Error('AI se sheet ka data nahi mila');
+  return JSON.parse(t.slice(a,b+1));
+}
+
+/* ---------- stage drafts ---------- */
+function stage(d){
+  var T=P();if(!T||!T.provisional)throw Error('Assistant draft system ready nahi hai, page refresh karo');
+  var items=(d.items||[]).slice(),anyMarks=!!d.anyMarks,mk=items.filter(function(i){return i.marked});
+  if(anyMarks&&mk.length)items=mk;
+  var buyer=String(d.buyer||'').replace(/^buyer\s*:?/i,'').trim(),orderNo=String(d.orderNo||'').trim(),tgt='';
+  var m=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(d.exfactoryDate||'');if(m)tgt=m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2);
+  var rows=[],skipped=[],qtyS=0,cbmS=0;
+  items.forEach(function(it){
+    var sub=String(it.subOrder||'').trim();if(!sub)return;
+    var qty=num(it.qty),per=num(it.cbmPerPc),tot=num(it.totalCbm)||r2(per*qty);
+    var vend=String(it.markedVendor||'').trim()||(it.vendors||[]).filter(function(v,i,a){return v&&a.indexOf(v)===i}).join(', ');
+    var rec={orderNo:orderNo||sub.split('/').slice(0,2).join('/'),subOrder:sub,itemCode:String(it.markedItemCode||it.itemCode||'').trim(),buyer:buyer,itemName:String(it.itemName||'').trim(),
+      size:String(it.size||'').replace(/(\d)\.0+(?!\d)/g,'$1').replace(/\s*cm/i,'').replace(/\s+/g,''),sizeUnit:'Cm',qty:qty,cbm:tot,woodSupplier:vend,date:today()};
+    if(tgt)rec.targetDate=tgt;
+    var ex=((T.provisional('search_records',{store:'work',query:sub})||{}).matches||[]).some(function(x){return String(x.subOrder).toLowerCase()===sub.toLowerCase()});
+    if(ex){skipped.push(sub);return}
+    T.provisional('propose_add',{store:'work',new_record:true,record:rec,reason:'Order sheet '+(rec.orderNo)+' se '+items.length+' entry'});
+    rows.push(rec);qtyS+=qty;cbmS+=tot;
+  });
+  if(T.showDraft)T.showDraft();
+  return {rows:rows,skipped:skipped,qty:qtyS,cbm:r2(cbmS),d:d,marked:anyMarks&&mk.length>0,orderNo:orderNo,buyer:buyer};
+}
+function report(s){
+  var L=[];
+  if(!s.rows.length){say('Sheet padh li, par nayi entry nahi bani'+(s.skipped.length?' — ye sub-order pehle se maujood hain: '+s.skipped.join(', ')+'.':'. Photo saaf/seedhi lekar dobara try karo.'));return}
+  L.push('📄 '+s.orderNo+' · Buyer '+s.buyer+' — '+s.rows.length+' entry taiyar'+(s.marked?' (sirf marked/underline wali rows li)':''));
+  L.push('');L.push('| Sub-order | Item code | Item | Size | Qty | Total CBM | Supplier |');L.push('|---|---|---|---|---|---|---|');
+  s.rows.forEach(function(r){L.push('| '+[r.subOrder,r.itemCode,r.itemName,r.size,r.qty,r.cbm.toFixed(2),r.woodSupplier||'?'].join(' | ')+' |')});
+  L.push('');L.push('Total: '+s.qty+' pcs · '+s.cbm.toFixed(2)+' CBM');
+  var sq=num(s.d.sheetTotalQty),sc=num(s.d.sheetTotalCbm);
+  if(!s.marked&&sc){L.push(Math.abs(sc-s.cbm)<=0.05&&(!sq||sq===s.qty)?'✓ Sheet ke TOTAL ('+sc.toFixed(2)+' CBM) se match hai.':'⚠ Sheet ka TOTAL '+(sq?sq+' pcs · ':'')+sc.toFixed(2)+' CBM hai, mera hisaab alag hai — photo/rows check karo.')}
+  if(s.skipped.length)L.push('Pehle se maujood (skip): '+s.skipped.join(', '));
+  var many=s.rows.filter(function(r){return r.woodSupplier.indexOf(',')>0}).map(function(r){return r.subOrder});
+  if(many.length)L.push('Supplier ek se zyada hain ('+many.join(', ')+') — sheet par jo supplier underline hai ya batao kaun sa lena hai.');
+  L.push('');L.push('Abhi SAVE nahi hua. Galat ho to bolo, jaise: "'+s.rows[0].subOrder+' ka size 140x43x80 karo" ya "supplier Kala Handicrafts karo". Sahi ho to Confirm & save dabao.');
+  say(L.join('\n'));
+}
+
+async function run(parts,label){
+  openAssistant();var a=A();if(!a)return;
+  a.log.push({who:'u',text:'📷 '+label});a.hold(1);
+  try{
+    var imgs=[],txt='';
+    for(var i=0;i<parts.length;i++){var p=parts[i];
+      if(typeof p==='string')imgs.push(p);
+      else if(/pdf$/i.test(p.type)||/\.pdf$/i.test(p.name)){var r=await pdfFile(p);imgs=imgs.concat(r.imgs);txt+=r.txt}
+      else imgs.push(await imgFile(p));}
+    if(!imgs.length)throw Error('Koi page nahi mila');
+    var d=await askAI(imgs.slice(0,8),txt);report(stage(d));
+  }catch(e){
+    if(e.message==='NOAI')say('Photo/PDF padhne ke liye AI key chahiye. Assistant ke ⚙ settings mein Gemini ya ChatGPT key daalo, phir dobara bhejo.');
+    else say('Sheet nahi padh paya: '+(e.message||e)+'. Photo seedhi aur saaf lekar dobara try karo.');
+  }finally{a.hold(-1)}
+}
+
+/* ---------- in-app camera (no app switching, so the ERP never reloads to Home) ---------- */
+function camera(){
+  if(document.getElementById('aiCam'))return;
+  var md=navigator.mediaDevices;if(!md||!md.getUserMedia)return pickCapture();
+  var o=document.createElement('div');o.id='aiCam';
+  o.innerHTML='<video playsinline autoplay muted></video><div class="hint">Sheet ko seedha rakho, poora frame mein. Kai page hon to sab ki photo lo.</div><div class="tray"></div><div class="bar"><button data-x="close">Band</button><button class="shot" data-x="shot" aria-label="Photo lo"></button><button class="go" data-x="go" disabled>Scan (0)</button></div>';
+  document.body.appendChild(o);
+  var v=o.querySelector('video'),tray=o.querySelector('.tray'),go=o.querySelector('.go'),shots=[],st=null;
+  function close(){if(st)st.getTracks().forEach(function(t){t.stop()});o.remove()}
+  md.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:2560},height:{ideal:1920}},audio:false}).then(function(s){st=s;v.srcObject=s;if(!document.getElementById('aiCam'))close()}).catch(function(){close();say('Camera permission nahi mili. Browser/app ki settings mein Camera allow karo, ya 📎 se photo upload karo.')});
+  o.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var x=b.dataset.x;
+    if(x==='close')close();
+    else if(x==='shot'){if(!v.videoWidth)return;var u=toJpeg(v,v.videoWidth,v.videoHeight,2000);shots.push(u);var im=new Image();im.src=u;tray.appendChild(im);go.disabled=false;go.textContent='Scan ('+shots.length+')'}
+    else if(x==='go'){var s=shots.slice();close();run(s,'Order sheet photo ('+s.length+')')}});
+}
+function pickCapture(){var i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)run(f,'Order sheet photo')};i.click()}
+function pick(){var i=document.createElement('input');i.type='file';i.multiple=true;i.accept='image/*,application/pdf,.pdf';i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)run(f,f.map(function(x){return x.name}).join(', '))};i.click()}
+
+window.__aiScan={camera:camera,pick:pick,run:run};
+
+/* let the AI correct one pending scanned record by its sub-order */
+var EXTRA=' A scanned order sheet may leave several NEW pending records in the draft. To correct one, call propose_add with record containing its subOrder (e.g. TAE/2927/1) plus only the corrected fields; it merges into that pending record (never set new_record for a correction). Record fields: orderNo, subOrder, itemCode, buyer, itemName, size (e.g. 141x43x80), sizeUnit, qty, cbm (TOTAL CBM of the row), woodSupplier. Supplier means the factory/vendor name only.';
+var base=window.TAE_FMT;
+try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){return (base||'')+EXTRA},set:function(v){base=v}})}catch(e){}
 })();
 </script>
 
