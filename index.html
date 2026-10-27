@@ -7985,6 +7985,7 @@ body.tae-open #taeSay{display:none}
 .taeM .mdCt{font-size:13px;margin:2px 0 6px;font-weight:600}
 .taeM .mdCg{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
 .taeM .mdCr{display:flex;flex-direction:column;font-size:12px;min-width:0;word-break:break-word}
+.taeM .mdCr>span{display:flex;flex-direction:column;gap:1px}.taeM .mdLn{display:block}
 .taeM .mdCr b{font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600}
 .taeM table.mdT{border-collapse:collapse;width:100%;font-size:12.5px;margin:0}
 .taeM table.mdT th{background:rgba(127,127,127,.18);padding:6px 8px;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;color:var(--text)}
@@ -8649,7 +8650,7 @@ function mdHtml(text){
         body.slice(1).forEach(r=>{const v=row(r);
           const g=n=>{const k=H.findIndex(x=>x.toLowerCase()===n);return k<0?'':(v[k]||'')};
           const used=['item code','item description','status'];
-          cs+='<div class="mdCard"><div class="mdCh"><span>'+mdInline(g('item code'))+'</span><span class="mdSt">'+mdInline(g('status'))+'</span></div>'+(g('item description')?'<div class="mdCt">'+mdInline(g('item description'))+'</div>':'')+'<div class="mdCg">'+H.map((h,k)=>used.includes(h.toLowerCase())?'':'<div class="mdCr"><b>'+mdInline(h)+'</b><span>'+mdInline(v[k]!=null&&v[k]!==''?v[k]:'—')+'</span></div>').join('')+'</div></div>';});
+          cs+='<div class="mdCard"><div class="mdCh"><span>'+mdInline(g('item code'))+'</span><span class="mdSt">'+mdInline(g('status'))+'</span></div>'+(g('item description')?'<div class="mdCt">'+mdInline(g('item description'))+'</div>':'')+'<div class="mdCg">'+H.map((h,k)=>used.includes(h.toLowerCase())?'':'<div class="mdCr"><b>'+mdInline(h)+'</b><span>'+((v[k]!=null&&v[k]!==''?v[k]:'—').split(/\s*(?:,|<br\s*\/?>)\s*/).filter(Boolean).map(p=>'<span class="mdLn">'+mdInline(p.replace(/\s+(?=\d+\/\d+)/,'\u00a0').replace(/\([^)]*\)/g,m=>m.replace(/\s/g,'\u00a0')))+'</span>').join(''))+'</span></div>').join('')+'</div></div>';});
         out.push(cs+'</div>');continue;
       }
       let t='<div class="taeT"><table class="mdT">';
