@@ -7975,6 +7975,7 @@ body.tae-open #taeSay{display:none}
 .taeM.b.erp{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;max-width:100%!important;width:100%;white-space:normal}
 .taeM.erp .erpCard{box-sizing:border-box;max-width:100%;overflow-x:auto}
 .taeM.erp .erpCard *{box-sizing:border-box;min-width:0}
+.taeM.nA{animation:none}
 .taeM.md{white-space:normal}.taeM .mdH{font-size:15px;font-weight:700;margin:2px 0 8px}.taeM .mdP{margin:2px 0}
 .taeM .mdHr{border:0;border-top:1px solid var(--line);margin:10px 0}
 .taeM table.mdT{border-collapse:collapse;width:100%;font-size:12.5px;margin:0}
@@ -9072,7 +9073,7 @@ function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
   typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
-  el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksHtml(m.text) ? '<div class="taeM b erp' + g + '">' + sanitizeErp(m.text) : looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
+  el.innerHTML = log.map((m, i) => { const g = (i && log[i - 1].who === m.who ? ' g' : '') + (m.seen ? ' nA' : ''); m.seen = true; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksHtml(m.text) ? '<div class="taeM b erp' + g + '">' + sanitizeErp(m.text) : looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
   if (keep) el.appendChild(keep);
   el.scrollTop = el.scrollHeight;
 }
