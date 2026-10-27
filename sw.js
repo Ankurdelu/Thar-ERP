@@ -1,5 +1,5 @@
 /* THAR ERP service worker: app shell offline. Firebase/Firestore traffic is never cached. */
-const CACHE = 'thar-erp-v2';
+const CACHE = 'thar-erp-v3';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
