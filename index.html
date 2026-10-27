@@ -7971,6 +7971,10 @@ body.tae-open #taeSay{display:none}
 .taeF{align-items:flex-end}.taeF textarea{flex:1;min-width:0;resize:none;max-height:150px;font-family:inherit;line-height:1.4;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:15px}
 .taeF button{border:none;border-radius:12px;padding:0 14px;background:var(--green);color:#04130d;font-weight:800;font-size:16px}.taeF button.mic{background:var(--panel3);color:var(--text)}
 
+@keyframes itemEntrance{0%{opacity:0;transform:translateY(14px) scale(0.98)}100%{opacity:1;transform:translateY(0) scale(1)}}
+.taeM.b.erp{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;max-width:100%!important;width:100%;white-space:normal}
+.taeM.erp .erpCard{box-sizing:border-box;max-width:100%;overflow-x:auto}
+.taeM.erp .erpCard *{box-sizing:border-box;min-width:0}
 .taeM.md{white-space:normal}.taeM .mdH{font-size:15px;font-weight:700;margin:2px 0 8px}.taeM .mdP{margin:2px 0}
 .taeM .mdHr{border:0;border-top:1px solid var(--line);margin:10px 0}
 .taeM table.mdT{border-collapse:collapse;width:100%;font-size:12.5px;margin:0}
@@ -8586,7 +8590,40 @@ function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } cat
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
 
 /* ---- Dashboard-style formatting for contractor / production data ---- */
-window.TAE_FMT = 'OUTPUT FORMAT (mandatory for contractor, carpenter, production and item data): never plain text or raw bullet lists. Use rich Markdown: (1) a header line "## \uD83D\uDC77 Contractor Breakdown: <Name>" (H2 with icon); (2) a Markdown table with exactly these headers: | Item Code | Item Description | Quantity | Status | then the alignment row | :--- | :--- | :---: | :---: |; Item Code in `backticks`; Item Description in clean Title Case; Quantity as **Done / Total** in bold; Status as a badge: "\u2705 Completed" when done equals total, otherwise "\u23F3 In Progress"; (3) then a blank line, a line with only ---, and a footer like "**Total Completed:** N Jobs | **Status:** All items cleared" (or "**In Progress:** M Jobs" when some are pending). Put a blank line between blocks. Short answers stay short and plain. ';
+window.TAE_FMT = `OUTPUT FORMAT (mandatory for EVERY answer that shows records: contractor, carpenter, supplier, wood supplier, buyer, department, job order, production progress, daily status, inventory, pending or completed lists). Never reply with plain text paragraphs or raw bullet lists for such data. Reply in clean dashboard-style Markdown only, no HTML, exactly in this structure, one block per contractor/carpenter/supplier (repeat the block for each name when several are asked):
+## <icon> <Role> Breakdown: <Name>
+(blank line)
+| Item Code | Item Description | Quantity | Status |
+| :--- | :--- | :---: | :---: |
+| \`TAE/2880/2\` | Mumbai Bedside 1 Drawer | **5 / 5** | ✅ Completed |
+| \`TAE/2856/30\` | Lloyd Highboard | **3 / 6** | ⏳ In Progress |
+(blank line)
+---
+**Total Completed:** <n> Jobs | **In Progress:** <n> Jobs | **Status:** <short summary, e.g. All items cleared>
+RULES: the H2 heading must start with an icon: 👷 for contractor/carpenter, 🚚 for supplier/wood supplier, 🧑‍💼 for buyer, 🏭 for department/other. Item Code always inside backticks (monospace). Item Description in clean Title Case. Quantity always bold as **Done / Total**. Status badge: ✅ Completed when done equals total, ⏳ In Progress when done is less than total, 🆕 Not Started when done is 0. Put one table row per item, header row and the |:---|:---:| alignment row exactly as shown, each row on its own line. Footer line after a --- separator with the real totals. Use only real data from the records; never invent codes, quantities or names. Short chit-chat or one-line answers stay plain text. `;
+
+/* ---- Safe renderer for AI-generated ERP HTML cards ---- */
+function looksHtml(t){return /^\s*<div[^>]*class=['"][^'"]*erpCard/i.test(String(t||''));}
+function sanitizeErp(html){
+  try{
+    const doc=new DOMParser().parseFromString('<body>'+String(html)+'</body>','text/html');
+    const OK={DIV:1,SPAN:1,B:1,STRONG:1,I:1,EM:1,BR:1,HR:1,SMALL:1,TABLE:1,THEAD:1,TBODY:1,TR:1,TH:1,TD:1};
+    const walk=n=>{[...n.childNodes].forEach(c=>{
+      if(c.nodeType===3)return;
+      if(c.nodeType!==1){c.remove();return;}
+      if(!OK[c.tagName]){c.remove();return;}
+      [...c.attributes].forEach(a=>{
+        const k=a.name.toLowerCase();
+        if(k==='style'){const v=a.value;if(/url\s*\(|expression|@import|javascript:|behavior|position\s*:\s*(fixed|absolute|sticky)|z-index/i.test(v))c.removeAttribute(a.name);}
+        else if(k==='class'){if(!/^erpCard$/.test(a.value.trim()))c.removeAttribute(a.name);}
+        else c.removeAttribute(a.name);
+      });
+      walk(c);
+    });};
+    walk(doc.body);
+    return doc.body.innerHTML;
+  }catch(e){return esc(html);}
+}
 function mdInline(t){return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');}
 function looksMd(t){return /^\s*\|.*\|\s*$/m.test(t)||/^#{1,3}\s/m.test(t);}
 function mdHtml(text){
@@ -8658,7 +8695,7 @@ async function checkLlm() {
 }
 async function llm(c, text, ctx) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
-  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown for casual chat, emojis only rarely. ' + window.TAE_FMT + 'Inside the JSON "reply" string write line breaks as \\n. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown for casual chat, emojis only rarely. ' + window.TAE_FMT + 'Inside the JSON "reply" string write line breaks as \\n; when you output the Markdown dashboard, separate every heading, table row and the --- line with \\n so each sits on its own line and the JSON stays valid. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
     + 'SPEECH INPUT: text may come from Hindi speech recognition and contain errors. Keep every number digit-for-digit as spoken (Hindi number words become digits, e.g. do sau pachaas = 250). Contractor, buyer and craft names are proper nouns: keep them exactly as spoken, match them phonetically to the lists below, never swap in a different name, and ask if two names are equally close or none matches. '
     + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
     + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
@@ -9025,7 +9062,7 @@ function pump() {
   if (m.who === 'u') { log.push(m); return pump(); }
   busy = 1; RB.mood('think'); draw(true); const go = () => { log.push(m); busy = 0; RB.mood(''); pump(); };
   const ln = String(m.text || '').split('\n');
-  if (!api.fast && ln.length > 2 && looksMd(m.text)) {
+  if (!api.fast && ln.length > 2 && !looksHtml(m.text) && looksMd(m.text)) {
     const d = Math.max(35, Math.min(110, 2600 / ln.length));
     setTimeout(() => { m.rev = 0; log.push(m); RB.mood(''); const iv = setInterval(() => { m.rev++; if (m.rev >= ln.length) { clearInterval(iv); delete m.rev; busy = 0; draw(); pump(); } else draw(); }, d); }, 150);
   } else if (api.fast) go(); else setTimeout(go, 150 + Math.random() * 250);
@@ -9035,7 +9072,7 @@ function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
   typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
-  el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
+  el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksHtml(m.text) ? '<div class="taeM b erp' + g + '">' + sanitizeErp(m.text) : looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
   if (keep) el.appendChild(keep);
   el.scrollTop = el.scrollHeight;
 }
