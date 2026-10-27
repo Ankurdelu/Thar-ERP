@@ -7946,6 +7946,7 @@ body.tae-open #taeSay{display:none}
 #taeSet input,#taeSet select{width:100%;padding:10px;border-radius:10px;border:1px solid #5a514c;background:#1f1a18;color:#fff;font-size:14px}
 #taeSet .tsSt{font-size:13px;min-height:18px}#taeSet .tsR{display:flex;gap:8px;flex-wrap:wrap}
 #taeSet button{flex:1;padding:10px;border-radius:10px;border:1px solid #5a514c;background:#3a3330;color:#fff;font-size:13px}
+#taeSet .tsNote{font-size:11.5px;opacity:.7;line-height:1.4}
 #taeSet button.tsP{background:#34d399;color:#04231a;border-color:#34d399;font-weight:600}
 .taeH .taeOn{display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-left:6px;box-shadow:0 0 8px #34d399;animation:taeBlink 1.8s infinite}
 @keyframes taeBlink{0%,100%{opacity:1}50%{opacity:.35}}
@@ -8415,8 +8416,7 @@ function plan(items) {
     const x = L[0]; S.target = x.id;
     if (!u.name) {
       const sp = splitsOf(x, u.stage).filter(p => p.name), cn = candNames(u.stage, null);
-      if (sp.length === 1) { u.name = sp[0].name; u.assumed = 1; } else if (!sp.length && cn.length === 1) { u.name = cn[0].name; u.assumed = 1; } else if (u.raw) u.name = u.raw;
-      else { S.await = 'name'; S.awaitItem = u; S.awaitX = x; return say(lbl(x) + '\nWho did ' + STL[u.stage] + '?', { chips: likely(u.stage, x).map(n => ({ l: n, send: n })).concat([{ l: '✖ Cancel', send: 'cancel', c: 'no' }]) }); }
+      if (u.raw) u.name = u.raw; else if (sp.length === 1) { u.name = sp[0].name; u.assumed = 1; } else if (!sp.length && cn.length === 1) { u.name = cn[0].name; u.assumed = 1; } else { S.await = 'name'; S.awaitItem = u; S.awaitX = x; return say(lbl(x) + '\nWho did ' + STL[u.stage] + '?', { chips: likely(u.stage, x).map(n => ({ l: n, send: n })).concat([{ l: '✖ Cancel', send: 'cancel', c: 'no' }]) }); }
     }
     P.rows.push(planRow(P, u, x));
   }
@@ -8576,8 +8576,17 @@ function roast(s) { const li = RL.indexOf(rlv) - 1; if (li < 0 || !RP[s]) return
 function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } catch (_) {} return say({ off: 'Roast mode off. Professional and boring, just as requested.', mild: 'Roast: mild. A gentle poke, only when you earn it.', medium: 'Roast: medium. Do not say I did not warn you.', savage: 'Roast: savage. Only your work gets it, never you. Brace yourself.' }[l], { chips: ['off', 'mild', 'medium', 'savage'].filter(x => x !== l).map(x => ({ l: 'roast ' + x, send: 'roast ' + x })) }); }
 
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
-const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-3.8-flash';
-function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^(AIza|AQ\.)/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
+const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-3.5-flash-lite';
+const OAI_URL = 'https://api.openai.com/v1/chat/completions';
+const PROV = {
+  gemini: { name: 'Gemini', url: GEM_URL, def: 'gemini-3.5-flash-lite', ph: 'AIza... / AQ....', fb: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-pro', 'gemini-4-argon'], note: 'Use a Google AI Studio API key. Press Load models to see exactly what your key can use.' },
+  openai: { name: 'ChatGPT', url: OAI_URL, def: 'gpt-6-luna', ph: 'sk-...', fb: ['gpt-6-luna', 'gpt-5.4-mini', 'gpt-6-sol', 'gpt-6-astra'], note: 'ChatGPT Free has no API access, so use an OpenAI API key with billing credit. GPT-6 Luna is the model free ChatGPT runs on; Sol and Astra are the paid-plan models and may need a higher API tier. Press Load models to see exactly what your key can use.' }
+};
+const MODEL_INFO = [[/3\.5.*flash-lite/i, '3.5 Flash-Lite', 'Fastest answers'], [/3\.8.*flash/i, '3.8 Flash', 'All-around help'], [/3\.1.*pro/i, '3.1 Pro', 'Advanced reasoning'], [/argon/i, '4 Argon', 'Complex tasks'], [/gpt-6.*luna/i, 'GPT-6 Luna', 'Free ChatGPT model'], [/gpt-5\.4.*mini/i, 'GPT-5.4 mini', 'Cheap all-rounder'], [/gpt-6.*sol/i, 'GPT-6 Sol', 'Paid plans model'], [/gpt-6.*astra/i, 'GPT-6 Astra', 'Most capable']];
+const THINK = [['low', 'Low', 'Quick and efficient'], ['medium', 'Medium', 'Balanced depth'], ['high', 'High', 'Extra thorough']];
+const modelRank = id => { const i = MODEL_INFO.findIndex(x => x[0].test(id)); return i < 0 ? 99 : i; };
+const modelLabel = id => { const m = MODEL_INFO.find(x => x[0].test(id)); return m ? m[1] + ' \u2014 ' + m[2] : String(id).replace(/^gemini-/, ''); };
+function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (c.provider !== 'gemini' && c.provider !== 'openai') c.provider = /^(AIza|AQ\.)/.test(c.key) ? 'gemini' : 'openai'; c.url = PROV[c.provider].url; if (c.provider === 'gemini') { if (!c.model || /^gpt/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } else if (!c.model || /^gemini/i.test(c.model)) c.model = PROV.openai.def; if (!['low', 'medium', 'high'].includes(c.think)) c.think = 'low'; return c; } catch (_) { return null; } }
 const LLM_HIST = [];
 function dataDigest() {
   try {
@@ -8595,15 +8604,16 @@ function setDot(state, msg) {
   S.llmState = state; const d = document.querySelector('#taeBox .taeOn'), l = document.getElementById('taeAi');
   const col = { ok: '#34d399', bad: '#f87171', chk: '#fbbf24', off: '#94a3b8' }[state] || '#94a3b8', c = llmCfg();
   const txt = state === 'ok' ? 'AI ✓' : state === 'bad' ? 'AI ✗' : state === 'chk' ? 'AI …' : 'AI off';
-  if (d) { d.style.background = col; d.style.boxShadow = '0 0 8px ' + col; d.title = (msg || '') + (c ? ' [' + c.model + ']' : ''); }
-  if (l) { l.textContent = txt + (c && state === 'ok' ? ' ' + String(c.model).replace(/^gemini-/, '') : ''); l.style.color = col; }
+  if (d) { d.style.background = col; d.style.boxShadow = '0 0 8px ' + col; d.title = (msg || '') + (c ? ' [' + (c.label ? c.label + ' \u00b7 ' : '') + c.model + ']' : ''); }
+  if (l) { l.textContent = txt + (c && state === 'ok' ? ' ' + (c.label || String(c.model).replace(/^(gemini|gpt)-/, '')) : ''); l.style.color = col; }
 }
 function llmBase(c) { return (c.url || GEM_URL).replace(/\/chat\/completions\/?$/, ''); }
 async function listModels(c) {
   const r = await fetch(llmBase(c) + '/models', { headers: { Authorization: 'Bearer ' + c.key } });
   if (!r.ok) throw new Error('API ' + r.status);
   const j = await r.json(); let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-  if (/^(AIza|AQ\.)/.test(c.key)) ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
+  if (c.provider === 'openai') ids = ids.filter(i => /^(gpt|chatgpt|o\d)/i.test(i) && !/embed|tts|whisper|audio|realtime|image|dall|moderation|transcribe|search|instruct|codex|davinci|babbage|sora/i.test(i));
+  else ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
   return [...new Set(ids)].sort().reverse();
 }
 async function checkLlm() {
@@ -8611,15 +8621,17 @@ async function checkLlm() {
   setDot('chk', 'Checking...');
   try { await listModels(c); setDot('ok', 'Connected'); } catch (e) { setDot('bad', 'Not connected: ' + (e && e.message || 'network')); }
 }
-async function llm(c, text) {
+async function llm(c, text, ctx) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
-  const sys = 'You are the smart assistant inside a furniture factory ERP and also a general-purpose AI. The user may write English, Hindi or Hinglish and may ask ANYTHING (factory data, personal, general, advice, chit-chat). Reply in the same language/style as the user. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown symbols like ** or #, emojis only rarely. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
     + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
     + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
-    + 'RULE 3: Anything else (personal or general question) - answer helpfully in "reply". '
-    + 'Contractor/worker names: ' + [...new Set(names)].slice(0, 60).join(', ') + '. Buyers: ' + (A().buyers || []).slice(0, 40).join(', ') + '.\nDATA (live entries):\n' + dataDigest();
-  const msgs = [{ role: 'system', content: sys }].concat(LLM_HIST.slice(-8), [{ role: 'user', content: text.slice(0, 4000) }]);
-  const r = await fetch(c.url || GEM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify({ model: c.model || GEM_MODEL, temperature: 0.4, messages: msgs }) });
+    + 'RULE 3: Anything else (personal or general question) - answer helpfully in "reply". If the user asks for help or what you can do, explain in your own words (update contractor progress, add new entries, find entries, pending, delayed, today production, brief, questions about the data); never paste a fixed template. '
+    + 'STAGE RULE: never guess the stage, and the word "entry" is NOT a stage. If the user names a contractor but no stage, use the stage whose list below contains that contractor; if the name is in several lists or in none, leave "cmd" empty and ask in "reply" which stage (sanding, polish, carpenter or fitting) is meant. Contractors by stage: ' + STORD.map(k => STL[k] + ': ' + candNames(k, null).map(v => v.name).join(', ')).join(' | ') + '. Buyers: ' + (A().buyers || []).slice(0, 40).join(', ') + '.\nDATA (live entries):\n' + dataDigest();
+  const msgs = [{ role: 'system', content: sys + (ctx ? '\nPENDING DRAFT awaiting the user\'s confirmation: ' + ctx + '. If the user message corrects or changes it (stage, contractor, pcs), output the FULL corrected command in "cmd", keeping every unchanged detail of the draft. If it is only a question, answer in "reply".' : '') }].concat(LLM_HIST.slice(-8), [{ role: 'user', content: text.slice(0, 4000) }]);
+  const isG = c.provider !== 'openai';
+  const post = (extra, plain) => fetch(c.url || GEM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify(Object.assign({ model: c.model || GEM_MODEL, messages: msgs }, (isG && !plain) ? { temperature: 0.6 } : {}, extra)) });
+  let r = await post({ reasoning_effort: c.think || 'low' }); if (r.status === 400) r = await post({}, true);
   if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + (m ? ': ' + String(m).slice(0, 160) : '')); }
   const j = await r.json(); let raw = String(j.choices[0].message.content || '').trim(), o;
   try { o = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) { o = { cmd: '', reply: raw }; }
@@ -8628,28 +8640,78 @@ async function llm(c, text) {
   LLM_HIST.push({ role: 'user', content: text.slice(0, 1000) }, { role: 'assistant', content: (cmd || reply).slice(0, 1500) }); if (LLM_HIST.length > 16) LLM_HIST.splice(0, 2);
   return { cmd, reply };
 }
-function saveLlm(key, model) {
-  const g = /^(AIza|AQ\.)/.test(key); const c = { key, url: g ? GEM_URL : (llmCfg() && llmCfg().url) || 'https://api.openai.com/v1/chat/completions', model: model || (g ? GEM_MODEL : 'gpt-4o-mini') };
-  try { localStorage.setItem('taeLlm', JSON.stringify(c)); } catch (_) {} return c;
+// ---------- SAVED AIs (several Gemini / ChatGPT keys, none is ever overwritten) ----------
+function saveProfs(P) {
+  try {
+    localStorage.setItem('taeLlmProfiles', JSON.stringify(P));
+    const a = P.list.find(x => x.id === P.active);
+    if (a) localStorage.setItem('taeLlm', JSON.stringify({ key: a.key, provider: a.provider, url: PROV[a.provider].url, model: a.model, think: a.think, label: a.label, pid: a.id }));
+    else localStorage.removeItem('taeLlm');
+  } catch (_) {}
+}
+function profs() {
+  try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) return p; } catch (_) {}
+  const p = { list: [], active: '' };
+  try {
+    const all = JSON.parse(localStorage.getItem('taeLlmAll') || '{}') || {}, a = llmCfg();
+    ['gemini', 'openai'].forEach(pr => { const x = a && a.provider === pr ? a : all[pr]; if (x && x.key) p.list.push({ id: 'a' + pr[0], provider: pr, label: PROV[pr].name + ' 1', key: x.key, model: x.model || PROV[pr].def, think: x.think || 'low' }); });
+    const hit = a && p.list.find(x => x.key === a.key); p.active = hit ? hit.id : '';
+    if (p.list.length) saveProfs(p);
+  } catch (_) {}
+  return p;
+}
+function autoLabel(list, prov) { let n = 1; while (list.some(x => x.label.toLowerCase() === (PROV[prov].name + ' ' + n).toLowerCase())) n++; return PROV[prov].name + ' ' + n; }
+function useAi(id) {
+  const P = profs(), x = P.list.find(z => z.id === id); if (!x) return;
+  P.active = id; saveProfs(P); setDot('chk'); checkLlm();
+  say('Switched to ' + x.label + ' (' + modelLabel(x.model).split(' \u2014 ')[0] + '). Ask me again.');
+}
+function aiFail(e, off) {
+  const m = String(e && e.message || 'network'), a = llmCfg();
+  if (/API (429|402)|quota|rate.?limit|exceed|billing|resource_exhausted/i.test(m)) {
+    const chips = profs().list.filter(x => !a || x.id !== a.pid).map(x => ({ l: 'Use ' + x.label, send: 'Use ' + x.label }));
+    return say('\u26a0 ' + (a && a.label ? a.label : 'This AI') + ' has hit its limit. Switch to another saved AI, or open \u2699 settings and add a new API.' + (off ? ' I will use the offline engine for this message.' : ''), { chips });
+  }
+  return say(off ? '\u26a0 Could not connect to AI (' + m + '). Using the offline engine instead.' : 'No response from AI (' + m + '). Check your key and internet (open \u2699 settings to re-enter the key).');
 }
 function cfg() {
   const box = document.getElementById('taeBox'); if (!box) return; const old = document.getElementById('taeSet'); if (old) old.remove();
-  const c = llmCfg(), ov = document.createElement('div'); ov.id = 'taeSet';
-  ov.innerHTML = '<div class="tsC"><h3>AI settings (Gemini)</h3><div class="tsSt" id="tsSt"></div><label>API key</label><input id="tsKey" type="password" placeholder="AIza... / AQ...." autocomplete="off" value="' + (c ? c.key.replace(/"/g, '') : '') + '"><label>Model</label><select id="tsMod"></select><div class="tsR"><button id="tsLoad">Models load karo</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save</button><button id="tsOff">Key hatao</button><button id="tsX">Band</button></div></div>';
+  const ov = document.createElement('div'); ov.id = 'taeSet';
+  let P = profs(), cur = P.active && P.list.some(x => x.id === P.active) ? P.active : (P.list[0] ? P.list[0].id : 'new'), prov = 'gemini';
+  ov.innerHTML = '<div class="tsC"><h3>AI settings</h3><div class="tsSt" id="tsSt"></div><label>Saved AIs</label><select id="tsAcc"></select><label>Name (optional)</label><input id="tsName" autocomplete="off" placeholder="Auto, e.g. Gemini 2"><label>AI provider</label><select id="tsProv"><option value="gemini">Gemini (Google)</option><option value="openai">ChatGPT (OpenAI)</option></select><div class="tsNote" id="tsNote"></div><label>API key</label><input id="tsKey" type="password" autocomplete="off"><label>Model</label><select id="tsMod"></select><label>Thinking level</label><select id="tsThink"></select><div class="tsR"><button id="tsLoad">Load models</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save &amp; use</button><button id="tsOff">Remove this one</button><button id="tsX">Close</button></div></div>';
   box.appendChild(ov); ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) ov.remove(); });
-  const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), FB = ['gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
-  const fill = (ids, cur) => { const l = [...new Set([cur].concat(ids).filter(Boolean))]; sel.innerHTML = l.map(i => '<option' + (i === cur ? ' selected' : '') + '>' + i + '</option>').join(''); };
-  const curKey = () => $('tsKey').value.trim(), curM = () => sel.value || GEM_MODEL;
-  fill(FB, c ? c.model : GEM_MODEL);
+  const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), tk = $('tsThink'), pv = $('tsProv'), acc = $('tsAcc'), nm = $('tsName');
+  const fill = (ids, cur2) => { const l = [...new Set([cur2].concat(ids).filter(Boolean))].sort((a, b) => modelRank(a) - modelRank(b)); sel.innerHTML = l.map(i => '<option value="' + i + '"' + (i === cur2 ? ' selected' : '') + '>' + modelLabel(i) + '</option>').join(''); };
+  const curKey = () => $('tsKey').value.trim(), curM = () => sel.value || PROV[prov].def, curT = () => tk.value || 'low';
   const show = (t, k) => { st.textContent = t; st.style.color = k === 'ok' ? '#34d399' : k === 'bad' ? '#f87171' : ''; };
-  show(c ? 'Status: ' + ({ ok: 'Connected ✓', bad: 'Not connected ✗', chk: 'Checking…' }[S.llmState] || 'Key saved (test karo)') : 'Status: AI off (free offline engine)');
-  const load = async () => { const k = curKey(); if (!k) return show('Pehle key daalo', 'bad'); show('Models la raha hu…'); try { const ids = await listModels(Object.assign(saveLlm(k, curM()), {})); fill(ids, curM()); show('Connected ✓ - ' + ids.length + ' models mile, dropdown se chuno', 'ok'); setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message + ' (key/internet check karo)', 'bad'); setDot('bad', e.message); } };
+  const tmp = () => ({ key: curKey(), provider: prov, url: PROV[prov].url, model: curM(), think: curT() });
+  const isAct = () => cur !== 'new' && cur === P.active;
+  const accList = () => { acc.innerHTML = P.list.map(x => '<option value="' + esc(x.id) + '"' + (x.id === cur ? ' selected' : '') + '>' + esc(x.label) + ' \u2014 ' + esc(modelLabel(x.model).split(' \u2014 ')[0]) + (x.id === P.active ? ' \u2713 in use' : '') + '</option>').join('') + '<option value="new"' + (cur === 'new' ? ' selected' : '') + '>\uff0b Add new API</option>'; };
+  const fillForm = () => { const x = P.list.find(z => z.id === cur); if (x) prov = x.provider; const PR = PROV[prov], d = x || {}; pv.value = prov; pv.disabled = !!x; $('tsNote').textContent = PR.note; $('tsKey').placeholder = PR.ph; $('tsKey').value = d.key || ''; nm.value = x ? x.label : ''; fill(PR.fb, d.model || PR.def); tk.innerHTML = THINK.map(t => '<option value="' + t[0] + '"' + ((d.think || 'low') === t[0] ? ' selected' : '') + '>' + t[1] + ' \u2014 ' + t[2] + '</option>').join(''); };
+  accList(); fillForm();
+  acc.onchange = () => { cur = acc.value; fillForm(); const x = P.list.find(z => z.id === cur); show(x ? 'Selected ' + x.label + '. Press Save & use to switch to it.' : 'New API: choose the provider, paste the key, then press Save & use.'); };
+  pv.onchange = () => { prov = pv.value; fillForm(); };
+  const act = P.list.find(x => x.id === P.active);
+  show(act ? 'In use: ' + act.label + ' \u00b7 ' + ({ ok: 'Connected \u2713', bad: 'Not connected \u2717', chk: 'Checking\u2026' }[S.llmState] || 'saved (run a test)') : 'AI off (free offline engine)');
+  const load = async () => { const k = curKey(); if (!k) return show('Enter the API key first', 'bad'); show('Loading models\u2026'); try { const ids = await listModels(tmp()); fill(ids, curM()); show('Connected \u2713 - ' + ids.length + ' models found, pick one from the list', 'ok'); if (isAct()) setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message + ' (check your key and internet)', 'bad'); if (isAct()) setDot('bad', e.message); } };
   $('tsLoad').onclick = load;
-  $('tsTest').onclick = async () => { const k = curKey(); if (!k) return show('Pehle key daalo', 'bad'); const cc = saveLlm(k, curM()); show('Test ho raha hai…'); try { const r = await fetch(cc.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cc.key }, body: JSON.stringify({ model: cc.model, messages: [{ role: 'user', content: 'Reply with the word OK' }] }) }); if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + ' ' + String(m).slice(0, 120)); } show('Connected ✓ - ' + cc.model + ' chal raha hai', 'ok'); setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message, 'bad'); setDot('bad', e.message); } };
-  $('tsSave').onclick = () => { const k = curKey(); if (!k) return show('Key khali hai', 'bad'); saveLlm(k, curM()); ov.remove(); setDot('chk'); checkLlm(); say('AI layer on (' + curM() + '). Ab kuch bhi puchho - factory data, Hindi me entry/update, ya personal sawal. Data changes pe Confirm hi lagega.'); pump(); };
-  $('tsOff').onclick = () => { try { localStorage.removeItem('taeLlm'); } catch (_) {} ov.remove(); setDot('off'); say('AI layer off. Back to the free offline engine.'); pump(); };
+  $('tsTest').onclick = async () => { const k = curKey(); if (!k) return show('Enter the API key first', 'bad'); const cc = tmp(); show('Testing\u2026'); try { const r = await fetch(cc.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cc.key }, body: JSON.stringify({ model: cc.model, messages: [{ role: 'user', content: 'Reply with the word OK' }] }) }); if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + ' ' + String(m).slice(0, 120)); } show('Connected \u2713 - ' + cc.model + ' is working', 'ok'); if (isAct()) setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message, 'bad'); if (isAct()) setDot('bad', e.message); } };
+  $('tsSave').onclick = () => {
+    const k = curKey(); if (!k) return show('The key is empty', 'bad');
+    P = profs(); const nv = nm.value.trim(); let x = P.list.find(z => z.id === cur);
+    if (x) { x.key = k; x.model = curM(); x.think = curT(); if (nv) x.label = nv; }
+    else { x = { id: 'a' + Date.now().toString(36), provider: prov, label: nv || autoLabel(P.list, prov), key: k, model: curM(), think: curT() }; P.list.push(x); }
+    P.active = x.id; saveProfs(P); ov.remove(); setDot('chk'); checkLlm();
+    say('Done! ' + x.label + ' (' + modelLabel(x.model).split(' \u2014 ')[0] + ', thinking: ' + x.think + ') is on. Ask me anything \u2014 factory data, entries, or just chat. I will always ask you to confirm before changing any data.'); pump();
+  };
+  $('tsOff').onclick = () => {
+    const x = P.list.find(z => z.id === cur); if (!x) return show('Nothing to remove here', 'bad');
+    if (!confirm('Remove ' + x.label + ' only? Your other saved AIs stay.')) return;
+    P = profs(); P.list = P.list.filter(z => z.id !== x.id); const was = P.active === x.id; if (was) P.active = ''; saveProfs(P); ov.remove(); if (was) setDot('off');
+    say(x.label + ' removed.' + (was ? (P.list.length ? ' AI is off until you pick another saved AI in \u2699 settings.' : ' AI is off. Using the offline engine.') : ' Your other saved AIs are untouched.')); pump();
+  };
   $('tsX').onclick = () => ov.remove();
-  if (c) load();
+  if (isAct()) load();
 }
 function lowConf(text) {
   const w = text.trim().slice(0, 30);
@@ -8658,7 +8720,7 @@ function lowConf(text) {
 function unknown(text) {
   const c = llmCfg(); if (!c || S.viaLlm) return lowConf(text);
   busy = 1; draw(true);
-  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else lowConf(text); pump(); }).catch(e => { busy = 0; setDot('bad', e && e.message); say('AI se jawab nahi mila (' + (e && e.message || 'network') + '). Key/internet check karo (⚙ se key dobara daalo).'); pump(); });
+  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else lowConf(text); pump(); }).catch(e => { busy = 0; setDot('bad', e && e.message); aiFail(e, 0); pump(); });
 }
 
 // ---------- ADD NAME + CODE (supplier / carpenter / polish / sanding / buyer) ----------
@@ -8878,7 +8940,8 @@ function handle(raw) {
   if (/^undo person\b/.test(t)) return undoPerson();
   if (/^(undo|wapas|revert|go back)/.test(t)) return doUndo();
   if (/^redo/.test(t)) return doRedo();
-  if (S.items && (m = t.match(/^(?:no|nahi|nahin|nope)\W+(?:i\s*meant|i\s*mean|meant|matlab)?\s*(.+)$/)) && stageOf(m[1])) { const k = stageOf(m[1]); S.items.forEach(u => { u.stage = k; }); return plan(S.items); }
+  if (S.items && (m = t.match(/^(?:no|nahi|nahin|nope)\W+(?:i\s*meant|i\s*mean|meant|matlab)?\s*(.+)$/)) && stageOf(m[1])) { const k = stageOf(m[1]); S.items.forEach(u => { u.stage = k; u.assumed = 0; u.name = pickName(k, null, m[1] + ' ' + (u.rest || '') + ' ' + (u.raw || '')) || ''; }); return plan(S.items); }
+  if (S.items && S.pending && S.pending.type === 'plan' && !findTae(t) && !/\d/.test(t) && !/^(haan|han|ha|yes|y|ok|okay|confirm|save|kar do|kardo|thik|theek|sahi|go|cancel|nahi|nahin|no|nope|rehne do|ruko|stop)\b/.test(t) && stageOf(t)) { const k = stageOf(t); S.items.forEach(u => { u.stage = k; u.assumed = 0; u.name = pickName(k, null, t + ' ' + (u.rest || '') + ' ' + (u.raw || '')) || ''; }); return plan(S.items); }
   if (/^(cancel|nahi|nahin|no|nope|rehne do|ruko|stop)\b/.test(t)) { S.pending = S.draft = S.upd = S.await = S.items = null; S.pd = S.resume = S.editAsk = null; return say('Cancelled ✔'); }
   if (S.await === 'person' && S.pd && personReply(text)) return;
   if (isAddPerson(text)) return doAddPerson(text);
@@ -8915,7 +8978,7 @@ function handle(raw) {
 const log = [], Q = []; let busy = 0;
 function say(text, o) {
   o = o || {};
-  if (S.rl) { const r = roast(S.rl); S.rl = ''; if (r) text += '\n\n' + r; }
+  if (S.rl) { const r = llmCfg() ? '' : roast(S.rl); S.rl = ''; if (r) text += '\n\n' + r; }
   Q.push({ who: 'b', text, html: o.html || '', chips: o.chips || [] });
   pump(); return true;
 }
@@ -8932,17 +8995,19 @@ function draw(typing) {
   el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : '<div class="taeM b' + g + '">' + esc(m.text) + (m.html || '') + (m.chips.length ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
   el.scrollTop = el.scrollHeight;
 }
+function pendCtx() { try { return S.items.map(u => (u.tae ? 'TAE/' + u.tae.n + (u.sub ? '/' + u.sub : '') : 'TAE ?') + ' ' + (u.name || u.raw || 'unknown') + ' ' + (STL[u.stage] || u.stage) + ' done ' + (u.done != null ? u.done : '?') + (u.qty != null ? ' of ' + u.qty : '')).join('; '); } catch (_) { return ''; } }
 function smart(text) {
   const c = llmCfg(); if (!c) return false; const t = norm(text);
-  if (S.pending || S.draft || S.await || S.items || S.editAsk || S.upd || S.pd || S.resume || S.viaLlm) return false;
-  if (/^(help|\?|format|brief|undo|redo|haan|han|ha|yes|y|ok|okay|confirm|save|cancel|nahi|nahin|no|stop|edit row|roast|hi|hello|hey|thanks|thank)\b/.test(t)) return false;
+  const planPend = !!(S.pending && S.pending.type === 'plan' && S.items && S.items.length);
+  if ((S.pending && !planPend) || S.draft || S.await || (S.items && !planPend) || S.editAsk || S.upd || S.pd || S.resume || S.viaLlm) return false;
+  if (/^(format|brief|undo|redo|haan|han|ha|yes|y|ok|okay|confirm|save|cancel|nahi|nahin|no|stop|edit row|roast|kar do|kardo|thik|theek|sahi|go|rehne do|ruko)\b/.test(t)) return false;
   if (/\n/.test(text) || isBlock(text)) return false;
   busy = 1; draw(true);
-  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); try { if (o.cmd) { say('🧠 Samjha: ' + o.cmd); S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); })
-    .catch(e => { busy = 0; setDot('bad', e && e.message); say('⚠ AI connect nahi hua (' + (e && e.message || 'network') + '). Offline engine se chala raha hu.'); try { handle(text); } catch (_) {} pump(); });
+  llm(c, text, planPend ? pendCtx() : '').then(o => { busy = 0; setDot('ok', 'Connected'); try { if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); })
+    .catch(e => { busy = 0; setDot('bad', e && e.message); aiFail(e, 1); try { handle(text); } catch (_) {} pump(); });
   return true;
 }
-function send(text) { text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
+function send(text) { text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
 function pick(pid) {
   const x = workOf(pid); if (!x) return; S.target = pid; Q.push({ who: 'u', text: lbl(x) });
   if (S.editAsk) { const tx = S.editAsk; S.editAsk = null; doEdit(tx, x); return pump(); }
