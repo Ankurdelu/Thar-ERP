@@ -8624,6 +8624,7 @@ async function checkLlm() {
 async function llm(c, text, ctx) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
   const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown symbols like ** or #, emojis only rarely. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+    + 'SPEECH INPUT: text may come from Hindi speech recognition and contain errors. Keep every number digit-for-digit as spoken (Hindi number words become digits, e.g. do sau pachaas = 250). Contractor, buyer and craft names are proper nouns: keep them exactly as spoken, match them phonetically to the lists below, never swap in a different name, and ask if two names are equally close or none matches. '
     + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
     + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
     + 'RULE 3: Anything else (personal or general question) - answer helpfully in "reply". If the user asks for help or what you can do, explain in your own words (update contractor progress, add new entries, find entries, pending, delayed, today production, brief, questions about the data); never paste a fixed template. '
@@ -8719,8 +8720,8 @@ function lowConf(text) {
 }
 function unknown(text) {
   const c = llmCfg(); if (!c || S.viaLlm) return lowConf(text);
-  busy = 1; draw(true);
-  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else lowConf(text); pump(); }).catch(e => { busy = 0; setDot('bad', e && e.message); aiFail(e, 0); pump(); });
+  wait++; draw();
+  llm(c, text).then(o => { wait = Math.max(0, wait - 1); setDot('ok', 'Connected'); if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else lowConf(text); pump(); }).catch(e => { wait = Math.max(0, wait - 1); setDot('bad', e && e.message); aiFail(e, 0); pump(); });
 }
 
 // ---------- ADD NAME + CODE (supplier / carpenter / polish / sanding / buyer) ----------
@@ -8975,7 +8976,9 @@ function handle(raw) {
 }
 
 // ---------- UI ----------
-const log = [], Q = []; let busy = 0;
+const log = [], Q = []; let busy = 0, wait = 0;
+/* user text/voice is rendered the instant it is sent, never queued behind the backend */
+function pushU(text) { log.push({ who: 'u', text }); draw(); }
 function say(text, o) {
   o = o || {};
   if (S.rl) { const r = llmCfg() ? '' : roast(S.rl); S.rl = ''; if (r) text += '\n\n' + r; }
@@ -8991,8 +8994,10 @@ function pump() {
 const chipHtml = (c, off) => '<button' + (off ? ' disabled' : '') + ' class="' + (c.c || '') + '" ' + (c.pick ? 'data-pick="' + esc(c.pick) + '"' : c.view ? 'data-view="' + esc(c.view) + '"' : c.go ? 'data-go="' + esc(c.go) + '"' : 'data-send="' + esc(c.send) + '"') + '>' + esc(c.l) + '</button>';
 function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
+  typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
   el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : '<div class="taeM b' + g + '">' + esc(m.text) + (m.html || '') + (m.chips.length ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
+  if (keep) el.appendChild(keep);
   el.scrollTop = el.scrollHeight;
 }
 function pendCtx() { try { return S.items.map(u => (u.tae ? 'TAE/' + u.tae.n + (u.sub ? '/' + u.sub : '') : 'TAE ?') + ' ' + (u.name || u.raw || 'unknown') + ' ' + (STL[u.stage] || u.stage) + ' done ' + (u.done != null ? u.done : '?') + (u.qty != null ? ' of ' + u.qty : '')).join('; '); } catch (_) { return ''; } }
@@ -9002,12 +9007,12 @@ function smart(text) {
   if ((S.pending && !planPend) || S.draft || S.await || (S.items && !planPend) || S.editAsk || S.upd || S.pd || S.resume || S.viaLlm) return false;
   if (/^(format|brief|undo|redo|haan|han|ha|yes|y|ok|okay|confirm|save|cancel|nahi|nahin|no|stop|edit row|roast|kar do|kardo|thik|theek|sahi|go|rehne do|ruko)\b/.test(t)) return false;
   if (/\n/.test(text) || isBlock(text)) return false;
-  busy = 1; draw(true);
-  llm(c, text, planPend ? pendCtx() : '').then(o => { busy = 0; setDot('ok', 'Connected'); try { if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); })
-    .catch(e => { busy = 0; setDot('bad', e && e.message); aiFail(e, 1); try { handle(text); } catch (_) {} pump(); });
+  wait++; draw();
+  llm(c, text, planPend ? pendCtx() : '').then(o => { wait = Math.max(0, wait - 1); setDot('ok', 'Connected'); try { if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); })
+    .catch(e => { wait = Math.max(0, wait - 1); setDot('bad', e && e.message); aiFail(e, 1); try { handle(text); } catch (_) {} pump(); });
   return true;
 }
-function send(text) { if (window.__tharDynamicSend && window.__tharDynamicSend.active && window.__tharDynamicSend.active()) { const t0 = String(text || '').trim(); if (!t0) return; Q.push({ who: 'u', text: t0 }); pump(); window.__tharDynamicSend(t0); return; } text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
+function send(text) { if (window.__tharDynamicSend && window.__tharDynamicSend.active && window.__tharDynamicSend.active()) { const t0 = String(text || '').trim(); if (!t0) return; pushU(t0); window.__tharDynamicSend(t0); return; } text = String(text || '').trim(); if (!text) return; pushU(text); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
 function pick(pid) {
   const x = workOf(pid); if (!x) return; S.target = pid; Q.push({ who: 'u', text: lbl(x) });
   if (S.editAsk) { const tx = S.editAsk; S.editAsk = null; doEdit(tx, x); return pump(); }
@@ -9036,8 +9041,10 @@ function init() {
 document.addEventListener('change', e => { const t = e.target; if (!t || !t.form || t.form.id !== 'workForm') return;
   if (t.name === 'size') { const v = t.value.trim(); if (/^[\d.\sx×*X]+$/.test(v)) { const z = normSize(v); if (z.size) t.value = z.size; } }
   else if (t.name === 'buyer') t.value = normBuyer(t.value); }, true);
-const api = { handle, send, pick, S, log, fast: false };
+const api = { handle, send, pick, S, log, fast: false, say, hold(n) { wait = Math.max(0, wait + n); draw(); } };
 window.TAE_ASSISTANT = api;
+/* registered craftsmen by stage, read by the speech/AI layer */
+window.__tharVocab = function () { try { const o = {}; STORD.forEach(k => { o[STL[k] || k] = candNames(k, null).map(v => v.name); }); return o; } catch (e) { return {}; } };
 if (typeof document !== 'undefined' && document.body) init();
 })();
 </script>
@@ -9232,7 +9239,31 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
 <script id="tharDynamicAI">
 (function(){
 'use strict';
-const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null, opened:null};
+const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null, opened:null, q:[], alts:null, altsFor:''};
+/* the chat engine's say() lives in its own closure; reach it through its public handle */
+const say=(t,o)=>{const a=window.TAE_ASSISTANT;return a&&a.say?a.say(t,o):false};
+/* ---- Hindi speech clean-up: numbers exactly as spoken ---- */
+const HN='शून्य,एक,दो,तीन,चार,पाँच,छह,सात,आठ,नौ,दस,ग्यारह,बारह,तेरह,चौदह,पंद्रह,सोलह,सत्रह,अठारह,उन्नीस,बीस,इक्कीस,बाईस,तेईस,चौबीस,पच्चीस,छब्बीस,सत्ताईस,अट्ठाईस,उनतीस,तीस,इकतीस,बत्तीस,तैंतीस,चौंतीस,पैंतीस,छत्तीस,सैंतीस,अड़तीस,उनतालीस,चालीस,इकतालीस,बयालीस,तैंतालीस,चवालीस,पैंतालीस,छियालीस,सैंतालीस,अड़तालीस,उनचास,पचास,इक्यावन,बावन,तिरपन,चौवन,पचपन,छप्पन,सत्तावन,अट्ठावन,उनसठ,साठ,इकसठ,बासठ,तिरसठ,चौंसठ,पैंसठ,छियासठ,सड़सठ,अड़सठ,उनहत्तर,सत्तर,इकहत्तर,बहत्तर,तिहत्तर,चौहत्तर,पचहत्तर,छिहत्तर,सतहत्तर,अठहत्तर,उन्यासी,अस्सी,इक्यासी,बयासी,तिरासी,चौरासी,पचासी,छियासी,सत्तासी,अट्ठासी,नवासी,नब्बे,इक्यानवे,बानवे,तिरानवे,चौरानवे,पचानवे,छियानवे,सत्तानवे,अट्ठानवे,निन्यानवे'.split(','),HNV={};HN.forEach((w,i)=>HNV[w]=i);
+Object.assign(HNV,{'पांच':5,'छे':6,'छः':6,'पन्द्रह':15,'बाइस':22,'तेइस':23,'सताईस':27,'अठाईस':28});
+function fixSpeech(s){s=String(s||'').replace(/[०-९]/g,d=>'०१२३४५६७८९'.indexOf(d));
+const tk=s.split(/\s+/).filter(Boolean),out=[],cl=w=>String(w||'').replace(/[.,।!?]+$/,'');let i=0;
+while(i<tk.length){let j=i,tot=0,cur=0,n=0,lastU=false;
+for(;j<tk.length;j++){const w=cl(tk[j]);
+if(Object.prototype.hasOwnProperty.call(HNV,w)){if(lastU)break;cur+=HNV[w];n++;lastU=true;}
+else if(w==='सौ'){cur=(cur||1)*100;n++;lastU=false;}
+else if(w==='हज़ार'||w==='हजार'){tot+=(cur||1)*1000;cur=0;n++;lastU=false;}
+else break;}
+if(!n){out.push(tk[i]);i++;continue;}
+const val=tot+cur,nx=cl(tk[j]),pv=out.length?out[out.length-1]:'';
+if(n===1&&val<3&&!(/\d$/.test(pv)||/^(बाई|गुणा|x|X|\d)/.test(nx))){out.push(tk[i]);i++;continue;}
+out.push(String(val));i=j;}
+return out.join(' ').replace(/(\d)\s*(?:बाई|गुणा)\s*(?=\d)/g,'$1 x ');}
+const DRAFT_RULES='CONVERSATIONAL LIVE ENTRY - DRAFT FIRST, SAVE ONLY ON COMMAND. 1) Every detail the user gives (TAE number, sub-order, item code, item name, buyer, size, qty) goes into ONE active draft held in memory, via propose_add for a new record or propose_update for an existing one. Details may arrive one at a time or all at once; call the tool with only the fields just given, they merge into the same draft and never erase earlier fields. 2) After every message say what changed and show the full draft so far, then end with: Not saved yet. Say save to confirm. 3) Only an explicit save command (save, save karo, सेव करो, confirm, or the Confirm & save button) commits; you cannot save. Words like ok, theek hai, haan, done are NOT save commands: reply that the draft is still not saved. 4) discard or cancel clears the draft. 5) If a value is unclear, ask instead of guessing. 6) Before editing an existing record, open_record and show its stored values first. EXAMPLES. One at a time: user New entry, TAE 4521 -> you call propose_add {tae:4521} and say Draft: TAE 4521. Not saved yet. Item code? | user Item code HD-220 -> propose_add {itemCode:HD-220}; Draft: TAE 4521 - HD-220. Not saved yet. Size? | user Size do sau bai do sau -> propose_add {size:200 x 200}; Draft: TAE 4521 - HD-220 - 200 x 200. Not saved yet. Anything else, or say save. | user Save karo -> the app commits it. All at once: user TAE 4521 sub order 2 item code HD-220 size 200 x 200 qty 30 -> one propose_add with all fields; Draft shown, Not saved yet. | user Qty 35 kar do -> propose_add {qty:35}; Updated qty 30 to 35, everything else unchanged. Not saved yet. Ok is not save: user Ok theek hai -> Got it, the draft is still not saved. Say save when ready or give another change. ';
+function speechRules(text){let v={};try{v=window.__tharVocab?window.__tharVocab():{}}catch(e){}
+const reg=Object.keys(v).map(k=>k+': '+(v[k]||[]).join(', ')).join(' | ');
+const alts=TX.alts&&TX.alts.length&&TX.altsFor===String(text).trim()?' Other transcripts the speech recognizer considered for this message (use only to resolve a doubtful number or name): '+TX.alts.join(' || ')+'.':'';
+return 'SPEECH INPUT RULES: messages may come from Hindi (hi-IN) speech recognition and can contain recognition errors. NUMBERS: keep every digit exactly as spoken, never round, drop, add or reorder digits; Hindi number words and Devanagari digits become ASCII digits (do sau pachaas = 250, teen sau = 300, dedh sau = 150, dhai sau = 250, saade teen sau = 350, do sau bai do sau = 200 x 200); TAE and sub-order numbers are copied digit for digit. If a number is unclear, ask instead of guessing. NAMES: craftsman, contractor and buyer names and craft titles are proper nouns: take them exactly as spoken (Devanagari or Roman), match them phonetically against the registered list, and never replace them with a different registered name, a common word or a translation. If two registered names are equally close or none is close, ask which one is meant. Registered craftsmen by stage: '+reg+'.'+alts+'\n';}
+
 const $=id=>document.getElementById(id);
 const STORES=['work','orders','repairs'];
 function store(n){try{const d=typeof A==='function'?A():window.db;return (d&&d[n])||[]}catch(e){return[]}}
@@ -9258,7 +9289,7 @@ function toolDefs(){return [
 {type:'function',function:{name:'search_records',description:'Search records. Read-only. For store=work you can filter by TAE, sub-order, buyer, item, contractor, size. For orders/repairs use query or filters on any field name.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},query:{type:'string'},filters:{type:'object',additionalProperties:true}},required:[]}}},
 {type:'function',function:{name:'open_record',description:'Open one record read-only. For work: by TAE number and optional sub-order. For orders/repairs: by recordId from search_records.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},tae:{type:'string'},subOrder:{type:'string'},recordId:{type:'string'}},required:[]}}},
 {type:'function',function:{name:'propose_update',description:'Stage a field update on the open record (or recordId/TAE). Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},fields:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['fields']}}},
-{type:'function',function:{name:'propose_add',description:'Stage a NEW record. Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['record']}}},
+{type:'function',function:{name:'propose_add',description:'Stage a NEW record. Fields merge into the new record already in the draft. Kept in memory only, never saved.',parameters:{type:'object',properties:{new_record:{type:'boolean',description:'true only to start a SECOND separate new record'},store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['record']}}},
 {type:'function',function:{name:'propose_split',description:'Stage a craftsman/contractor quantity split (store=work only). Never saved.',parameters:{type:'object',properties:{recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},stage:{type:'string'},splits:{type:'array',items:{type:'object',properties:{name:{type:'string'},qty:{type:'number'}},required:['name','qty']}},reason:{type:'string'}},required:['stage','splits']}}}
 ] }
 function grp(x){return String(x||'').match(/\d+/g)||[]}
@@ -9291,9 +9322,10 @@ TX.draft=TX.draft||{summary:'',changes:[]};if(a.reason)TX.draft.summary=a.reason
 const same=z=>z.store===change.store&&z.index===change.index;
 if(change.op==='update'){const prior=TX.draft.changes.find(z=>z.op==='update'&&same(z));if(prior){prior.fields=Object.assign({},prior.fields,change.fields);change=prior;}else TX.draft.changes.push(change);}
 else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split'&&same(z)&&z.stage===change.stage);if(k>=0)TX.draft.changes[k]=change;else TX.draft.changes.push(change);}
+else if(change.op==='add'){const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store);if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
-async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys='You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
 const res=await fetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
@@ -9321,7 +9353,7 @@ const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|ह�
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
 if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('Koi pending change nahi hai, isliye kuch save nahi hua.');return;}await commit();return;}
-if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discard kar diya. Database mein kuch change nahi hua.');}else if(typeof say==='function')say('Koi pending draft nahi hai.');return;}if(TX.busy){if(typeof say==='function')say('Please wait for the current AI response.');return;}TX.busy=true;try{if(typeof say==='function')say('Thinking…');const answer=await ai(text);if(typeof say==='function')say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the selected API key/model in AI settings. No offline canned response was used.');}finally{TX.busy=false;}}
+if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discard kar diya. Database mein kuch change nahi hua.');}else if(typeof say==='function')say('Koi pending draft nahi hai.');return;}if(TX.busy){TX.q.push(text);return;}TX.busy=true;let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the selected API key/model in AI settings. No offline canned response was used.');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
 /* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
 window.__tharDynamicSend=function(text){if(!cfg())return false;sendDynamic(text);return true;};
 window.__tharDynamicSend.active=function(){return !!cfg()};
@@ -9340,10 +9372,10 @@ function finishUi(){TX.rec=null;TX.voice=false;holdMode=false;input.placeholder=
 function stopVoice(){const r=TX.rec;finishUi();if(!r)return;r.onend=null;r.onerror=null;try{r.stop()}catch(e){}setTimeout(()=>{try{r.abort()}catch(e){}r.onresult=null;},1500);}
 function startVoice(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert('Speech recognition is not supported in this browser. Try Chrome on HTTPS.');return;}
 if(TX.voice||TX.rec){stopVoice();return;}
-const rec=new SR();TX.rec=rec;TX.voice=true;rec.lang='hi-IN';rec.continuous=true;rec.interimResults=true;waves.classList.add('on');sync();
-rec.onresult=e=>{let fin='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t;else interim+=t;}
+const rec=new SR();TX.rec=rec;TX.voice=true;rec.lang='hi-IN';rec.maxAlternatives=5;rec.continuous=true;rec.interimResults=true;waves.classList.add('on');sync();
+rec.onresult=e=>{let fin='',interim='',alts=[];for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal){fin+=t;for(let a=1;a<e.results[i].length;a++)alts.push(e.results[i][a].transcript);}else interim+=t;}
 if(interim&&!fin&&TX.rec===rec){input.placeholder='🎙 '+interim;}
-if(fin){input.placeholder=TX.rec===rec?'🎙 …':PH;input.value=(input.value+' '+fin).trim();input.dispatchEvent(new Event('input',{bubbles:true}));if(form.requestSubmit)form.requestSubmit();else form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}};
+if(fin){input.placeholder=TX.rec===rec?'🎙 …':PH;fin=fixSpeech(fin);TX.alts=alts.map(fixSpeech).filter(a=>a&&a!==fin);input.value=(input.value+' '+fin).trim();TX.altsFor=input.value.trim();input.dispatchEvent(new Event('input',{bubbles:true}));if(form.requestSubmit)form.requestSubmit();else form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}};
 rec.onerror=e=>{const fatal=['not-allowed','service-not-allowed','audio-capture','network','language-not-supported'].includes(e.error);
 if(e.error!=='no-speech'&&e.error!=='aborted'&&typeof say==='function')say(fatal&&e.error!=='network'?'Mic start nahi hua ('+e.error+'). Mic permission allow karo, aur page ko Chrome mein HTTPS par kholo (content:// ya file:// par mic block ho sakta hai).':'Voice input issue: '+e.error);
 if(fatal)finishUi();};
