@@ -7970,6 +7970,14 @@ body.tae-open #taeSay{display:none}
 .taeF{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
 .taeF{align-items:flex-end}.taeF textarea{flex:1;min-width:0;resize:none;max-height:150px;font-family:inherit;line-height:1.4;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:15px}
 .taeF button{border:none;border-radius:12px;padding:0 14px;background:var(--green);color:#04130d;font-weight:800;font-size:16px}.taeF button.mic{background:var(--panel3);color:var(--text)}
+
+.taeM.md{white-space:normal}.taeM .mdH{font-size:15px;font-weight:700;margin:2px 0 8px}.taeM .mdP{margin:2px 0}
+.taeM .mdHr{border:0;border-top:1px solid var(--line);margin:10px 0}
+.taeM table.mdT{border-collapse:collapse;width:100%;font-size:12.5px;margin:0}
+.taeM table.mdT th{background:rgba(127,127,127,.18);padding:6px 8px;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;color:var(--text)}
+.taeM table.mdT td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--text)}.taeM table.mdT td:first-child{color:var(--text)}
+.taeM table.mdT tr:nth-child(even) td{background:rgba(127,127,127,.07)}
+.taeM code{font-family:ui-monospace,Menlo,Consolas,monospace;background:rgba(127,127,127,.22);padding:1px 5px;border-radius:5px;font-size:12px;white-space:nowrap}
 .taeT{overflow-x:auto}.taeM th{text-align:left;font-size:12px;color:var(--muted);padding:3px 6px}.taeM.g{margin-top:-5px}.taeC button:disabled{opacity:.35}
 .taeDots i{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:var(--muted);animation:taeD 1s infinite}.taeDots i:nth-child(2){animation-delay:.15s}.taeDots i:nth-child(3){animation-delay:.3s}
 @keyframes taeD{0%,80%,100%{opacity:.25}40%{opacity:1}}
@@ -8576,6 +8584,33 @@ function roast(s) { const li = RL.indexOf(rlv) - 1; if (li < 0 || !RP[s]) return
 function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } catch (_) {} return say({ off: 'Roast mode off. Professional and boring, just as requested.', mild: 'Roast: mild. A gentle poke, only when you earn it.', medium: 'Roast: medium. Do not say I did not warn you.', savage: 'Roast: savage. Only your work gets it, never you. Brace yourself.' }[l], { chips: ['off', 'mild', 'medium', 'savage'].filter(x => x !== l).map(x => ({ l: 'roast ' + x, send: 'roast ' + x })) }); }
 
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
+
+/* ---- Dashboard-style formatting for contractor / production data ---- */
+window.TAE_FMT = 'OUTPUT FORMAT (mandatory for contractor, carpenter, production and item data): never plain text or raw bullet lists. Use rich Markdown: (1) a header line "## \uD83D\uDC77 Contractor Breakdown: <Name>" (H2 with icon); (2) a Markdown table with exactly these headers: | Item Code | Item Description | Quantity | Status | then the alignment row | :--- | :--- | :---: | :---: |; Item Code in `backticks`; Item Description in clean Title Case; Quantity as **Done / Total** in bold; Status as a badge: "\u2705 Completed" when done equals total, otherwise "\u23F3 In Progress"; (3) then a blank line, a line with only ---, and a footer like "**Total Completed:** N Jobs | **Status:** All items cleared" (or "**In Progress:** M Jobs" when some are pending). Put a blank line between blocks. Short answers stay short and plain. ';
+function mdInline(t){return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');}
+function looksMd(t){return /^\s*\|.*\|\s*$/m.test(t)||/^#{1,3}\s/m.test(t);}
+function mdHtml(text){
+  const L=String(text).split('\n'),out=[];let i=0;
+  const row=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+  while(i<L.length){
+    const l=L[i];
+    if(/^\s*\|.*\|\s*$/.test(l)){
+      const rows=[];while(i<L.length&&/^\s*\|.*\|\s*$/.test(L[i])){rows.push(L[i]);i++;}
+      let al=[],body=rows;
+      if(rows.length>1&&/^[\s|:\-]+$/.test(rows[1])){al=row(rows[1]).map(c=>/^:-+:$/.test(c)?'center':/-+:$/.test(c)?'right':'left');body=[rows[0]].concat(rows.slice(2));}
+      const hd=al.length>0;
+      let t='<div class="taeT"><table class="mdT">';
+      body.forEach((r,ri)=>{const h=hd&&ri===0,tg=h?'th':'td';t+=(h?'<thead>':'')+'<tr>'+row(r).map((c,k)=>'<'+tg+' style="text-align:'+(al[k]||'left')+'">'+mdInline(c)+'</'+tg+'>').join('')+'</tr>'+(h?'</thead><tbody>':'');});
+      out.push(t+(hd?'</tbody>':'')+'</table></div>');continue;
+    }
+    const h=/^(#{1,3})\s+(.*)$/.exec(l);
+    if(h){out.push('<div class="mdH">'+mdInline(h[2])+'</div>');i++;continue;}
+    if(/^\s*(-{3,}|\*{3,})\s*$/.test(l)){out.push('<hr class="mdHr">');i++;continue;}
+    if(!l.trim()){i++;continue;}
+    out.push('<div class="mdP">'+mdInline(l)+'</div>');i++;
+  }
+  return out.join('');
+}
 const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-3.5-flash-lite';
 const OAI_URL = 'https://api.openai.com/v1/chat/completions';
 const PROV = {
@@ -8623,7 +8658,7 @@ async function checkLlm() {
 }
 async function llm(c, text, ctx) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
-  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown symbols like ** or #, emojis only rarely. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown for casual chat, emojis only rarely. ' + window.TAE_FMT + 'Inside the JSON "reply" string write line breaks as \\n. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
     + 'SPEECH INPUT: text may come from Hindi speech recognition and contain errors. Keep every number digit-for-digit as spoken (Hindi number words become digits, e.g. do sau pachaas = 250). Contractor, buyer and craft names are proper nouns: keep them exactly as spoken, match them phonetically to the lists below, never swap in a different name, and ask if two names are equally close or none matches. '
     + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
     + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
@@ -8989,14 +9024,18 @@ function pump() {
   if (busy) return; const m = Q.shift(); if (!m) { draw(); return; }
   if (m.who === 'u') { log.push(m); return pump(); }
   busy = 1; RB.mood('think'); draw(true); const go = () => { log.push(m); busy = 0; RB.mood(''); pump(); };
-  if (api.fast) go(); else setTimeout(go, 150 + Math.random() * 250);
+  const ln = String(m.text || '').split('\n');
+  if (!api.fast && ln.length > 2 && looksMd(m.text)) {
+    const d = Math.max(35, Math.min(110, 2600 / ln.length));
+    setTimeout(() => { m.rev = 0; log.push(m); RB.mood(''); const iv = setInterval(() => { m.rev++; if (m.rev >= ln.length) { clearInterval(iv); delete m.rev; busy = 0; draw(); pump(); } else draw(); }, d); }, 150);
+  } else if (api.fast) go(); else setTimeout(go, 150 + Math.random() * 250);
 }
 const chipHtml = (c, off) => '<button' + (off ? ' disabled' : '') + ' class="' + (c.c || '') + '" ' + (c.pick ? 'data-pick="' + esc(c.pick) + '"' : c.view ? 'data-view="' + esc(c.view) + '"' : c.go ? 'data-go="' + esc(c.go) + '"' : 'data-send="' + esc(c.send) + '"') + '>' + esc(c.l) + '</button>';
 function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
   typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
-  el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : '<div class="taeM b' + g + '">' + esc(m.text) + (m.html || '') + (m.chips.length ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
+  el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
   if (keep) el.appendChild(keep);
   el.scrollTop = el.scrollHeight;
 }
@@ -9325,7 +9364,7 @@ else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split
 else if(change.op==='add'){const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store);if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
-async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
 const res=await fetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
