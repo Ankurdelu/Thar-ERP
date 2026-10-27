@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -2417,9 +2417,9 @@ function getWorkStagesSummary(x) {
   return stages.length ? stages.join(' · ') : 'Entry Saved';
 }
 
-const QC_ITEMS = [['qcPolish', 'Polish OK'], ['qcFitting', 'Fitting Complete'], ['qcBalance', 'Balance OK'], ['qcNoPending', 'No Pending Item']];
-const STAGES = [['sanding', 'Sanding', '🪵'], ['polish', 'Polish', '✨'], ['carpenter', 'Balance / Carpenter', '🪚'], ['fitting', 'Fitting', '🔩']];
-const HW = [['fitGlass', 'Glass'], ['fitKnob', 'Knob/Handle'], ['fitShelf', 'Shelf'], ['fitWoodLeg', 'Wood Leg'], ['fitIronLeg', 'Iron Leg'], ['fitPushMagnet', 'Push Magnet'], ['fitSSMagnet', 'SS Magnet'], ['fitBrownMagnet', 'Brown Magnet'], ['fitCatcher', 'Catcher']];
+const QC_ITEMS = [];
+const STAGES = [['sanding', 'Sanding', '🪵'], ['polish', 'Polish', '✨'], ['carpenter', 'Balance / Carpenter', '🪚']];
+const HW = [];
 const HWK = HW.map(h => h[0]), QCK = [...QC_ITEMS.map(q => q[0]), 'qcMoisture', 'allComplete', 'noHardware', 'noRepair', 'noBalance', 'noSanding', 'noPolish', 'noFitting', 'noPacking', 'noQC'];
 const NO_STAGE = { sanding: 'noSanding', polish: 'noPolish', carpenter: 'noBalance', fitting: 'noFitting' };
 const NOK = ['noSanding', 'noPolish', 'noBalance', 'noFitting', 'noHardware', 'noPacking', 'noQC'];
@@ -2653,9 +2653,12 @@ function prCollect(A, type) {
       return;
     }
     splitsOf(w, type).forEach(sp => {
-      const q = Number(sp.done) || 0, a = Number(sp.qty) || 0, p = resolve(sp.name);
-      if (!p) { if (String(sp.name || '').trim()) note(sp.name, q || a); return; }
-      rows.push({ ...base, key: p.key, date: String(sp.date || '').slice(0, 10), alloc: a, done: q, cbm: total ? cbmT * q / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
+      const q = Number(sp.done) || 0, p = resolve(sp.name);
+      if (!p) { if (String(sp.name || '').trim()) note(sp.name, q); return; }
+      const carpSplits = splitsOf(w, 'carpenter');
+      const inheritedDate = carpSplits.length > 0 && carpSplits[0].date ? carpSplits[0].date : (w.date || '').slice(0, 10);
+      const finalDate = (type === 'sanding' || type === 'polish') ? inheritedDate : String(sp.date || '').slice(0, 10);
+      rows.push({ ...base, key: p.key, date: finalDate, alloc: q, done: q, cbm: total ? cbmT * q / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
     });
   });
   return { reg, rows, unreg, type };
@@ -3062,7 +3065,17 @@ function homeStats() {
   const late = A.orders.filter(o => orderStatus(o).late).sort((a, b) => orderStatus(b).daysLate - orderStatus(a).daysLate);
   const tcA = topCarp(A), top3 = tcA.list.slice(0, 7), topCbm = tcA.cbm;
   pdL.sort((a, b) => b.q - a.q);
-  const v = { topCbm, tdL: tdL.slice(-5).reverse(), pdL: pdL.slice(0, 5), blL: blL.sort((a, b) => b.q - a.q).slice(0, 5), top3, qty, nToday, pendPcs, actN, qcPend, balQty, balN, delayed, late, fixN: fixSet(A).size };
+  const overQty = [];
+  A.work.forEach(x => {
+    const total = Number(x.qty || 0);
+    if (total > 0) {
+        ['sanding', 'polish', 'carpenter'].forEach(stage => {
+           const stageDone = splitsOf(x, stage).reduce((sum, p) => sum + Number(p.done || 0), 0);
+           if (stageDone > total) overQty.push(x);
+        });
+    }
+  });
+  const v = { topCbm, tdL: tdL.slice(-5).reverse(), pdL: pdL.slice(0, 5), blL: blL.sort((a, b) => b.q - a.q).slice(0, 5), top3, qty, nToday, pendPcs, actN, qcPend, balQty, balN, delayed, late, fixN: fixSet(A).size, overQty: [...new Set(overQty)] };
   window.__hs = { ver: dataVer, A, day: today, nw: A.work.length, no: A.orders.length, sig: nameReg().sig, v }; return v;
 }
 
@@ -3189,9 +3202,10 @@ function homePage() {
     backupAlert = `<div style="background:rgba(244, 63, 94, 0.15); border:1px solid rgba(244,63,94,0.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center;"><span>⚠️ Backup Data Reminder!</span><button onclick="moreSub='backup';go('settings')" class="btn smallbtn danger">Backup Now</button></div>`;
   }
   const fixAlert = (H.fixN && !isEmployeeMode) ? `<div style="background:rgba(244,63,94,.15); border:1px solid rgba(244,63,94,.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>⚠ ${H.fixN} work entr${H.fixN === 1 ? 'y has' : 'ies have'} a missing field, wrong Sub Order or unregistered name</span><button class="btn smallbtn danger" onclick="wl.st='fix';go('workList')">Fix now</button></div>` : '';
+  const qtyAlert = (H.overQty && H.overQty.length && !isEmployeeMode) ? `<div style="background:rgba(244,63,94,.15); border:1px solid rgba(244,63,94,.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>⚠ ${H.overQty.length} entr${H.overQty.length === 1 ? 'y has' : 'ies have'} stage quantities exceeding the Total Quantity.</span><button class="btn smallbtn danger" onclick="wl.st='overQty';go('workList')">Fix now</button></div>` : '';
   const alertBtns = (fxN.length ? `<button class="btn danger" style="flex:1" onclick="homeOpen=homeOpen==='names'?'':'names';render()">👤 Unregistered Names (${fxN.length}) ${homeOpen === 'names' ? '▲' : '▼'}</button>` : '') + (H.delayed.length ? `<button class="btn danger" style="flex:1" onclick="homeOpen=homeOpen==='work'?'':'work';render()">⚠️ Delayed Work (${H.delayed.length}) ${homeOpen === 'work' ? '▲' : '▼'}</button>` : '') +
     (H.late.length ? `<button class="btn danger" style="flex:1" onclick="homeOpen=homeOpen==='orders'?'':'orders';render()">⏰ Orders Late (${H.late.length}) ${homeOpen === 'orders' ? '▲' : '▼'}</button>` : '');
-  return oldBanner() + backupAlert + folderBanner() + inboxCard() + dupAlert + fixAlert + `
+  return oldBanner() + backupAlert + folderBanner() + inboxCard() + dupAlert + fixAlert + qtyAlert + `
     <section class="card">
       <h3>🔎 Global Search</h3>
       <div style="position:relative;margin-bottom:10px"><input class="search" id="msInput" type="text" style="margin-bottom:0;padding-right:46px" placeholder="TAE, sub order, item code, wood supplier, sanding, polish, carpenter..." value="${esc(msQ)}" oninput="msDebounce(this.value);document.getElementById('msClr').style.display=this.value?'flex':'none'"><button type="button" id="msClr" aria-label="Clear" title="Clear" onclick="const i=document.getElementById('msInput');i.value='';this.style.display='none';msDebounce('');i.focus()" style="display:${msQ ? 'flex' : 'none'};position:absolute;right:10px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:inherit;font-size:15px;font-weight:800;line-height:1;align-items:center;justify-content:center;cursor:pointer;padding:0">&#10005;</button></div>
@@ -3278,17 +3292,16 @@ function splitRowHtml(stage, name = '', qty = '', done = '0', date = '', link = 
   const sameSup = stage === 'carpenter' && !!supplier && !!mainSup && prNorm(supplier) === prNorm(mainSup);
   if (stage === 'carpenter' && sameSup) supplier = mainSup;
   if(stage==='carpenter') linkHtml += `<div class="field"><label>Wood Supplier</label><div style="position:relative"><input class="split-supplier" type="text" value="${esc(supplier)}" ${sameSup ? 'readonly' : ''} placeholder="Supplier name or code" style="padding-right:52px;width:100%"><label title="Use the Wood Supplier from above" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);margin:0;display:flex;align-items:center;justify-content:center;width:38px;height:38px;cursor:pointer"><input type="checkbox" class="split-samesup" ${sameSup ? 'checked' : ''} onchange="sameSupToggle(this)" style="width:24px;height:24px;margin:0;accent-color:var(--green,#10b981);cursor:pointer"></label></div></div>`;
-  let isFit = stage === 'fitting';
-  let nameField = isFit ? `<input type="text" class="split-name" value="Chandaram" readonly>` : `<input type="text" class="split-name" value="${esc(name)}" placeholder="Select or type" onchange="rememberName('${stage}', this.value)">`;
+  
+  let nameField = `<input type="text" class="split-name" value="${esc(name)}" placeholder="Select or type" onchange="rememberName('${stage}', this.value)">`;
 
   return `
     <div class="split-row" data-stage="${stage}">
       <div class="field"><label>${stage === 'carpenter' ? 'Carpenter' : 'Contractor'}</label>${nameField}</div>
       ${linkHtml}
-      <div class="field"><label>Allocated Qty</label><input type="number" class="split-qty" min="1" step="any" value="${esc(qty)}" placeholder="Total" oninput="this.dataset.m=1;updateSplitSummary('${stage}')"></div>
-      <div class="field"><label><span>Completed (Done)</span><button type="button" class="quick-link" onclick="const r=this.closest('.split-row');r.querySelector('.split-done').value=r.querySelector('.split-qty').value;updateSplitSummary('${stage}');qcChanged()">All</button></label><input type="number" class="split-done" min="0" step="any" value="${Number(done) > 0 ? esc(done) : ''}" placeholder="Done" oninput="updateSplitSummary('${stage}')"></div>
-      <div class="field"><label>Date</label><input type="date" class="split-date" value="${esc(date || '')}"></div>
-      ${isFit ? '' : `<button type="button" class="btn smallbtn danger" style="margin-bottom:12px; height: 42px;" onclick="this.closest('.split-row').remove(); updateSplitSummary('${stage}')">×</button>`}
+      <div class="field"><label><span>Quantity (Done)</span><button type="button" class="quick-link" onclick="const r=this.closest('.split-row');r.querySelector('.split-done').value=document.querySelector('#workForm [name=qty]').value;updateSplitSummary('${stage}');qcChanged()">All</button></label><input type="number" class="split-done" min="0" step="any" value="${Number(done) > 0 ? esc(done) : ''}" placeholder="Done" oninput="updateSplitSummary('${stage}')"></div>
+      ${stage === 'carpenter' ? `<div class="field"><label>Date</label><input type="date" class="split-date" value="${esc(date || '')}"></div>` : `<input type="hidden" class="split-date" value="">`}
+      <button type="button" class="btn smallbtn danger" style="margin-bottom:12px; height: 42px;" onclick="this.closest('.split-row').remove(); updateSplitSummary('${stage}')">×</button>
     </div>
   `;
 }
@@ -3465,7 +3478,7 @@ function completeIssues(wf) {
   else if (pk.length) {
     if (pkSent < total) add('Packing Hall: only ' + pkSent + ' of ' + total + ' pcs sent', pkBox);
     if (pk.some(p => !p.date)) add('Packing Hall: date missing in a row', pkBox);
-  } else if (!String(o.packingDate || '').trim()) add('Fitting to Packing Hall Date missing', wf.elements.packingDate);
+  }
   QC_ITEMS.forEach(([k, l]) => { if (!qcOkIn(wf, k)) add('Quality Check: ' + l + ' not ticked', wf.elements[k]?.closest('.checkrow')); });
   formNameErrors(wf, false).forEach(n => add('Unregistered name: ' + n.m, n.el));
   return out;
@@ -3739,31 +3752,7 @@ function workPage() {
           <div id="balWrap"><div id="splits-carpenter"></div>
           <div id="summary-carpenter" class="small muted" style="margin-bottom:16px;">Allocated: 0 | Completed: 0 | Pending: 0</div></div>
           
-          <hr style="border-top:1px dashed var(--line); margin: 16px 0;">
           
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-             <h4 class="tg-h" data-dim="noFitting" style="margin:0;color:var(--green)"><label class="tgl"><input type="checkbox" name="noFitting" value="Yes" onchange="lhChange(this)"></label><span class="tgt">Stage 4 · Fitting</span></h4>
-             <span data-skip="noFitting" class="pill">Fixed Contractor</span>
-          </div>
-          <div id="wrapFitting">
-          <div id="splits-fitting"></div>
-          <div id="summary-fitting" class="small muted" style="margin-bottom:12px;">Allocated: 0 | Completed: 0 | Pending: 0</div></div>
-          
-          <div class="field" id="hwBox"><div class="tg-h" data-dim="noHardware" style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px;margin-bottom:6px"><label class="tgl"><input type="checkbox" name="noHardware" value="Yes" onchange="lhChange(this)"></label><span class="tgt">Hardware Checklist</span></div>
-             <div class="grid" id="hwWrap">
-                 <label class="checkrow"><input type="checkbox" name="fitGlass" value="Yes"> Glass</label>
-                 <label class="checkrow"><input type="checkbox" name="fitKnob" value="Yes"> Knob/Handle</label>
-                 <label class="checkrow"><input type="checkbox" name="fitShelf" value="Yes"> Shelf</label>
-                 <label class="checkrow"><input type="checkbox" name="fitWoodLeg" value="Yes"> Wood Leg</label>
-                 <label class="checkrow"><input type="checkbox" name="fitIronLeg" value="Yes"> Iron Leg</label>
-                 <label class="checkrow"><input type="checkbox" name="fitPushMagnet" value="Yes"> Push Magnet</label>
-                 <label class="checkrow"><input type="checkbox" name="fitSSMagnet" value="Yes"> SS Magnet</label>
-                 <label class="checkrow"><input type="checkbox" name="fitBrownMagnet" value="Yes"> Brown Magnet</label>
-                 <label class="checkrow"><input type="checkbox" name="fitCatcher" value="Yes"> Catcher</label>
-                 <label class="checkrow"><input type="checkbox" name="fitCustomHardwareEnabled" value="Yes" onchange="document.getElementById('fitCustomHardwareWrap').classList.toggle('hidden',!this.checked)"> Custom Hdw</label>
-             </div>
-          </div>
-          <div class="hidden" id="fitCustomHardwareWrap">${field('Custom Hardware', 'fitCustomHardware', '', 'text')}</div>
           
                   </div>
 
@@ -3788,21 +3777,12 @@ function workPage() {
           </div>
         </div>
 
-        <div class="stage-box" style="border-left: 4px solid #f43f5e">
-          <h4 class="tg-h" data-dim="noPacking"><label class="tgl"><input type="checkbox" name="noPacking" value="Yes" onchange="lhChange(this)"></label><span class="tgt">Fitting to Packing Hall</span></h4>
-          <div id="wrapPacking"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-4px 0 10px"><span class="small muted">Add rows: whose pcs went to packing hall, how many, on which date (partial dispatch allowed)</span><button type="button" class="btn smallbtn primary" onclick="addPackRow()">＋ Add Row</button></div>
-          <div id="splits-packing"></div>
-          <div id="summary-packing" class="small muted" style="margin-bottom:14px">Sent to packing: 0 / - | Pending: 0</div></div>
-          <div class="row"><div id="packDateWrap">${dateField('Fitting to Packing Hall Date', 'packingDate')}</div>
+        
+          <div class="row">
           <div class="field"><label>Remarks / Notes ${micBtn('notesId')}</label><input id="notesId" name="notes" type="text" placeholder="Any notes..."></div></div>
-                  </div>
-
-        <div class="stage-box" style="border-left: 4px solid var(--green2)">
-          <h4 class="tg-h" data-dim="noQC"><label class="tgl"><input type="checkbox" name="noQC" value="Yes" onchange="lhChange(this)"></label><span class="tgt">Quality Check & Final Status</span> <button type="button" data-skip="noQC" style="margin-left:auto" class="quick-link" onclick="const q=document.getElementById('workForm').elements;QCK.slice(0,4).forEach(k=>q[k].checked=true);qcChanged(q.qcFitting)">Tick all</button></h4>
-          <p class="small muted" style="margin-top:-4px">The entry stays <b>Pending</b> until all four checks are ticked and <b>All Complete</b> is ticked.</p>
-          <div class="grid" id="qcWrap">${QC_ITEMS.map(([k, l]) => `<label class="checkrow"><input type="checkbox" name="${k}" value="Yes" onchange="qcChanged(this)"> ${l}</label>`).join('')}<label class="checkrow"><input type="checkbox" name="qcMoisture" value="Yes"> Moisture OK <small class="muted">(optional)</small></label></div>
-          <div id="qcStatus" class="qcstatus"></div>
         </div>
+
+        
 
         <div class="stage-box" style="border-left: 4px solid var(--green2)">
           <label class="checkrow" style="background:rgba(16,185,129,.12);border:1.5px solid var(--green2);padding:16px">
@@ -3836,6 +3816,10 @@ function wlResults() {
   if (wl.st === 'packed') list = list.filter(x => statusOf(x).complete);
   if (wl.st === 'fix') list = list.filter(x => fixSet(A).has(x.id));
   if (wl.st === 'fixnames') { const ids = fixNameIds(A); list = list.filter(x => ids.has(x.id)); }
+  if (wl.st === 'overQty') list = list.filter(x => {
+    const total = Number(x.qty || 0);
+    return ['sanding', 'polish', 'carpenter'].some(stage => splitsOf(x, stage).reduce((sum, p) => sum + Number(p.done || 0), 0) > total);
+  });
   const tn = x => { const m = String(x.orderNo || '').match(/\d+/); return m ? Number(m[0]) : Infinity; };
   const sn = x => { const m = String(x.subOrder || '').trim().match(/\/(\d+)$/); return m ? Number(m[1]) : Infinity; };
   list = list.slice().sort((a, b) => (tn(a) - tn(b)) || String(a.orderNo || '').localeCompare(String(b.orderNo || '')) || (sn(a) - sn(b)) || String(a.subOrder || '').localeCompare(String(b.subOrder || ''), undefined, { numeric: true }));
@@ -3900,10 +3884,9 @@ function renderWorkDetailCard(x) {
     ${sibs.length ? `<div class="dsec"><h4>Other Sub Orders in ${esc(x.orderNo)}</h4><div class="stage-chips wrapchips subgrid" style="margin:0;grid-template-rows:repeat(${Math.ceil(sibs.length / 2)},auto)">${sibs.map(w => `<button class="chip" onclick="viewWork('${w.id}')">${esc(w.subOrder || w.itemCode)} ${statusOf(w).complete ? '' : '⏳'}</button>`).join('')}</div></div>` : ''}
     <div class="dsec"><h4>Progress Breakdown</h4>${s.complete ? '<div class="small muted">Complete — 100%</div>' : pi.parts.map(q => row(q.l + ' <small class="muted">(' + q.wt + '%)</small>', q.na ? 'Not required' : Math.round(q.wt * q.f * 10) / 10 + ' / ' + q.wt + '%')).join('') + (pi.rep ? row('<span style="color:var(--red)">Repair pending (' + pi.rep.qty + '× ' + esc(pi.rep.part) + ')</span>', '<span style="color:var(--red)">−' + Math.round(pi.rep.ded * 10) / 10 + '%</span>') : '') + row('<b>Progress</b>', p + '%')}</div>
     <div class="dsec"><h4>Production Pipeline</h4><div class="tl">${STAGES.map(node).join('')}</div></div>
-    <div class="dsec"><h4>Hardware</h4><div class="qchips">${hw}</div></div>
-    <div class="dsec"><h4>Quality Check</h4>${qcHtml}</div>
+    
     ${x.needsRepair ? `<div class="dsec" style="border-color:rgba(245,158,11,.5)"><h4 style="color:var(--amber)">Repair</h4>${row('Part & Qty', repairPartsText(x) || '—')}${row('Hand over By', esc(x.fitRepairPolishContractor || '—'))}${row('Handover To', esc(x.fitRepairHandover || '—'))}${row('Sent', esc(x.fitRepairSendDate || '—'))}${row('Returned', x.fitRepairReceiveDate ? esc(x.fitRepairReceiveDate) : '<span style="color:var(--red)">Pending</span>')}</div>` : ''}
-    <div class="dsec"><h4>Packing & Notes</h4>${(x.packingSplits || []).length ? row('Sent to Packing Hall', x.packingSplits.map(p => esc(p.name || '—') + ': ' + esc(p.qty) + ' pcs' + (p.date ? ' (' + esc(p.date) + ')' : '')).join('<br>') + `<br><small style="color:var(--amber)">Total ${x.packingSplits.reduce((t, p) => t + Number(p.qty || 0), 0)} / ${esc(x.qty)} pcs</small>`) : ''}${row('Fitting to Packing Hall', esc(x.packingDate || '—'))}${row('Entry Date', esc(x.date || '—'))}${x.enteredBy ? row('Entered by', esc(x.enteredBy)) : ''}${row('Target Dispatch', esc(x.targetDate || 'Not set'))}${row('Wood Supplier', hl(x.woodSupplier || '—'))}${row('Notes', esc(x.notes || '—'))}</div>
+    <div class="dsec"><h4>Packing & Notes</h4>${(x.packingSplits || []).length ? row('Sent to Packing Hall', x.packingSplits.map(p => esc(p.name || '—') + ': ' + esc(p.qty) + ' pcs' + (p.date ? ' (' + esc(p.date) + ')' : '')).join('<br>') + `<br><small style="color:var(--amber)">Total ${x.packingSplits.reduce((t, p) => t + Number(p.qty || 0), 0)} / ${esc(x.qty)} pcs</small>`) : ''}${row('Entry Date', esc(x.date || '—'))}${x.enteredBy ? row('Entered by', esc(x.enteredBy)) : ''}${row('Target Dispatch', esc(x.targetDate || 'Not set'))}${row('Wood Supplier', hl(x.woodSupplier || '—'))}${row('Notes', esc(x.notes || '—'))}</div>
     <div class="dsec emp-hide" style="border-color:rgba(244,63,94,.45)"><h4 style="color:var(--red)">Danger Zone</h4><button class="btn danger" style="width:100%" onclick="deleteEntry('work','${x.id}')">Delete Entry (password required)</button></div>
   </section>`;
 }
