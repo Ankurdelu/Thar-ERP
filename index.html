@@ -7939,6 +7939,14 @@ body.tae-open #taeSay{display:none}
 .taeH .taeLg{display:inline-block!important;width:30px!important;height:35px!important;background:none!important;border:0!important;animation:none!important;border-radius:0!important}.taeH{background:linear-gradient(90deg,rgba(16,185,129,.16),rgba(var(--blue-rgb),.10));border-radius:0}
 .taeH .taeLg{display:inline-grid;place-items:center;width:34px;height:34px;margin-right:9px;vertical-align:middle;border-radius:11px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:9.5px;font-weight:900;border:1px solid rgba(255,255,255,.25);animation:taeGlow 3.2s ease-in-out infinite}
 .taeH .taeNm{font-weight:900;background:linear-gradient(to right,var(--blue),#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.taeAi{font-size:11px;margin-left:6px;white-space:nowrap;max-width:92px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle;opacity:.95}
+#taeSet{position:absolute;inset:0;background:rgba(0,0,0,.6);z-index:50;display:flex;align-items:center;justify-content:center;padding:14px}
+#taeSet .tsC{background:#2a2523;color:#eee;border-radius:16px;padding:16px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:8px;max-height:92%;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+#taeSet h3{margin:0 0 2px;font-size:16px}#taeSet label{font-size:12px;opacity:.75}
+#taeSet input,#taeSet select{width:100%;padding:10px;border-radius:10px;border:1px solid #5a514c;background:#1f1a18;color:#fff;font-size:14px}
+#taeSet .tsSt{font-size:13px;min-height:18px}#taeSet .tsR{display:flex;gap:8px;flex-wrap:wrap}
+#taeSet button{flex:1;padding:10px;border-radius:10px;border:1px solid #5a514c;background:#3a3330;color:#fff;font-size:13px}
+#taeSet button.tsP{background:#34d399;color:#04231a;border-color:#34d399;font-weight:600}
 .taeH .taeOn{display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-left:6px;box-shadow:0 0 8px #34d399;animation:taeBlink 1.8s infinite}
 @keyframes taeBlink{0%,100%{opacity:1}50%{opacity:.35}}
 .taeM{animation:taeIn .28s ease-out both}.taeM.u{transform-origin:right bottom}.taeM.b{transform-origin:left bottom;box-shadow:0 2px 10px rgba(0,0,0,.12)}
@@ -8568,19 +8576,80 @@ function roast(s) { const li = RL.indexOf(rlv) - 1; if (li < 0 || !RP[s]) return
 function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } catch (_) {} return say({ off: 'Roast mode off. Professional and boring, just as requested.', mild: 'Roast: mild. A gentle poke, only when you earn it.', medium: 'Roast: medium. Do not say I did not warn you.', savage: 'Roast: savage. Only your work gets it, never you. Brace yourself.' }[l], { chips: ['off', 'mild', 'medium', 'savage'].filter(x => x !== l).map(x => ({ l: 'roast ' + x, send: 'roast ' + x })) }); }
 
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
-function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); return c && c.key ? c : null; } catch (_) { return null; } }
+const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-2.5-flash';
+function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^AIza/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
+const LLM_HIST = [];
+function dataDigest() {
+  try {
+    const W = (A().work || []).slice(), rows = W.map(x => { let c = false; try { c = !!statusOf(x).complete; } catch (_) {} return { x, c }; });
+    rows.sort((p, q) => p.c - q.c); const out = []; let len = 0;
+    for (const { x, c } of rows) {
+      const stg = STORD.map(k => { const sp = splitsOf(x, k); return sp.length ? k[0].toUpperCase() + ':' + sp.map(p => p.name + ' ' + (p.done || 0) + '/' + (p.qty || 0)).join('+') : ''; }).filter(Boolean).join(' ');
+      const line = [x.subOrder || x.orderNo, x.itemCode, x.itemName, x.buyer, 'qty' + x.qty, x.woodSupplier && ('ws:' + x.woodSupplier), x.targetDate && ('target ' + x.targetDate), c ? 'COMPLETE' : 'RUNNING', stg].filter(Boolean).join(' | ');
+      if (len + line.length > 90000) break; out.push(line); len += line.length + 1;
+    }
+    return 'Total entries: ' + W.length + '. Today: ' + todayStr() + '. (S=Sanding P=Polish C=Carpenter F=Fitting, format name done/allocated)\n' + out.join('\n');
+  } catch (_) { return ''; }
+}
+function setDot(state, msg) {
+  S.llmState = state; const d = document.querySelector('#taeBox .taeOn'), l = document.getElementById('taeAi');
+  const col = { ok: '#34d399', bad: '#f87171', chk: '#fbbf24', off: '#94a3b8' }[state] || '#94a3b8', c = llmCfg();
+  const txt = state === 'ok' ? 'AI ✓' : state === 'bad' ? 'AI ✗' : state === 'chk' ? 'AI …' : 'AI off';
+  if (d) { d.style.background = col; d.style.boxShadow = '0 0 8px ' + col; d.title = (msg || '') + (c ? ' [' + c.model + ']' : ''); }
+  if (l) { l.textContent = txt + (c && state === 'ok' ? ' ' + String(c.model).replace(/^gemini-/, '') : ''); l.style.color = col; }
+}
+function llmBase(c) { return (c.url || GEM_URL).replace(/\/chat\/completions\/?$/, ''); }
+async function listModels(c) {
+  const r = await fetch(llmBase(c) + '/models', { headers: { Authorization: 'Bearer ' + c.key } });
+  if (!r.ok) throw new Error('API ' + r.status);
+  const j = await r.json(); let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
+  if (/^AIza/.test(c.key)) ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
+  return [...new Set(ids)].sort().reverse();
+}
+async function checkLlm() {
+  const c = llmCfg(); if (!c) return setDot('off', 'No key - offline engine');
+  setDot('chk', 'Checking...');
+  try { await listModels(c); setDot('ok', 'Connected'); } catch (e) { setDot('bad', 'Not connected: ' + (e && e.message || 'network')); }
+}
 async function llm(c, text) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
-  const r = await fetch(c.url || 'https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify({ model: c.model || 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Rewrite the factory message into ONE command. Reply strict JSON {"cmd":"..."}. Forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>". Names: ' + [...new Set(names)].slice(0, 60).join(', ') + '. Buyers: ' + (A().buyers || []).slice(0, 40).join(', ') }, { role: 'user', content: text.slice(0, 500) }] }) });
-  if (!r.ok) return ''; const j = await r.json(), o = JSON.parse(j.choices[0].message.content), cmd = String(o.cmd || '').slice(0, 300);
-  return /^[\w\s,.\-\/×:+]+$/.test(cmd) ? cmd : '';
+  const sys = 'You are the smart assistant inside a furniture factory ERP and also a general-purpose AI. The user may write English, Hindi or Hinglish and may ask ANYTHING (factory data, personal, general, advice, chit-chat). Reply in the same language/style as the user. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+    + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
+    + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
+    + 'RULE 3: Anything else (personal or general question) - answer helpfully in "reply". '
+    + 'Contractor/worker names: ' + [...new Set(names)].slice(0, 60).join(', ') + '. Buyers: ' + (A().buyers || []).slice(0, 40).join(', ') + '.\nDATA (live entries):\n' + dataDigest();
+  const msgs = [{ role: 'system', content: sys }].concat(LLM_HIST.slice(-8), [{ role: 'user', content: text.slice(0, 4000) }]);
+  const r = await fetch(c.url || GEM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify({ model: c.model || GEM_MODEL, temperature: 0.4, messages: msgs }) });
+  if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + (m ? ': ' + String(m).slice(0, 160) : '')); }
+  const j = await r.json(); let raw = String(j.choices[0].message.content || '').trim(), o;
+  try { o = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) { o = { cmd: '', reply: raw }; }
+  let cmd = String(o.cmd || '').slice(0, 400); if (!/^[\w\s,.\-\/×:+]+$/.test(cmd)) cmd = '';
+  const reply = String(o.reply || '').trim();
+  LLM_HIST.push({ role: 'user', content: text.slice(0, 1000) }, { role: 'assistant', content: (cmd || reply).slice(0, 1500) }); if (LLM_HIST.length > 16) LLM_HIST.splice(0, 2);
+  return { cmd, reply };
+}
+function saveLlm(key, model) {
+  const g = /^AIza/.test(key); const c = { key, url: g ? GEM_URL : (llmCfg() && llmCfg().url) || 'https://api.openai.com/v1/chat/completions', model: model || (g ? GEM_MODEL : 'gpt-4o-mini') };
+  try { localStorage.setItem('taeLlm', JSON.stringify(c)); } catch (_) {} return c;
 }
 function cfg() {
-  const k = prompt('LLM API key (stays on this device only). Leave empty to turn the AI layer off:', ''); if (k === null) return;
-  if (!k.trim()) { try { localStorage.removeItem('taeLlm'); } catch (_) {} return say('AI layer off. Back to the free offline engine.'); }
-  const url = prompt('Endpoint (OpenAI-compatible chat completions):', 'https://api.openai.com/v1/chat/completions') || '', model = prompt('Model name:', 'gpt-4o-mini') || '';
-  try { localStorage.setItem('taeLlm', JSON.stringify({ key: k.trim(), url: url.trim(), model: model.trim() })); } catch (_) {}
-  return say('AI layer on. It only helps me read unclear messages; every change still goes through my checks and your Confirm.');
+  const box = document.getElementById('taeBox'); if (!box) return; const old = document.getElementById('taeSet'); if (old) old.remove();
+  const c = llmCfg(), ov = document.createElement('div'); ov.id = 'taeSet';
+  ov.innerHTML = '<div class="tsC"><h3>AI settings (Gemini)</h3><div class="tsSt" id="tsSt"></div><label>API key</label><input id="tsKey" type="password" placeholder="AIza..." autocomplete="off" value="' + (c ? c.key.replace(/"/g, '') : '') + '"><label>Model</label><select id="tsMod"></select><div class="tsR"><button id="tsLoad">Models load karo</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save</button><button id="tsOff">Key hatao</button><button id="tsX">Band</button></div></div>';
+  box.appendChild(ov); ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) ov.remove(); });
+  const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), FB = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+  const fill = (ids, cur) => { const l = [...new Set([cur].concat(ids).filter(Boolean))]; sel.innerHTML = l.map(i => '<option' + (i === cur ? ' selected' : '') + '>' + i + '</option>').join(''); };
+  const curKey = () => $('tsKey').value.trim(), curM = () => sel.value || GEM_MODEL;
+  fill(FB, c ? c.model : GEM_MODEL);
+  const show = (t, k) => { st.textContent = t; st.style.color = k === 'ok' ? '#34d399' : k === 'bad' ? '#f87171' : ''; };
+  show(c ? 'Status: ' + ({ ok: 'Connected ✓', bad: 'Not connected ✗', chk: 'Checking…' }[S.llmState] || 'Key saved (test karo)') : 'Status: AI off (free offline engine)');
+  const load = async () => { const k = curKey(); if (!k) return show('Pehle key daalo', 'bad'); show('Models la raha hu…'); try { const ids = await listModels(Object.assign(saveLlm(k, curM()), {})); fill(ids, curM()); show('Connected ✓ - ' + ids.length + ' models mile, dropdown se chuno', 'ok'); setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message + ' (key/internet check karo)', 'bad'); setDot('bad', e.message); } };
+  $('tsLoad').onclick = load;
+  $('tsTest').onclick = async () => { const k = curKey(); if (!k) return show('Pehle key daalo', 'bad'); const cc = saveLlm(k, curM()); show('Test ho raha hai…'); try { const r = await fetch(cc.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cc.key }, body: JSON.stringify({ model: cc.model, messages: [{ role: 'user', content: 'Reply with the word OK' }] }) }); if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + ' ' + String(m).slice(0, 120)); } show('Connected ✓ - ' + cc.model + ' chal raha hai', 'ok'); setDot('ok', 'Connected'); } catch (e) { show('Fail: ' + e.message, 'bad'); setDot('bad', e.message); } };
+  $('tsSave').onclick = () => { const k = curKey(); if (!k) return show('Key khali hai', 'bad'); saveLlm(k, curM()); ov.remove(); setDot('chk'); checkLlm(); say('AI layer on (' + curM() + '). Ab kuch bhi puchho - factory data, Hindi me entry/update, ya personal sawal. Data changes pe Confirm hi lagega.'); pump(); };
+  $('tsOff').onclick = () => { try { localStorage.removeItem('taeLlm'); } catch (_) {} ov.remove(); setDot('off'); say('AI layer off. Back to the free offline engine.'); pump(); };
+  $('tsX').onclick = () => ov.remove();
+  if (c) load();
 }
 function lowConf(text) {
   const w = text.trim().slice(0, 30);
@@ -8589,7 +8658,7 @@ function lowConf(text) {
 function unknown(text) {
   const c = llmCfg(); if (!c || S.viaLlm) return lowConf(text);
   busy = 1; draw(true);
-  llm(c, text).then(cmd => { busy = 0; if (cmd) { S.viaLlm = 1; try { handle(cmd); } finally { S.viaLlm = 0; } } else lowConf(text); pump(); }).catch(() => { busy = 0; lowConf(text); pump(); });
+  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); if (o.cmd) { S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else lowConf(text); pump(); }).catch(e => { busy = 0; setDot('bad', e && e.message); say('AI se jawab nahi mila (' + (e && e.message || 'network') + '). Key/internet check karo (⚙ se key dobara daalo).'); pump(); });
 }
 
 // ---------- ADD NAME + CODE (supplier / carpenter / polish / sanding / buyer) ----------
@@ -8822,7 +8891,7 @@ function handle(raw) {
   if (/^(hi|hello|hey|namaste|good (morning|afternoon|evening))\b/.test(t)) return say('Hello! Ready when you are. Try "brief me" or tell me what to enter.', { chips: [{ l: 'Brief me', send: 'brief' }, { l: 'Help', send: 'help' }] });
   if (/(thanks|thank you|thx|shukriya|dhanyavaad|dhanyavad)/.test(t)) return say('Anytime. Send the next one when you are ready.');
   if (/(stupid|useless|bekar|dumb|idiot|worst|nalayak)/.test(t)) return say('Sorry it is not going well. Tell me exactly what you wanted and I will do it step by step, or type "help" for examples.', { chips: [{ l: 'Help', send: 'help' }, { l: 'Entry format', send: 'format' }] });
-  if (/\b(weather|joke|cricket|movie|song|who are you|your name|meaning of life)\b/.test(t)) return say('Fun topic, but I only know furniture, contractors and pcs. Want a brief instead?', { chips: [{ l: 'Brief me', send: 'brief' }, { l: 'Help', send: 'help' }] });
+  if (/\b(weather|joke|cricket|movie|song|who are you|your name|meaning of life)\b/.test(t)) { if (llmCfg()) return unknown(text); return say('Fun topic, but I only know furniture, contractors and pcs. Want a brief instead?', { chips: [{ l: 'Brief me', send: 'brief' }, { l: 'Help', send: 'help' }] }); }
   const blocks = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
   if (blocks.length > 1 && blocks.every(isBlock)) { S.pending = S.upd = S.await = null; return multiNew(blocks); }
   const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
@@ -8863,7 +8932,17 @@ function draw(typing) {
   el.innerHTML = log.map((m, i) => { const g = i && log[i - 1].who === m.who ? ' g' : ''; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : '<div class="taeM b' + g + '">' + esc(m.text) + (m.html || '') + (m.chips.length ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
   el.scrollTop = el.scrollHeight;
 }
-function send(text) { text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); try { handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
+function smart(text) {
+  const c = llmCfg(); if (!c) return false; const t = norm(text);
+  if (S.pending || S.draft || S.await || S.items || S.editAsk || S.upd || S.pd || S.resume || S.viaLlm) return false;
+  if (/^(help|\?|format|brief|undo|redo|haan|han|ha|yes|y|ok|okay|confirm|save|cancel|nahi|nahin|no|stop|edit row|roast|hi|hello|hey|thanks|thank)\b/.test(t)) return false;
+  if (/\n/.test(text) || isBlock(text)) return false;
+  busy = 1; draw(true);
+  llm(c, text).then(o => { busy = 0; setDot('ok', 'Connected'); try { if (o.cmd) { say('🧠 Samjha: ' + o.cmd); S.viaLlm = 1; try { handle(o.cmd); } finally { S.viaLlm = 0; } } else if (o.reply) say(o.reply); else handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); })
+    .catch(e => { busy = 0; setDot('bad', e && e.message); say('⚠ AI connect nahi hua (' + (e && e.message || 'network') + '). Offline engine se chala raha hu.'); try { handle(text); } catch (_) {} pump(); });
+  return true;
+}
+function send(text) { text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
 function pick(pid) {
   const x = workOf(pid); if (!x) return; S.target = pid; Q.push({ who: 'u', text: lbl(x) });
   if (S.editAsk) { const tx = S.editAsk; S.editAsk = null; doEdit(tx, x); return pump(); }
@@ -8875,7 +8954,8 @@ function init() {
   if (document.getElementById('taeFab')) return;
   const fab = document.createElement('button'); fab.id = 'taeFab'; fab.className = 'hidden no-print'; fab.title = 'ERP Assistant'; fab.setAttribute('aria-label', 'Open ERP Assistant'); fab.innerHTML = '<span class="rw">' + ROBO('f') + '</span>';
   const box = document.createElement('div'); box.id = 'taeBox'; box.className = 'hidden no-print'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'ERP Assistant');
-  box.innerHTML = '<div class="taeH"><span><em class="taeLg" style="font-style:normal">'+ROBO('h')+'</em><span class="taeNm">ERP Assistant</span><span class="taeOn"></span></span><button data-x="cfg" aria-label="Settings">⚙</button><button data-x="help">Help</button><button data-x="close" aria-label="Close">✕</button></div><div class="taeCaps" id="taeCaps">'+CAPS.map((c,i)=>'<span class="taeCp" data-i="'+i+'">'+c+'</span>').join('')+'</div><div id="taeLog" role="log" aria-live="polite"></div><form class="taeF" id="taeForm"><textarea id="taeIn" rows="1" autocomplete="off" aria-label="Message" placeholder="Type or speak… (try “brief me”)"></textarea><button aria-label="Send">➤</button></form>';
+  box.innerHTML = '<div class="taeH"><span><em class="taeLg" style="font-style:normal">'+ROBO('h')+'</em><span class="taeNm">ERP Assistant</span><span class="taeOn"></span><span id="taeAi" class="taeAi"></span></span><button data-x="cfg" aria-label="Settings">⚙</button><button data-x="help">Help</button><button data-x="close" aria-label="Close">✕</button></div><div class="taeCaps" id="taeCaps">'+CAPS.map((c,i)=>'<span class="taeCp" data-i="'+i+'">'+c+'</span>').join('')+'</div><div id="taeLog" role="log" aria-live="polite"></div><form class="taeF" id="taeForm"><textarea id="taeIn" rows="1" autocomplete="off" aria-label="Message" placeholder="Type or speak… (try “brief me”)"></textarea><button aria-label="Send">➤</button></form>';
+  setTimeout(() => { try { checkLlm(); } catch (_) {} }, 600);
   const say2 = document.createElement('div'); say2.id = 'taeSay'; say2.className = 'no-print'; document.body.appendChild(say2);
   document.body.appendChild(fab); document.body.appendChild(box);
   RB.init(fab.querySelector('svg'), say2); RB.init(box.querySelector('svg'), null);
