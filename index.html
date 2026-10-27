@@ -8576,8 +8576,8 @@ function roast(s) { const li = RL.indexOf(rlv) - 1; if (li < 0 || !RP[s]) return
 function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } catch (_) {} return say({ off: 'Roast mode off. Professional and boring, just as requested.', mild: 'Roast: mild. A gentle poke, only when you earn it.', medium: 'Roast: medium. Do not say I did not warn you.', savage: 'Roast: savage. Only your work gets it, never you. Brace yourself.' }[l], { chips: ['off', 'mild', 'medium', 'savage'].filter(x => x !== l).map(x => ({ l: 'roast ' + x, send: 'roast ' + x })) }); }
 
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
-const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-2.5-flash';
-function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^(AIza|AQ\.)/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
+const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-3.8-flash';
+function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^(AIza|AQ\.)/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
 const LLM_HIST = [];
 function dataDigest() {
   try {
@@ -8637,7 +8637,7 @@ function cfg() {
   const c = llmCfg(), ov = document.createElement('div'); ov.id = 'taeSet';
   ov.innerHTML = '<div class="tsC"><h3>AI settings (Gemini)</h3><div class="tsSt" id="tsSt"></div><label>API key</label><input id="tsKey" type="password" placeholder="AIza... / AQ...." autocomplete="off" value="' + (c ? c.key.replace(/"/g, '') : '') + '"><label>Model</label><select id="tsMod"></select><div class="tsR"><button id="tsLoad">Models load karo</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save</button><button id="tsOff">Key hatao</button><button id="tsX">Band</button></div></div>';
   box.appendChild(ov); ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) ov.remove(); });
-  const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), FB = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+  const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), FB = ['gemini-3.8-flash', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
   const fill = (ids, cur) => { const l = [...new Set([cur].concat(ids).filter(Boolean))]; sel.innerHTML = l.map(i => '<option' + (i === cur ? ' selected' : '') + '>' + i + '</option>').join(''); };
   const curKey = () => $('tsKey').value.trim(), curM = () => sel.value || GEM_MODEL;
   fill(FB, c ? c.model : GEM_MODEL);
