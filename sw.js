@@ -1,6 +1,6 @@
 // Network-first service worker: always tries the latest files from the server,
 // falls back to the cached copy only when offline. Bump CACHE to force a clean-up.
-const CACHE = 'thar-erp-v16';
+const CACHE = 'thar-erp-v17';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {
   e.waitUntil(
