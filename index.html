@@ -8577,7 +8577,7 @@ function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } cat
 
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
 const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-2.5-flash';
-function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^AIza/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
+function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (/^(AIza|AQ\.)/.test(c.key)) { c.url = GEM_URL; if (!c.model || /^gpt/i.test(c.model)) c.model = GEM_MODEL; } return c; } catch (_) { return null; } }
 const LLM_HIST = [];
 function dataDigest() {
   try {
@@ -8603,7 +8603,7 @@ async function listModels(c) {
   const r = await fetch(llmBase(c) + '/models', { headers: { Authorization: 'Bearer ' + c.key } });
   if (!r.ok) throw new Error('API ' + r.status);
   const j = await r.json(); let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-  if (/^AIza/.test(c.key)) ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
+  if (/^(AIza|AQ\.)/.test(c.key)) ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
   return [...new Set(ids)].sort().reverse();
 }
 async function checkLlm() {
@@ -8629,13 +8629,13 @@ async function llm(c, text) {
   return { cmd, reply };
 }
 function saveLlm(key, model) {
-  const g = /^AIza/.test(key); const c = { key, url: g ? GEM_URL : (llmCfg() && llmCfg().url) || 'https://api.openai.com/v1/chat/completions', model: model || (g ? GEM_MODEL : 'gpt-4o-mini') };
+  const g = /^(AIza|AQ\.)/.test(key); const c = { key, url: g ? GEM_URL : (llmCfg() && llmCfg().url) || 'https://api.openai.com/v1/chat/completions', model: model || (g ? GEM_MODEL : 'gpt-4o-mini') };
   try { localStorage.setItem('taeLlm', JSON.stringify(c)); } catch (_) {} return c;
 }
 function cfg() {
   const box = document.getElementById('taeBox'); if (!box) return; const old = document.getElementById('taeSet'); if (old) old.remove();
   const c = llmCfg(), ov = document.createElement('div'); ov.id = 'taeSet';
-  ov.innerHTML = '<div class="tsC"><h3>AI settings (Gemini)</h3><div class="tsSt" id="tsSt"></div><label>API key</label><input id="tsKey" type="password" placeholder="AIza..." autocomplete="off" value="' + (c ? c.key.replace(/"/g, '') : '') + '"><label>Model</label><select id="tsMod"></select><div class="tsR"><button id="tsLoad">Models load karo</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save</button><button id="tsOff">Key hatao</button><button id="tsX">Band</button></div></div>';
+  ov.innerHTML = '<div class="tsC"><h3>AI settings (Gemini)</h3><div class="tsSt" id="tsSt"></div><label>API key</label><input id="tsKey" type="password" placeholder="AIza... / AQ...." autocomplete="off" value="' + (c ? c.key.replace(/"/g, '') : '') + '"><label>Model</label><select id="tsMod"></select><div class="tsR"><button id="tsLoad">Models load karo</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save</button><button id="tsOff">Key hatao</button><button id="tsX">Band</button></div></div>';
   box.appendChild(ov); ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) ov.remove(); });
   const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), FB = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
   const fill = (ids, cur) => { const l = [...new Set([cur].concat(ids).filter(Boolean))]; sel.innerHTML = l.map(i => '<option' + (i === cur ? ' selected' : '') + '>' + i + '</option>').join(''); };
