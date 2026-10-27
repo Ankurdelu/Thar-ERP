@@ -7978,6 +7978,14 @@ body.tae-open #taeSay{display:none}
 .taeM.nA{animation:none}
 .taeM.md{white-space:normal}.taeM .mdH{font-size:15px;font-weight:700;margin:2px 0 8px}.taeM .mdP{margin:2px 0}
 .taeM .mdHr{border:0;border-top:1px solid var(--line);margin:10px 0}
+.taeM .mdCards{display:flex;flex-direction:column;gap:8px;margin:2px 0}
+.taeM .mdCard{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:rgba(127,127,127,.07)}
+.taeM .mdCh{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12.5px;font-weight:700}
+.taeM .mdSt{font-size:11.5px;font-weight:600;white-space:nowrap}
+.taeM .mdCt{font-size:13px;margin:2px 0 6px;font-weight:600}
+.taeM .mdCg{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
+.taeM .mdCr{display:flex;flex-direction:column;font-size:12px;min-width:0;word-break:break-word}
+.taeM .mdCr b{font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600}
 .taeM table.mdT{border-collapse:collapse;width:100%;font-size:12.5px;margin:0}
 .taeM table.mdT th{background:rgba(127,127,127,.18);padding:6px 8px;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;color:var(--text)}
 .taeM table.mdT td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--text)}.taeM table.mdT td:first-child{color:var(--text)}
@@ -8591,17 +8599,16 @@ function setRoast(l) { rlv = l; try { localStorage.setItem('taeRoast', l); } cat
 // ---------- OPTIONAL LLM LAYER (off unless a key is saved on this device) ----------
 
 /* ---- Dashboard-style formatting for contractor / production data ---- */
-window.TAE_FMT = `OUTPUT FORMAT (mandatory for EVERY answer that shows records: contractor, carpenter, supplier, wood supplier, buyer, department, job order, production progress, daily status, inventory, pending or completed lists). Never reply with plain text paragraphs or raw bullet lists for such data. Reply in clean dashboard-style Markdown only, no HTML, exactly in this structure, one block per contractor/carpenter/supplier (repeat the block for each name when several are asked):
+window.TAE_FMT = `OUTPUT FORMAT (mandatory for EVERY answer that shows records: contractor, carpenter, polish, sanding, supplier, wood supplier, buyer, department, job order, production progress, daily status, pending or completed lists). Never reply with plain text paragraphs or raw bullet lists for such data. Reply in clean dashboard-style Markdown only, no HTML, one block per contractor/carpenter/supplier/buyer (repeat the block for each name when several are asked):
 ## <icon> <Role> Breakdown: <Name>
 (blank line)
-| Item Code | Item Description | Quantity | Status |
-| :--- | :--- | :---: | :---: |
-| \`TAE/2880/2\` | Mumbai Bedside 1 Drawer | **5 / 5** | ✅ Completed |
-| \`TAE/2856/30\` | Lloyd Highboard | **3 / 6** | ⏳ In Progress |
+| Item Code | Sub Order | Item Description | Buyer | Size | CBM | Quantity | Status | Sanding | Polish | Carpenter | Fitting | Wood Supplier | Entry Date | Target Date |
+| :--- | :--- | :--- | :--- | :--- | :---: | :---: | :---: | :--- | :--- | :--- | :--- | :--- | :---: | :---: |
+| \`TAE/2880\` | TAE/2880/2 | Mumbai Bedside 1 Drawer | F-2 | 45x40x60 Cm | 0.11 | **5 / 5** | ✅ Completed | Kamlesh 5/5 (12 Oct) | Deeparam 5/5 (15 Oct) | Chunaram 5/5 (18 Oct) | Chandaram 5/5 (20 Oct) | Thar International | 10 Oct | 30 Oct |
 (blank line)
 ---
-**Total Completed:** <n> Jobs | **In Progress:** <n> Jobs | **Status:** <short summary, e.g. All items cleared>
-RULES: the H2 heading must start with an icon: 👷 for contractor/carpenter, 🚚 for supplier/wood supplier, 🧑‍💼 for buyer, 🏭 for department/other. Item Code always inside backticks (monospace). Item Description in clean Title Case. Quantity always bold as **Done / Total**. Status badge: ✅ Completed when done equals total, ⏳ In Progress when done is less than total, 🆕 Not Started when done is 0. Put one table row per item, header row and the |:---|:---:| alignment row exactly as shown, each row on its own line. Footer line after a --- separator with the real totals. Use only real data from the records; never invent codes, quantities or names. Short chit-chat or one-line answers stay plain text. `;
+**Total Completed:** <n> Jobs | **In Progress:** <n> Jobs | **Status:** <short summary>
+FULL DETAILS RULE: every row MUST show ALL these columns filled from the data: Item Code (the TAE number in backticks), Sub Order, item name, Buyer, Size with unit, CBM, Quantity, Status, and the contractor of EVERY stage: Sanding contractor, Polish contractor, Carpenter, Fitting, each written as Name done/allocated (completion date), put several names in one cell separated by <br> or comma, then Wood Supplier (for carpenter rows also the supplier of that row), Entry Date and Target Date. Never drop a column, never summarise, never leave out polish contractor, date or wood supplier. If a value really is not in the data write — in that cell. If the user asks for details (detail, poori detail, full, sab kuch, kaun polish wala, kaun supplier, date) or about one TAE/item, show this complete table and also any packing or note information that exists. Icons: 👷 contractor/carpenter, 🎨 polish contractor, 🛠️ sanding contractor, 🚚 supplier/wood supplier, 🧑‍💼 buyer, 🏭 other. Item Code always in backticks. Description in Title Case. Quantity bold as **Done / Total**. Status badge: ✅ Completed when done equals total, ⏳ In Progress when done is less than total, 🆕 Not Started when done is 0. Header row and the |:---| alignment row exactly as shown, each row on its own line. Use only real data; never invent codes, quantities or names. Short chit-chat or one-line answers stay plain text. `;
 
 /* ---- Safe renderer for AI-generated ERP HTML cards ---- */
 function looksHtml(t){return /^\s*<div[^>]*class=['"][^'"]*erpCard/i.test(String(t||''));}
@@ -8637,6 +8644,14 @@ function mdHtml(text){
       let al=[],body=rows;
       if(rows.length>1&&/^[\s|:\-]+$/.test(rows[1])){al=row(rows[1]).map(c=>/^:-+:$/.test(c)?'center':/-+:$/.test(c)?'right':'left');body=[rows[0]].concat(rows.slice(2));}
       const hd=al.length>0;
+      if(hd&&row(body[0]).length>=8&&body.length>1){
+        const H=row(body[0]);let cs='<div class="mdCards">';
+        body.slice(1).forEach(r=>{const v=row(r);
+          const g=n=>{const k=H.findIndex(x=>x.toLowerCase()===n);return k<0?'':(v[k]||'')};
+          const used=['item code','item description','status'];
+          cs+='<div class="mdCard"><div class="mdCh"><span>'+mdInline(g('item code'))+'</span><span class="mdSt">'+mdInline(g('status'))+'</span></div>'+(g('item description')?'<div class="mdCt">'+mdInline(g('item description'))+'</div>':'')+'<div class="mdCg">'+H.map((h,k)=>used.includes(h.toLowerCase())?'':'<div class="mdCr"><b>'+mdInline(h)+'</b><span>'+mdInline(v[k]!=null&&v[k]!==''?v[k]:'—')+'</span></div>').join('')+'</div></div>';});
+        out.push(cs+'</div>');continue;
+      }
       let t='<div class="taeT"><table class="mdT">';
       body.forEach((r,ri)=>{const h=hd&&ri===0,tg=h?'th':'td';t+=(h?'<thead>':'')+'<tr>'+row(r).map((c,k)=>'<'+tg+' style="text-align:'+(al[k]||'left')+'">'+mdInline(c)+'</'+tg+'>').join('')+'</tr>'+(h?'</thead><tbody>':'');});
       out.push(t+(hd?'</tbody>':'')+'</table></div>');continue;
@@ -8666,11 +8681,12 @@ function dataDigest() {
     const W = (A().work || []).slice(), rows = W.map(x => { let c = false; try { c = !!statusOf(x).complete; } catch (_) {} return { x, c }; });
     rows.sort((p, q) => p.c - q.c); const out = []; let len = 0;
     for (const { x, c } of rows) {
-      const stg = STORD.map(k => { const sp = splitsOf(x, k); return sp.length ? k[0].toUpperCase() + ':' + sp.map(p => p.name + ' ' + (p.done || 0) + '/' + (p.qty || 0)).join('+') : ''; }).filter(Boolean).join(' ');
-      const line = [x.subOrder || x.orderNo, x.itemCode, x.itemName, x.buyer, 'qty' + x.qty, x.woodSupplier && ('ws:' + x.woodSupplier), x.targetDate && ('target ' + x.targetDate), c ? 'COMPLETE' : 'RUNNING', stg].filter(Boolean).join(' | ');
-      if (len + line.length > 90000) break; out.push(line); len += line.length + 1;
+      const stg = STORD.map(k => { const sp = splitsOf(x, k); return sp.length ? STL[k] + ': ' + sp.map(p => p.name + ' ' + (p.done || 0) + '/' + (p.qty || 0) + (p.date ? ' on ' + p.date : '') + (p.supplier ? ' ws:' + p.supplier : '')).join(' + ') : ''; }).filter(Boolean).join(' ; ');
+      const kv = (l, v) => (v != null && String(v).trim() !== '') ? l + ' ' + v : '', pk = (x.packingSplits || []).map(p => p.qty + ' on ' + p.date).join(', ');
+      const line = [x.orderNo, x.subOrder, x.itemCode, x.itemName, kv('buyer', x.buyer), kv('size', sizeTxt(x)), kv('cbm', x.cbm), 'qty ' + x.qty, kv('wood supplier', x.woodSupplier), kv('entry date', x.date), kv('target date', x.targetDate), c ? 'COMPLETE' : 'RUNNING', stg, kv('packed', pk)].filter(Boolean).join(' | ');
+      if (len + line.length > 150000) break; out.push(line); len += line.length + 1;
     }
-    return 'Total entries: ' + W.length + '. Today: ' + todayStr() + '. (S=Sanding P=Polish C=Carpenter F=Fitting, format name done/allocated)\n' + out.join('\n');
+    return 'Total entries: ' + W.length + '. Today: ' + todayStr() + '. (each stage: Sanding / Polish / Carpenter / Fitting = contractor name done/allocated on completion date; ws = wood supplier of that carpenter row)\n' + out.join('\n');
   } catch (_) { return ''; }
 }
 function setDot(state, msg) {
@@ -9063,7 +9079,7 @@ function pump() {
   if (m.who === 'u') { log.push(m); return pump(); }
   busy = 1; RB.mood('think'); draw(true); const go = () => { log.push(m); busy = 0; RB.mood(''); pump(); };
   const ln = String(m.text || '').split('\n');
-  if (!api.fast && ln.length > 2 && !looksHtml(m.text) && looksMd(m.text)) {
+  if (false) {
     const d = Math.max(35, Math.min(110, 2600 / ln.length));
     setTimeout(() => { m.rev = 0; log.push(m); RB.mood(''); const iv = setInterval(() => { m.rev++; if (m.rev >= ln.length) { clearInterval(iv); delete m.rev; busy = 0; draw(); pump(); } else draw(); }, d); }, 150);
   } else if (api.fast) go(); else setTimeout(go, 150 + Math.random() * 250);
@@ -9073,9 +9089,28 @@ function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
   typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
-  el.innerHTML = log.map((m, i) => { const g = (i && log[i - 1].who === m.who ? ' g' : '') + (m.seen ? ' nA' : ''); m.seen = true; return m.who === 'u' ? '<div class="taeM u' + g + '">' + esc(m.text) + '</div>' : (looksHtml(m.text) ? '<div class="taeM b erp' + g + '">' + sanitizeErp(m.text) : looksMd(m.text) ? '<div class="taeM b md' + g + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) : '<div class="taeM b' + g + '">' + esc(m.text)) + (m.rev != null ? '' : (m.html || '')) + (m.chips.length && m.rev == null ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '') + '</div>'; }).join('') + (typing ? '<div class="taeM b taeDots"><i></i><i></i><i></i></div>' : '');
-  if (keep) el.appendChild(keep);
-  el.scrollTop = el.scrollHeight;
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 140; let added = false;
+  const dots = el.querySelector(':scope > .taeDots');
+  const nodes = [...el.querySelectorAll(':scope > .taeM[data-i]')];
+  const mk = h => { const t = document.createElement('div'); t.innerHTML = h; return t.firstChild; };
+  log.forEach((m, i) => {
+    const g = (i && log[i - 1].who === m.who ? ' g' : '');
+    const chips = (m.chips && m.chips.length && m.rev == null) ? '<div class="taeC">' + m.chips.map(c => chipHtml(c, i !== lb)).join('') + '</div>' : '';
+    const tail = (m.rev != null ? '' : (m.html || '')) + chips + '</div>';
+    let h;
+    if (m.who === 'u') h = '<div class="taeM u' + g + '" data-i="' + i + '">' + esc(m.text) + '</div>';
+    else if (looksHtml(m.text)) h = '<div class="taeM b erp' + g + '" data-i="' + i + '">' + sanitizeErp(m.text) + tail;
+    else if (looksMd(m.text)) h = '<div class="taeM b md' + g + '" data-i="' + i + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) + tail;
+    else h = '<div class="taeM b' + g + '" data-i="' + i + '">' + esc(m.text) + tail;
+    const old = nodes[i];
+    if (!old) { const n = mk(h); n.__k = h; el.insertBefore(n, dots || keep || null); added = true; }
+    else if (old.__k !== h) { const n = mk(h); n.classList.add('nA'); n.__k = h; old.replaceWith(n); }
+  });
+  for (let i = log.length; i < nodes.length; i++) nodes[i].remove();
+  if (typing && !dots) { const d = mk('<div class="taeM b taeDots"><i></i><i></i><i></i></div>'); el.insertBefore(d, keep || null); added = true; }
+  else if (!typing && dots) dots.remove();
+  if (keep && keep.parentNode === el && keep !== el.lastElementChild) el.appendChild(keep);
+  if (added || near || typing) el.scrollTop = el.scrollHeight;
 }
 function pendCtx() { try { return S.items.map(u => (u.tae ? 'TAE/' + u.tae.n + (u.sub ? '/' + u.sub : '') : 'TAE ?') + ' ' + (u.name || u.raw || 'unknown') + ' ' + (STL[u.stage] || u.stage) + ' done ' + (u.done != null ? u.done : '?') + (u.qty != null ? ' of ' + u.qty : '')).join('; '); } catch (_) { return ''; } }
 function smart(text) {
@@ -9120,6 +9155,7 @@ document.addEventListener('change', e => { const t = e.target; if (!t || !t.form
   else if (t.name === 'buyer') t.value = normBuyer(t.value); }, true);
 const api = { handle, send, pick, S, log, fast: false, say, hold(n) { wait = Math.max(0, wait + n); draw(); } };
 window.TAE_ASSISTANT = api;
+window.__tharDigest = dataDigest;
 /* registered craftsmen by stage, read by the speech/AI layer */
 window.__tharVocab = function () { try { const o = {}; STORD.forEach(k => { o[STL[k] || k] = candNames(k, null).map(v => v.name); }); return o; } catch (e) { return {}; } };
 if (typeof document !== 'undefined' && document.body) init();
@@ -9350,6 +9386,7 @@ function nstore(a){const t=String((a&&a.store)||'work').toLowerCase();return STO
 function brief(r){const o={};Object.keys(r||{}).filter(k=>r[k]===null||typeof r[k]!=='object').slice(0,8).forEach(k=>o[k]=r[k]);return o}
 function genericFind(st,args){const q=String(args.query||'').toLowerCase(),f=args.filters||{};return store(st).map((r,i)=>({r,i})).filter(({r})=>{if(q&&!JSON.stringify(r).toLowerCase().includes(q))return false;return Object.keys(f).every(k=>f[k]==null||f[k]===''||String(r[k]==null?'':r[k]).toLowerCase().includes(String(f[k]).toLowerCase()))}).slice(0,30).map(({r,i})=>({index:i,id:r.id||'',store:st,summary:brief(r)}))}
 function cfg(){try{return typeof llmCfg==='function'?llmCfg():null}catch(e){return null}}
+function dtl(r){r=r||{};const o={cbm:r.cbm,woodSupplier:r.woodSupplier,entryDate:r.date,targetDate:r.targetDate};['sanding','polish','carpenter','fitting'].forEach(k=>{const a=r[k+'Splits']||[];if(a.length)o[k]=a.map(p=>p.name+' '+(p.done||0)+'/'+(p.qty||0)+(p.date?' ('+p.date+')':'')+(p.supplier?' ws:'+p.supplier:'')).join(', ')});const pk=(r.packingSplits||[]).map(p=>p.qty+' ('+p.date+')').join(', ');if(pk)o.packing=pk;return o}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function ensurePanel(){const log=$('taeLog');if(!log||$('aiTxnPanel'))return;const p=document.createElement('section');p.id='aiTxnPanel';p.hidden=true;log.appendChild(p)}
 function fmt(v){if(v===undefined||v===null||v==='')return '—';return typeof v==='object'?JSON.stringify(v):String(v)}
@@ -9387,7 +9424,7 @@ if(m.length===1)return {hit:Object.assign(m[0],{store:'work'})};
 return {error:m.length?'Multiple records match. Ask the user which sub-order.':'No matching record found.',matches:m.map(z=>({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty}))};}
 function cleanFields(f){const o={},BAD={'__proto__':1,'constructor':1,'prototype':1,'id':1,'_id':1};Object.keys(f||{}).forEach(k=>{if(BAD[k])return;let v=f[k];if(k==='size'&&typeof normSize==='function'){try{const z=normSize(String(v));if(z&&z.size)v=z.size}catch(e){}}o[k]=v});return o}
 function provisional(name,a){a=a||{};const st=nstore(a);if(!st)return {error:'store must be work, orders or repairs'};
-if(name==='search_records'){if(st!=='work')return {matches:genericFind(st,a)};return {matches:findRecords(a).map(z=>({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty}))};}
+if(name==='search_records'){if(st!=='work')return {matches:genericFind(st,a)};return {matches:findRecords(a).map(z=>Object.assign({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty},dtl(z.record)))};}
 if(name==='open_record'){if(st==='work'&&!a.tae&&!a.recordId)return {error:'TAE number is required to open a record.'};const r=locate(a);if(r.error)return r;TX.opened=r.hit;return {opened:true,store:st,record:r.hit.record,notice:'Record opened (read-only, nothing changed). Show the key fields to the user, confirm it is the right one, then ask what to change.'};}
 let change;
 if(name==='propose_add'){if(!a.record||typeof a.record!=='object')return {error:'record is required'};change={op:'add',store:st,record:cleanFields(a.record)};}
@@ -9402,7 +9439,7 @@ else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split
 else if(change.op==='add'){const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store);if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
-async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
 const res=await fetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
