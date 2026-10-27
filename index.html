@@ -1640,7 +1640,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.74';
+const APP_VER = 'V1.0.75';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -8676,7 +8676,7 @@ const THINK = [['low', 'Low', 'Quick and efficient'], ['medium', 'Medium', 'Bala
 const modelRank = id => { const i = MODEL_INFO.findIndex(x => x[0].test(id)); return i < 0 ? 99 : i; };
 const modelLabel = id => { const m = MODEL_INFO.find(x => x[0].test(id)); return m ? m[1] + ' \u2014 ' + m[2] : String(id).replace(/^gemini-/, ''); };
 function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (c.provider !== 'gemini' && c.provider !== 'openai') c.provider = /^(AIza|AQ\.)/.test(c.key) ? 'gemini' : 'openai'; c.url = PROV[c.provider].url; if (c.provider === 'gemini') { if (!c.model || /^gpt/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } else if (!c.model || /^gemini/i.test(c.model)) c.model = PROV.openai.def; if (!['low', 'medium', 'high'].includes(c.think)) c.think = 'low'; return c; } catch (_) { return null; } }
-const LLM_HIST = [];
+window.__llmCfg = llmCfg; const LLM_HIST = [];
 function dataDigest() {
   try {
     const W = (A().work || []).slice(), rows = W.map(x => { let c = false; try { c = !!statusOf(x).complete; } catch (_) {} return { x, c }; });
@@ -9671,6 +9671,16 @@ var t=setInterval(function(){
 #aiCam .tray{display:flex;gap:6px;padding:8px 12px;background:#0b0c10;overflow-x:auto;min-height:0}
 #aiCam .tray:empty{display:none}
 #aiCam .tray img{height:54px;border-radius:8px;border:1px solid rgba(255,255,255,.25)}
+
+#aiAttTray{display:flex;align-items:center;gap:8px;padding:6px 14px 0;overflow-x:auto;scrollbar-width:none}
+#aiAttTray[hidden]{display:none}
+#aiAttTray::-webkit-scrollbar{display:none}
+.aiAtt{flex:none;display:flex;align-items:center;gap:6px;max-width:190px;padding:5px 6px 5px 5px;border-radius:14px;background:#1f2230;border:1px solid rgba(255,255,255,.1);color:#e6e8f2;font-size:12px;animation:slideUpFade .28s ease both}
+.aiAtt img{width:34px;height:34px;object-fit:cover;border-radius:9px}
+.aiAtt span{width:34px;height:34px;display:grid;place-items:center;font-size:20px}
+.aiAtt em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:96px}
+.aiAtt button{border:0;background:rgba(255,255,255,.1);color:#fff;width:22px;height:22px;border-radius:50%;font-size:11px;padding:0}
+.aiAttGo{flex:none;border:0;border-radius:9999px;padding:10px 16px;font-weight:700;font-size:13px;color:#fff;background:linear-gradient(135deg,#38bdf8,#a855f7);margin-left:auto}
 </style>
 <script id="aiScanJs">
 (function(){
@@ -9714,9 +9724,16 @@ async function pdfFile(f){
 }
 
 /* ---------- AI ---------- */
-async function askAI(imgs,txt){
-  var c=typeof llmCfg==='function'?llmCfg():null;if(!c)throw Error('NOAI');
-  var content=[{type:'text',text:'Read these order sheet page(s) and return the JSON.'+(txt?'\nExtra text layer from the PDF (use to double-check digits):'+txt.slice(0,9000):'')}];
+function getCfg(){
+  try{if(typeof window.__llmCfg==='function'){var c=window.__llmCfg();if(c)return c}}catch(e){}
+  try{var s=JSON.parse(localStorage.getItem('taeLlm')||'null');if(!(s&&s.key))return null;
+    var g=s.provider==='gemini'||(s.provider!=='openai'&&/^(AIza|AQ\.)/.test(s.key));
+    s.url=g?'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions':'https://api.openai.com/v1/chat/completions';
+    if(g){if(!s.model||/^gpt/i.test(s.model))s.model='gemini-3.5-flash-lite'}else if(!s.model||/^gemini/i.test(s.model))s.model='gpt-6-luna';
+    return s}catch(e){return null}}
+async function askAI(imgs,txt,note){
+  var c=getCfg();if(!c)throw Error('NOAI');
+  var content=[{type:'text',text:'Read these order sheet page(s) and return the JSON.'+(note?'\nUser instruction (follow it, e.g. which rows/supplier/code to take): '+note:'')+(txt?'\nExtra text layer from the PDF (use to double-check digits):'+txt.slice(0,9000):'')}];
   imgs.forEach(function(u){content.push({type:'image_url',image_url:{url:u}})});
   var r=await fetch(c.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.key},body:JSON.stringify({model:c.model,messages:[{role:'system',content:SYS},{role:'user',content:content}]})});
   if(!r.ok)throw Error('AI error '+r.status);
@@ -9764,9 +9781,9 @@ function report(s){
   say(L.join('\n'));
 }
 
-async function run(parts,label){
+async function run(parts,label,note){
   openAssistant();var a=A();if(!a)return;
-  a.log.push({who:'u',text:'📷 '+label});a.hold(1);
+  a.log.push({who:'u',text:'📷 '+label+(note?'\n'+note:'')});a.hold(1);
   try{
     var imgs=[],txt='';
     for(var i=0;i<parts.length;i++){var p=parts[i];
@@ -9774,7 +9791,7 @@ async function run(parts,label){
       else if(/pdf$/i.test(p.type)||/\.pdf$/i.test(p.name)){var r=await pdfFile(p);imgs=imgs.concat(r.imgs);txt+=r.txt}
       else imgs.push(await imgFile(p));}
     if(!imgs.length)throw Error('Koi page nahi mila');
-    var d=await askAI(imgs.slice(0,8),txt);report(stage(d));
+    var d=await askAI(imgs.slice(0,8),txt,note);report(stage(d));
   }catch(e){
     if(e.message==='NOAI')say('Photo/PDF padhne ke liye AI key chahiye. Assistant ke ⚙ settings mein Gemini ya ChatGPT key daalo, phir dobara bhejo.');
     else say('Sheet nahi padh paya: '+(e.message||e)+'. Photo seedhi aur saaf lekar dobara try karo.');
@@ -9794,10 +9811,30 @@ function camera(){
   o.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var x=b.dataset.x;
     if(x==='close')close();
     else if(x==='shot'){if(!v.videoWidth)return;var u=toJpeg(v,v.videoWidth,v.videoHeight,2000);shots.push(u);var im=new Image();im.src=u;tray.appendChild(im);go.disabled=false;go.textContent='Scan ('+shots.length+')'}
-    else if(x==='go'){var s=shots.slice();close();run(s,'Order sheet photo ('+s.length+')')}});
+    else if(x==='go'){var s=shots.slice();close();stageAdd(s)}});
 }
-function pickCapture(){var i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)run(f,'Order sheet photo')};i.click()}
-function pick(){var i=document.createElement('input');i.type='file';i.multiple=true;i.accept='image/*,application/pdf,.pdf';i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)run(f,f.map(function(x){return x.name}).join(', '))};i.click()}
+function pickCapture(){var i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)stageAdd(f)};i.click()}
+function pick(){var i=document.createElement('input');i.type='file';i.multiple=true;i.accept='image/*,application/pdf,.pdf';i.onchange=function(){var f=[].slice.call(i.files||[]);if(f.length)stageAdd(f)};i.click()}
+
+
+/* ---------- attachment tray: choose files, add a note, then send ---------- */
+var att=[],tray=null;
+function ensureTray(){if(tray&&tray.isConnected)return tray;var f=document.getElementById('taeForm');if(!f)return null;tray=document.createElement('div');tray.id='aiAttTray';f.parentNode.insertBefore(tray,f);return tray}
+function renderTray(){var t=ensureTray();if(!t)return;t.innerHTML='';t.hidden=!att.length;
+  att.forEach(function(a,i){var c=document.createElement('div');c.className='aiAtt';
+    if(a.thumb){var im=new Image();im.src=a.thumb;c.appendChild(im)}else{var s=document.createElement('span');s.textContent='📄';c.appendChild(s)}
+    var n=document.createElement('em');n.textContent=a.name;c.appendChild(n);
+    var x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('aria-label','Hatao');x.onclick=function(){att.splice(i,1);renderTray()};c.appendChild(x);t.appendChild(c)});
+  if(att.length){var g=document.createElement('button');g.type='button';g.className='aiAttGo';g.textContent='Scan ➤';g.onclick=fire;t.appendChild(g)}}
+function stageAdd(list){list.forEach(function(p){
+    if(typeof p==='string')att.push({data:p,thumb:p,name:'Photo '+(att.length+1)});
+    else{var pdf=/pdf$/i.test(p.type)||/\.pdf$/i.test(p.name);att.push({data:p,thumb:pdf?'':URL.createObjectURL(p),name:p.name||'Photo'})}});
+  renderTray();openAssistant();var i=document.getElementById('taeIn');if(i)i.focus()}
+function fire(){if(!att.length)return;var ti=document.getElementById('taeIn'),note=ti?ti.value.trim():'';
+  var parts=att.map(function(a){return a.data}),label=att.map(function(a){return a.name}).join(', ');att=[];renderTray();
+  if(ti){ti.value='';ti.style.height='auto';ti.dispatchEvent(new Event('input',{bubbles:true}))}run(parts,label,note)}
+var pt=setInterval(function(){var f=document.getElementById('taeForm');if(f){clearInterval(pt);
+  f.addEventListener('submit',function(e){if(att.length){e.preventDefault();e.stopImmediatePropagation();fire()}},true)}},50);
 
 window.__aiScan={camera:camera,pick:pick,run:run};
 
