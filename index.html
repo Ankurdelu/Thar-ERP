@@ -9513,5 +9513,123 @@ window.THAR_AI_TX={state:TX};
 })();
 </script>
 
+<!-- ===== AI Chat UI/UX layer: neon thinking capsule · floating pill input · cascading reveal ===== -->
+<style id="aiFxStyle">
+@property --angle{syntax:'<angle>';inherits:false;initial-value:0deg}
+@keyframes rotateGlow{to{--angle:360deg}}
+@keyframes aiThIn{from{opacity:0;transform:translateY(8px) scale(.94)}to{opacity:1;transform:none}}
+@keyframes aiThOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-8px) scale(.97)}}
+@keyframes aiLbl{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes slideUpFade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes aiMic{0%,100%{transform:scale(1.15);filter:drop-shadow(0 0 6px #38bdf8)}50%{transform:scale(1.26);filter:drop-shadow(0 0 12px #38bdf8)}}
+
+/* 1 · Thinking / Personalising capsule */
+#taeLog>.taeDots{display:none!important}
+#aiThinkSlot{position:relative;height:0;z-index:6;pointer-events:none}
+.aiThink{position:absolute;left:0;right:0;bottom:12px;margin:auto;width:max-content;max-width:calc(100% - 32px);padding:1.5px;border-radius:9999px;isolation:isolate;opacity:0;
+  background:conic-gradient(from var(--angle),transparent 60%,#ec4899 80%,#a855f7 95%,transparent 100%),rgba(255,255,255,.08);
+  box-shadow:0 0 16px rgba(236,72,153,.45);will-change:transform,opacity}
+.aiThink[hidden]{display:none}
+.aiThink::before{content:"";position:absolute;inset:-2px;border-radius:inherit;background:inherit;filter:blur(10px);opacity:.7;z-index:-1}
+.aiThink.in{animation:rotateGlow 2.4s linear infinite,aiThIn .36s cubic-bezier(.2,.8,.2,1) forwards}
+.aiThink.out{animation:rotateGlow 2.4s linear infinite,aiThOut .32s cubic-bezier(.4,0,.2,1) forwards}
+.aiT-in{display:flex;align-items:center;gap:9px;padding:7px 16px 7px 7px;border-radius:9999px;background:#15161b;color:#eceef6;font-weight:600;font-size:13.5px;line-height:1;white-space:nowrap}
+.aiT-av{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#38bdf8,#a855f7 60%,#ec4899);box-shadow:0 0 10px rgba(168,85,247,.5)}
+.aiT-av svg{width:14px;height:14px;color:#fff}
+.aiT-lbl.sw{animation:aiLbl .35s ease both}
+
+/* 2 · Floating pill input */
+#taeBox #taeForm.taeF{position:relative;margin:6px 12px 10px;padding:6px;gap:2px;align-items:flex-end;
+  background:var(--aiBar,#202127);border:1px solid rgba(255,255,255,.08);border-radius:28px;
+  box-shadow:0 4px 18px rgba(0,0,0,.35);transition:all .28s cubic-bezier(.2,.8,.2,1)}
+#taeBox #taeForm.taeF:focus-within{margin:6px 6px 10px;padding:8px;background:#282a36;border-color:rgba(56,189,248,.45);
+  box-shadow:0 0 0 2px rgba(56,189,248,.35),0 0 32px rgba(168,85,247,.22),0 8px 24px rgba(0,0,0,.5)}
+@media (min-width:700px){
+  #taeBox #taeForm.taeF{width:calc(100% - 24px);max-width:720px;margin-left:auto;margin-right:auto}
+  #taeBox #taeForm.taeF:focus-within{max-width:748px;width:calc(100% - 12px)}}
+#taeBox #taeForm #taeIn{flex:1;min-width:0;background:transparent;border:0!important;box-shadow:none!important;outline:none;border-radius:0;
+  padding:9px 6px;min-height:40px;line-height:22px;font-size:15.5px;color:var(--text)}
+#taeBox #taeForm #taeIn::placeholder{color:#9aa0b3;opacity:1}
+#taeBox #taeForm>button.aiIc,#taeBox #taeForm>button[aria-label="Send"]{flex:none;width:40px;height:40px;min-width:40px;padding:0;border:0;border-radius:50%;
+  display:grid;place-items:center;background:transparent;color:#c4c7d6;box-shadow:none;cursor:pointer;
+  transition:transform .22s cubic-bezier(.2,.8,.2,1),background .22s,color .22s,box-shadow .22s,filter .22s}
+#taeBox #taeForm>button svg{width:22px;height:22px;display:block;margin:0}
+#taeBox #taeForm>button.aiIc:hover,#taeBox #taeForm>button[aria-label="Send"]:hover{background:rgba(255,255,255,.09);color:#fff}
+#taeBox #taeForm>button:active{transform:scale(.9)}
+.aiPlus svg{transition:transform .28s cubic-bezier(.2,.8,.2,1)}.aiPlus.on svg{transform:rotate(45deg)}
+.aiPlus.on{background:rgba(56,189,248,.16)!important;color:#38bdf8!important}
+#taeBox #taeForm>button[aria-label="Send"][data-m="send"]{background:linear-gradient(135deg,#38bdf8,#a855f7);color:#fff;box-shadow:0 4px 14px rgba(56,189,248,.35)}
+#taeBox #taeForm>button[aria-label="Send"].aiRec{background:rgba(56,189,248,.16)!important;color:#38bdf8!important;
+  box-shadow:0 0 0 1px rgba(56,189,248,.5)!important;animation:aiMic 1.4s ease-in-out infinite!important}
+.aiCapsOff{display:none!important}
+body.light #taeForm.taeF{--aiBar:#fff;border-color:rgba(15,23,42,.12)}
+body.light #taeForm.taeF:focus-within{background:#fff}
+body.light #taeForm.taeF .aiIc,body.light #taeForm.taeF [aria-label="Send"]{color:#475569}
+
+/* 3 · Cascading reveal (bottom → top, staggered) */
+.aiSf{opacity:0;animation:slideUpFade .38s ease forwards;animation-delay:calc(var(--i) * 0.05s)}
+#taeLog{overscroll-behavior:contain}
+@media (prefers-reduced-motion:reduce){
+  .aiSf{animation:none!important;opacity:1!important}
+  .aiThink.in,.aiThink.out{animation:none!important;opacity:1}
+  #taeBox #taeForm>button[aria-label="Send"].aiRec{animation:none!important;transform:scale(1.15);filter:drop-shadow(0 0 8px #38bdf8)}}
+</style>
+<script id="aiFxJs">
+(function(){
+if(window.__aiFx)return;window.__aiFx=1;
+var PLUS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+var LENS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.2"/></svg>';
+var USER='<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7z"/></svg>';
+var SEL='.mdH,.mdP,.mdCard,.mdHr,tr,li,.erpCard>*,.taeC button';
+
+function btn(cls,label,html){var b=document.createElement('button');b.type='button';b.className='aiIc '+cls;b.setAttribute('aria-label',label);b.title=label;b.innerHTML=html;return b}
+
+function cascade(node){
+  if(node.__sf||!node.classList||!node.classList.contains('b'))return;node.__sf=1;
+  var all=[].slice.call(node.querySelectorAll(SEL));
+  var leaf=all.filter(function(e){return !all.some(function(o){return o!==e&&e.contains(o)})});
+  leaf.forEach(function(e,i){e.style.setProperty('--i',Math.min(i,16));e.classList.add('aiSf')});
+}
+
+function wire(form,ti){
+  var log=document.getElementById('taeLog'),caps=document.getElementById('taeCaps'),send=form.querySelector('button[aria-label="Send"]');
+  /* placeholder */
+  var PH='Ask anything';ti.placeholder=PH;
+  new MutationObserver(function(){var p=ti.placeholder;if(p!==PH&&p.indexOf('🎙')!==0)ti.placeholder=PH}).observe(ti,{attributes:true,attributeFilter:['placeholder']});
+  /* + and lens */
+  var plus=btn('aiPlus','More options',PLUS);
+  plus.onclick=function(){var off=caps&&caps.classList.toggle('aiCapsOff');plus.classList.toggle('on',!off);ti.focus()};
+  form.insertBefore(plus,ti);
+  var lens=btn('aiLens','Lens',LENS),file=document.createElement('input');
+  file.type='file';file.accept='image/*';file.setAttribute('capture','environment');file.hidden=true;
+  lens.onclick=function(){file.click()};
+  file.onchange=function(){var f=file.files&&file.files[0];file.value='';if(f&&window.TAE_ASSISTANT)window.TAE_ASSISTANT.say('📷 '+f.name+' received. Image input is not connected to the ERP assistant yet — please type or speak the details.')};
+  form.insertBefore(lens,send);form.appendChild(file);
+  /* thinking capsule */
+  var slot=document.createElement('div');slot.id='aiThinkSlot';
+  slot.innerHTML='<div class="aiThink" hidden role="status" aria-live="polite"><span class="aiT-in"><span class="aiT-av">'+USER+'</span><span class="aiT-lbl"></span></span></div>';
+  form.parentNode.insertBefore(slot,form);
+  var th=slot.firstChild,lbl=th.querySelector('.aiT-lbl'),on=false,hT,lT,eT;
+  function setLbl(t){lbl.textContent=t;lbl.classList.remove('sw');void lbl.offsetWidth;lbl.classList.add('sw')}
+  function show(){clearTimeout(hT);on=true;th.hidden=false;th.classList.remove('out');void th.offsetWidth;th.classList.add('in');
+    setLbl('Personalising');clearTimeout(lT);lT=setTimeout(function(){setLbl('Thinking…')},1600)}
+  function hide(){on=false;clearTimeout(lT);th.classList.remove('in');th.classList.add('out');
+    hT=setTimeout(function(){th.hidden=true;th.classList.remove('out')},340)}
+  function evalState(){var has=!!log.querySelector(':scope>.taeDots');if(has&&!on)show();else if(!has&&on)hide()}
+  /* log observer: capsule state (debounced vs. flicker between queued messages) + cascade */
+  new MutationObserver(function(ms){
+    clearTimeout(eT);eT=setTimeout(evalState,160);
+    ms.forEach(function(m){[].forEach.call(m.addedNodes,function(n){if(n.nodeType===1)cascade(n)})});
+  }).observe(log,{childList:true});
+  evalState();
+}
+
+var t=setInterval(function(){
+  var f=document.getElementById('taeForm'),i=document.getElementById('taeIn');
+  if(f&&i&&document.getElementById('taeLog')&&!f.dataset.aiFx){f.dataset.aiFx='1';clearInterval(t);wire(f,i)}
+},50);
+})();
+</script>
+
 </body>
 </html>
