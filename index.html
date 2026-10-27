@@ -9365,7 +9365,11 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
 <script id="tharDynamicAI">
 (function(){
 'use strict';
-const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null, opened:null, q:[], alts:null, altsFor:''};
+const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null, opened:null, q:[], alts:null, altsFor:'', askSave:false};
+const LIVE={on:false,rec:null,speaking:false,pending:0,interim:'',seen:{},obs:null,safety:null,voices:[]};
+const YESW=/^(?:ok(?:ay)?\s*)?(?:haan|han|haa|ha|yes|yeah|yep|ji|ji haan|theek hai|thik hai|kar do|kardo|karo|हाँ|हां|हा|जी|जी हाँ|जी हां|ठीक है|कर दो|करो)\s*[.!।]*$/i;
+const NOW=/^(?:nahi|nahin|no|na|mat|ruko|नहीं|ना|मत|रुको|रुकिए)\s*[.!।]*$/i;
+const LIVE_RULES='LIVE VOICE MODE. You are talking out loud with the user like a friendly colleague on a phone call, so be natural and warm, and you may chat casually about anything, not only ERP. Reply in the SAME language the user just spoke: if they speak Hindi or Hinglish answer in simple spoken Hindi written in Devanagari script, if they speak English answer in English. Use 1 to 2 short spoken sentences, no lists, no markdown, no emojis, no symbols, and never read the whole draft aloud, only say what changed. When a PDF or new-entry draft is pending, its entries are NOT saved records: to open or read one call show_draft_entry, and to change its fields call edit_draft_entry (with the entry number, or without it for the entry already open); never use propose_update for draft entries. For entries already saved in the database call show_record (it opens the entry on screen). When the user asks to change, add or fix something, call propose_update or propose_add straight away, then say in one short sentence what you changed and ask if you should save it (for example: save karun?). Nothing is saved until the user says yes or save. Field values you stage stay in English letters and digits. ';
 /* the chat engine's say() lives in its own closure; reach it through its public handle */
 const say=(t,o)=>{const a=window.TAE_ASSISTANT;return a&&a.say?a.say(t,o):false};
 /* ---- Hindi speech clean-up: numbers exactly as spoken ---- */
@@ -9404,7 +9408,7 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function ensurePanel(){const log=$('taeLog');if(!log||$('aiTxnPanel'))return;const p=document.createElement('section');p.id='aiTxnPanel';p.hidden=true;log.appendChild(p)}
 function fmt(v){if(v===undefined||v===null||v==='')return '—';return typeof v==='object'?JSON.stringify(v):String(v)}
 function recLabel(r,st){r=r||{};if(st&&st!=='work')return st+' · '+(r.name||r.title||r.orderNo||r.id||'');return 'TAE '+(r.tae||r.taeNo||r.orderNo||'?')+(r.subOrder||r.subOrderNo?' / Sub-order '+(r.subOrder||r.subOrderNo):'')+(r.itemName?' · '+r.itemName:'')}
-function showDraft(){ensurePanel();const p=$('aiTxnPanel');if(!p)return;p.hidden=!TX.draft;if(!TX.draft)return;const d=TX.draft;
+function showDraft(){ensurePanel();const p=$('aiTxnPanel');if(!p)return;p.hidden=!TX.draft;if(!TX.draft){TX.focus=null;return}const d=TX.draft;
 p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+draftStats(d)+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
 wireDraft(p);$('aiCommit').onclick=commit;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
 /* ===== field normalisation, duplicate check, editable draft, local commands ===== */
@@ -9467,19 +9471,53 @@ m=low.match(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*(\d{1,3})\b/)||
 if(m){const n=+m[1];let l=adds.filter(z=>{const g=grp(z.c.record.subOrder);return g.length&&+g[g.length-1]===n});if(!l.length&&adds[n-1])l=[adds[n-1]];return {list:l,ref:'entry '+n}}
 if(/\b(last|aakhri|akhri|akhir)\b/.test(low)&&adds.length)return {list:[adds[adds.length-1]],ref:'the last entry'};
 return null}
+
+
+function focusTg(adds){const f=TX.focus;if(!f)return null;const z=adds.find(x=>x.c===f);return z?{list:[z],ref:'the open entry'}:null}
+function entryNo(c){const g=grp((c.record||{}).subOrder);return g.length?g[g.length-1]:String(TX.draft?TX.draft.changes.indexOf(c)+1:'')}
+function focusEntry(c){TX.focus=c;if(!TX.draft)return;TX.draft.changes.forEach(x=>{if(x.op==='add')x._open=(x===c)});showDraft();
+setTimeout(()=>{try{const ci=TX.draft?TX.draft.changes.indexOf(c):-1,el=document.querySelector('#aiTxnPanel [data-tg="'+ci+'"]');if(el&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:'smooth'})}catch(e){}},80)}
+function entrySay(c){const r=c.record||{},n=entryNo(c),parts=[r.itemName,r.itemCode,r.size,(r.qty!==undefined&&r.qty!==''?r.qty+' pcs':''),(r.woodSupplier?'supplier '+r.woodSupplier:'')].filter(Boolean).join(', ');
+return LIVE.on?('एंट्री '+n+': '+(parts||'खाली')+'। क्या बदलना है?'):'Entry '+n+': '+(parts||'empty')+'. What should I change?'}
+function draftOpenCmd(raw){const adds=draftAdds();if(!adds.length)return null;
+const t=devaNorm(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();if(!t||t.length>100)return null;
+if(/(?:^|\s)(?:size|buyer|supplier|sup|qty|cbm|code|name|hatao|hata|remove|delete)(?=\s|$)/.test(t))return null;
+if(!/(?:^|\s)(?:open|show|dikhao|kholo|khol do|khol|next|previous|prev|pehli|pehla|first|last|aakhri|akhri|batao|read)(?=\s|$)/.test(t))return null;
+const cur=TX.focus?adds.findIndex(z=>z.c===TX.focus):-1;let idx=-1;
+if(/(?:^|\s)next(?=\s|$)/.test(t)){if(cur>=adds.length-1&&cur>=0)return LIVE.on?'यही आख़िरी एंट्री है।':'That is the last entry.';idx=cur<0?0:cur+1}
+else if(/(?:^|\s)(?:previous|prev)(?=\s|$)/.test(t)){if(cur<=0&&cur>=0)return LIVE.on?'यही पहली एंट्री है।':'That is the first entry.';idx=cur<0?0:cur-1}
+else if(/(?:^|\s)(?:pehli|pehla|first)(?=\s|$)/.test(t))idx=0;
+else if(/(?:^|\s)(?:last|aakhri|akhri)(?=\s|$)/.test(t))idx=adds.length-1;
+else{let tg=pickTargets(t,adds);if(!tg){const m=t.match(/(?:^|\s)(\d{1,2})(?:\s+(?:number|no|wali|wale|wala))?(?=\s|$)/);if(m)tg=pickTargets('entry '+m[1],adds)}
+if(!tg)return null;if(!tg.list.length)return LIVE.on?('ड्राफ़्ट में '+tg.ref+' नहीं मिली।'):'I could not find '+tg.ref+' in the draft.';idx=adds.indexOf(tg.list[0])}
+if(idx<0||idx>=adds.length)return null;focusEntry(adds[idx].c);return entrySay(adds[idx].c)}
+function devaNorm(s){return String(s||'').replace(/साइज़|साइज|आकार/g,' size ').replace(/बायर/g,' buyer ').replace(/सप्लायर|सप्लाईयर|सप्लाइयर/g,' supplier ').replace(/क्वांटिटी|क्वान्टिटी|मात्रा/g,' qty ').replace(/सीबीएम/g,' cbm ').replace(/कर\s*दो|करदो|कीजिए|कर\s*दीजिए/g,' kar do ').replace(/अगली|अगला|आगे/g,' next ').replace(/पिछली|पिछला/g,' previous ').replace(/पहली|पहला/g,' pehli ').replace(/आखिरी|आखरी|अंतिम/g,' last ').replace(/नंबर|नम्बर/g,' number ').replace(/बताओ|बताइए|पढ़ो/g,' batao ').replace(/डी\s*आई\s*ए\s*एम|डीआईएएम|डायम|डाइम|डियम/g,' diam ').replace(/एफ\s*एफ/g,' ff ').replace(/ए\s*एम|एएम/g,' am ').replace(/कोड/g,' code ').replace(/वाले|वाला|वाली/g,' wale ').replace(/रखो|रखें|रखिए|रखना/g,' rakho ').replace(/(^|\s)और(?=\s|$)/g,' aur ').replace(/(^|\s)ही(?=\s|$)/g,' hi ').replace(/सिर्फ़|सिर्फ|केवल/g,' sirf ').replace(/हटा\s*दो|हटाओ|हटाइए/g,' hatao ').replace(/खोल\s*दो/g,' kholo ').replace(/खोलो|खोलिए/g,' kholo ').replace(/(^|\s)खोल(?=\s|$)/g,' khol ').replace(/दिखाओ|दिखा\s*दो|दिखाइए/g,' dikhao ').replace(/ओपन/g,' open ').replace(/एंट्री|एन्ट्री/g,' entry ').replace(/टी\s*ए\s*ई/g,' tae ').replace(/\s+/g,' ')}
+function openUI(a){const m=findRecords({tae:a.tae,subOrder:a.subOrder,query:''});if(!m.length)return {error:'No matching record found.'};
+const h=m[0],r=work()[h.index];if(r)TX.opened=shape(r,h.index,'work');
+if(typeof viewWork==='function'&&h.id){try{viewWork(h.id)}catch(e){}}
+const box=$('taeBox');if(box){document.body.classList.remove('tae-open');if(LIVE.on)box.classList.add('aiMini');else box.classList.add('hidden')}
+const n=m.length,lab=h.subOrder||('TAE '+h.tae);
+const msg=LIVE.on?(n>1&&!a.subOrder?('टी ए ई '+grp(h.tae).join('')+' की '+n+' एंट्रियाँ हैं, पहली खोल दी है। कौन सी चाहिए, नंबर बोलिए।'):(lab+' खोल दी है। '+(h.itemName||'')+'. बोलिए क्या बदलना है?')):(n>1&&!a.subOrder?'TAE '+grp(h.tae).join('')+' has '+n+' entries. I opened the first one ('+lab+'). Tell me the sub-order number to open another.':'Opened '+lab+(h.itemName?' · '+h.itemName:'')+'.');
+return {opened:true,msg,matches:n,subOrder:h.subOrder,itemCode:h.itemCode,itemName:h.itemName,size:h.size,qty:h.qty,buyer:h.buyer,notice:'The entry is now open on screen. Tell the user in one short sentence and ask what to change.'}}
+function openCmd(raw){const t=devaNorm(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();if(!t||t.length>120)return null;
+if(!/(?:^|\s)(?:open|show|dikhao|dikha do|kholo|khol do|khol|dhundo|find)(?=\s|$)/.test(t))return null;
+let m=t.match(/(?:tae\s*\/?\s*)?(\d{3,6})\s*\/\s*(\d{1,3})\b/),tae,sub='',slash=!!m;
+if(m){tae=m[1];sub=m[2]}else{m=t.match(/(\d{3,6})(?:\s+(?:ki|ka|ke|sub\s*order|sub|entry|no|number)\.?)*(?:\s+#?(\d{1,3}))?(?=\s|$)/);if(!m)return null;tae=m[1];sub=m[2]||''}
+if(!slash&&!/\btae\b/.test(t)&&TX.draft)return null;
+const r=openUI({tae,subOrder:sub});if(r.error)return LIVE.on?('TAE '+tae+(sub?' '+sub:'')+' नहीं मिली।'):'I could not find TAE '+tae+(sub?'/'+sub:'')+'.';return r.msg}
 function localCmd(raw){
 const adds=draftAdds();if(!adds.length)return null;
-const t=String(raw||'').trim().replace(/\s+/g,' ');if(!t||t.length>200)return null;
+const t=devaNorm(String(raw||'')).trim().replace(/\s+/g,' ');if(!t||t.length>200)return null;
 const low=t.toLowerCase(),tg=pickTargets(low,adds),ALL=/\b(sab|sabhi|saare|sare|all|every|har)\b/.test(low);
 const sh=r=>(r&&r.subOrder)||'entry';
 /* 1) remove an entry */
 if(/\b(hata|hatao|hatado|hta|delete|remove|nikal|nikaal|drop)\b/.test(low)&&!/\b(supplier|code|size|buyer|qty|cbm)\b/.test(low)){
-if(!tg)return 'Which entry should I remove? Say for example "remove 6", or tap the 🗑 button on that entry.';
-if(!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';
-return removeChanges(tg.list.map(z=>z.c))}
+const tgR=tg||focusTg(adds);if(!tgR)return 'Which entry should I remove? Say for example "remove 6", or tap the 🗑 button on that entry.';
+if(!tgR.list.length)return 'I could not find '+tgR.ref+' in the draft.';
+return removeChanges(tgR.list.map(z=>z.c))}
 /* 2) keep only item codes that start with the given prefixes */
 if(/\bcode\b/.test(low)&&/\b(wale|wala|wali|waale|only|rakho|rkho|rakh|rkh|rakhna|keep|sirf)\b/.test(low)){
-const stop=new Set('code item wale wala wali waale rakho rkho rakh rkh rakhna keep only sirf bas sab sabhi all ka ke ki me mein entry entries or aur and ko hi se of the'.split(' '));
+const stop=new Set('code codes item wale wala wali waale rakho rkho rakh rkh rakhna keep only sirf bas sab sabhi saare sare all ka ke ki me mein entry entries or aur and ko hi se of the kar do de dena baaki baki hatao hata jo ye yeh hain hai'.split(' '));
 const body=low.replace(/(?:tae\s*\/?\s*)?\d{3,6}\s*\/\s*\d{1,3}/g,' ').replace(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*\d{1,3}\b/g,' ');
 const toks=body.split(/[^a-z0-9]+/).filter(w=>w&&!stop.has(w)&&/[a-z]/.test(w));
 if(!toks.length)return 'Tell me which code prefixes to keep, for example "code DIAM AM FF only".';
@@ -9488,7 +9526,7 @@ const L=tg?tg.list:adds;let ch=0;const none=[];
 L.forEach(z=>{const r=z.c.record,parts=String(r.itemCode||'').split('/').map(x=>x.trim()).filter(Boolean),keep=parts.filter(p=>toks.some(x=>p.toLowerCase().startsWith(x)));
 if(!keep.length){none.push(sh(r));return}
 const nv=keep.join('/');if(nv!==r.itemCode){r.itemCode=nv;ch++}});
-return 'Item code: kept only the '+toks.map(x=>x.toUpperCase()).join(' / ')+' code on '+ch+' of '+L.length+' entries.'+(none.length?' No matching code on: '+none.join(', ')+'.':'')+' Not saved yet.'}
+const tkS=toks.map(x=>x.toUpperCase()).join(' / ');if(LIVE.on)return (ch===0&&!none.length?'कोड पहले से सिर्फ़ '+tkS+' वाले हैं, कुछ बदलना नहीं पड़ा।':'आइटम कोड में सिर्फ़ '+tkS+' रखे, '+ch+' एंट्री बदलीं। सेव करूँ?');return (ch===0&&!none.length?'Item codes already show only the '+tkS+' code on all '+L.length+' entries, so nothing needed changing.':'Item code: kept only the '+tkS+' code on '+ch+' of '+L.length+' entries.')+(none.length?' No matching code on: '+none.join(', ')+'.':'')+' Not saved yet.'}
 /* 3) set one field */
 let body=t.replace(/(?:tae\s*\/?\s*)?\d{3,6}\s*\/\s*\d{1,3}/i,' ').replace(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*\d{1,3}\b/i,' ').replace(/^\s*#?\d{1,3}\b(?=\s*(?:ka|ki|ke|me|mein|ko|:)|\s+(?:size|buyer|supplier|qty|code|item|cbm))/i,' ').replace(/\b(?:last|aakhri|akhri)\s*(?:wali|wala|wale|entry)?\b/i,' ');
 body=body.replace(/^[\s,:\-]*(?:(?:sab|sabhi|saare|sare|all|every|har)\s*(?:entry|entries|me|mein|ka|ki|ke|ko)?\s*)?(?:(?:ka|ki|ke|ko|me|mein|of|for|entry|entries)\s*)*/i,'').trim();
@@ -9498,16 +9536,20 @@ if(!key)return null;
 rest=rest.replace(/^[\s:=\-]+/,'').replace(/^(?:to|as|ko|me|mein|se|is|hai)\b\s*/i,'').replace(/\s*\b(?:kar\s*do|kardo|kar\s*dijiye|karo|karna|kro|kar|set|rakho|rkho|rakh|please|pls|chahiye|daal\s*do|dalo|likho|change|update)\s*$/i,'').trim();
 if(!rest)return 'What should the '+FLBL[key].toLowerCase()+' be?';
 if(tg&&!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';
-const L=tg?tg.list:((ALL||adds.length===1||key==='buyer')?adds:null);
+const fg=(!tg&&!ALL)?focusTg(adds):null;const L=tg?tg.list:(fg?fg.list:((ALL||adds.length===1||key==='buyer')?adds:null));
 if(!L)return 'Which entry? Say for example "6 '+(key==='woodSupplier'?'supplier':FLBL[key].toLowerCase())+' '+rest+'", or "all '+(key==='woodSupplier'?'supplier':FLBL[key].toLowerCase())+' '+rest+'".';
 const f=cleanFields({[key]:rest});L.forEach(z=>{z.c.record=Object.assign({},z.c.record,f)});
 let msg='Updated '+FLBL[key].toLowerCase()+' to "'+f[key]+'" on '+(L.length===1?sh(L[0].c.record):L.length+' entries')+'.';
 if(key==='woodSupplier'&&!supKnown(f[key]))msg+=' Note: this supplier is not in your supplier list.';
+if(LIVE.on){const HL={woodSupplier:'सप्लायर',itemName:'आइटम नेम',itemCode:'आइटम कोड',buyer:'बायर',size:'साइज़',qty:'क्वांटिटी',cbm:'सीबीएम'};return HL[key]+' '+f[key]+' कर दिया'+(L.length===1?' एंट्री '+entryNo(L[0].c):', '+L.length+' एंट्री में')+'। सेव करूँ?'}
 return msg+' Not saved yet.'}
 function tfetch(u,o){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),45000);return fetch(u,Object.assign({},o,{signal:ac.signal})).catch(e=>{throw Error(e&&e.name==='AbortError'?'The AI took too long (45 s). Try again.':String((e&&e.message)||e))}).finally(()=>clearTimeout(t))}
 function toolDefs(){return [
 {type:'function',function:{name:'search_records',description:'Search records. Read-only. For store=work you can filter by TAE, sub-order, buyer, item, contractor, size. For orders/repairs use query or filters on any field name.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},query:{type:'string'},filters:{type:'object',properties:FILTER_PROPS}},required:[]}}},
 {type:'function',function:{name:'open_record',description:'Open one record read-only. For work: by TAE number and optional sub-order. For orders/repairs: by recordId from search_records.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},tae:{type:'string'},subOrder:{type:'string'},recordId:{type:'string'}},required:[]}}},
+{type:'function',function:{name:'show_draft_entry',description:'Open ONE entry of the pending PDF/new-entry draft on screen and read it. entry = its sub-order number (e.g. 6 for TAE/2851/6).',parameters:{type:'object',properties:{entry:{type:'string'}},required:['entry']}}},
+{type:'function',function:{name:'edit_draft_entry',description:'Change fields of ONE entry in the pending draft (entries not yet saved). entry = sub-order number; omit entry to edit the entry currently open on screen. Use this, NOT propose_update, for draft entries.',parameters:{type:'object',properties:{entry:{type:'string'},fields:{type:'object',properties:REC_PROPS}},required:['fields']}}},
+{type:'function',function:{name:'show_record',description:'Open a work entry ON SCREEN for the user (visible entry page). Use when the user says open/show/kholo an entry. Give tae number and optional subOrder number.',parameters:{type:'object',properties:{tae:{type:'string'},subOrder:{type:'string'}},required:['tae']}}},
 {type:'function',function:{name:'propose_update',description:'Stage a field update on the open record (or recordId/TAE). Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},fields:{type:'object',properties:REC_PROPS},reason:{type:'string'}},required:['fields']}}},
 {type:'function',function:{name:'propose_add',description:'Stage a NEW record. Fields merge into the new record already in the draft. Kept in memory only, never saved.',parameters:{type:'object',properties:{new_record:{type:'boolean',description:'true only to start a SECOND separate new record'},store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',properties:REC_PROPS},reason:{type:'string'}},required:['record']}}},
 {type:'function',function:{name:'propose_split',description:'Stage a craftsman/contractor quantity split (store=work only). Never saved.',parameters:{type:'object',properties:{recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},stage:{type:'string'},splits:{type:'array',items:{type:'object',properties:{name:{type:'string'},qty:{type:'number'}},required:['name','qty']}},reason:{type:'string'}},required:['stage','splits']}}}
@@ -9531,6 +9573,13 @@ return {error:m.length?'Multiple records match. Ask the user which sub-order.':'
 function provisional(name,a){a=a||{};const st=nstore(a);if(!st)return {error:'store must be work, orders or repairs'};
 if(name==='search_records'){if(st!=='work')return {matches:genericFind(st,a)};return {matches:findRecords(a).map(z=>Object.assign({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty},dtl(z.record)))};}
 if(name==='open_record'){if(st==='work'&&!a.tae&&!a.recordId)return {error:'TAE number is required to open a record.'};const r=locate(a);if(r.error)return r;TX.opened=r.hit;return {opened:true,store:st,record:r.hit.record,notice:'Record opened (read-only, nothing changed). Show the key fields to the user, confirm it is the right one, then ask what to change.'};}
+if(name==='show_draft_entry'||name==='edit_draft_entry'){const adds=draftAdds();if(!adds.length)return {error:'There is no pending draft.'};let z=null;
+if(a.entry!=null&&String(a.entry).trim()!==''){const tg=pickTargets('entry '+String(a.entry).replace(/\D*(\d+)$/,'$1'),adds);z=tg&&tg.list[0]}else{const fg=focusTg(adds);z=fg&&fg.list[0]}
+if(!z)return {error:'Entry not found in the draft. Entries present: '+adds.map(x=>x.c.record.subOrder).join(', ')};
+if(name==='show_draft_entry'){focusEntry(z.c);return {shown:true,entry:z.c.record,notice:'Entry is open on screen. Read it out briefly and ask what to change.'}}
+const f=cleanFields(a.fields||{});if(!Object.keys(f).length)return {error:'No valid fields.'};z.c.record=Object.assign({},z.c.record,f);focusEntry(z.c);
+return {updated:true,entry:z.c.record.subOrder,fields:f,notice:'Draft entry updated on screen, NOT saved yet.'}}
+if(name==='show_record'){if(!a.tae)return {error:'TAE number is required.'};return openUI(a);}
 let change;
 if(name==='propose_add'){if(!a.record||typeof a.record!=='object')return {error:'record is required'};change={op:'add',store:st,record:cleanFields(a.record)};}
 else if(name==='propose_update'||name==='propose_split'){if(name==='propose_split'&&st!=='work')return {error:'Splits only apply to work records.'};const r=locate(a);if(r.error)return r;const hit=r.hit;TX.opened=hit;
@@ -9544,7 +9593,7 @@ else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split
 else if(change.op==='add'){const sk=String((change.record||{}).subOrder||'').toLowerCase();const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store&&(!sk||String((z.record||{}).subOrder||'').toLowerCase()===sk));if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
-async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. ALWAYS reply in plain English only, never Hindi or Hinglish, even when the user writes Hindi or Hinglish; keep replies short. Formatting rules for every field you stage: buyer uses a hyphen instead of a space (M 2 = M-2); size uses the × sign between numbers (140×45×75); supplier is the registered supplier name (a supplier code means that registered name); item code has no spaces around - or /. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. '+(LIVE.on?LIVE_RULES:'ALWAYS reply in plain English only, never Hindi or Hinglish, even when the user writes Hindi or Hinglish; keep replies short. ')+'Formatting rules for every field you stage: buyer uses a hyphen instead of a space (M 2 = M-2); size uses the × sign between numbers (140×45×75); supplier is the registered supplier name (a supplier code means that registered name); item code has no spaces around - or /. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
 const res=await tfetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
@@ -9568,16 +9617,89 @@ Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw)
 if(typeof save==='function')save();
 if(typeof doPushCloud==='function')await doPushCloud();
 try{if(typeof render==='function')render()}catch(e){}
-TX.draft=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app and synced to the cloud.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
+TX.draft=null;TX.focus=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app and synced to the cloud.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
 catch(e){if(typeof say==='function')say('Could not save the draft: '+String(e.message||e)+'. Nothing was reported as saved.');}}
 const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
 if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('There is nothing pending, so nothing was saved.');return;}await commit();return;}
-if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. Nothing was changed in the database.');}else if(typeof say==='function')say('There is no pending draft.');return;}{const lc=localCmd(text);if(lc){say(lc);showDraft();return}}if(!cfg()){say('Free-text commands need an AI key (⚙ settings). You can still tap an entry in the draft to edit it, or use commands like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6".');return}if(TX.busy&&Date.now()-(TX.busyAt||0)>60000)TX.busy=false;if(TX.busy){TX.q.push(text);return;}TX.busy=true;TX.busyAt=Date.now();let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the API key and model in the AI settings (⚙).');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
+if(LIVE.on&&TX.draft&&TX.askSave){if(YESW.test(text)){TX.askSave=false;await commit();return}if(NOW.test(text)){TX.askSave=false;say('ठीक है, सेव नहीं किया। और क्या बदलना है?');return}}
+if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. Nothing was changed in the database.');}else if(typeof say==='function')say('There is no pending draft.');return;}{const oc=draftOpenCmd(text)||openCmd(text);if(oc){say(oc);return}}{const lc=localCmd(text);if(lc){say(lc);showDraft();return}}if(!cfg()){say('Free-text commands need an AI key (⚙ settings). You can still tap an entry in the draft to edit it, or use commands like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6".');return}if(TX.busy&&Date.now()-(TX.busyAt||0)>60000)TX.busy=false;if(TX.busy){TX.q.push(text);return;}TX.busy=true;TX.busyAt=Date.now();let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the API key and model in the AI settings (⚙).');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
 /* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
-window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft)return false;sendDynamic(text);return true;};
-window.__tharDynamicSend.active=function(){return !!cfg()||!!TX.draft};
+window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft&&!LIVE.on)return false;sendDynamic(text);return true;};
+window.__tharDynamicSend.active=function(){return !!cfg()||!!TX.draft||!!LIVE.on};
+
+function setupLive(form,sendBtn,stopMic){
+const SRC=window.SpeechRecognition||window.webkitSpeechRecognition,SS=window.speechSynthesis;
+if(!document.getElementById('aiLiveCss')){const st=document.createElement('style');st.id='aiLiveCss';st.textContent=`
+#aiLiveBtn{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;background:linear-gradient(135deg,#7c3aed,#06b6d4);margin-right:6px;padding:0}
+#aiLiveBtn svg{width:20px;height:20px}
+#aiLiveBar{display:flex;align-items:center;gap:10px;padding:8px 12px;margin:0 8px 6px;border-radius:16px;background:linear-gradient(135deg,rgba(124,58,237,.25),rgba(6,182,212,.2));border:1px solid rgba(124,58,237,.45);color:var(--text,#fff)}
+#aiLiveBar[hidden]{display:none}
+#aiLiveBar .lvOrb{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:0;background:radial-gradient(circle at 35% 30%,#a78bfa,#06b6d4);box-shadow:0 0 0 0 rgba(6,182,212,.6);animation:lvPulse 1.4s ease-in-out infinite}
+#aiLiveBar.sp .lvOrb{background:radial-gradient(circle at 35% 30%,#34d399,#06b6d4);animation-duration:.6s}
+#aiLiveBar.th .lvOrb{background:radial-gradient(circle at 35% 30%,#fbbf24,#f472b6);animation-duration:.9s}
+@keyframes lvPulse{0%{box-shadow:0 0 0 0 rgba(6,182,212,.55)}70%{box-shadow:0 0 0 14px rgba(6,182,212,0)}100%{box-shadow:0 0 0 0 rgba(6,182,212,0)}}
+#aiLiveBar .lvT{flex:1;min-width:0;display:flex;flex-direction:column}
+#aiLiveBar .lvT b{font-size:14px}
+#aiLiveBar .lvT small{opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:14px}
+#aiLiveBar .lvB{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:inherit;border-radius:12px;padding:6px 10px;font-weight:700;cursor:pointer}
+#aiLiveBar .lvEnd{background:#dc2626;border-color:#dc2626;color:#fff}
+#taeBox.aiMini{top:auto!important;bottom:0!important;height:auto!important;max-height:44dvh;border-radius:20px 20px 0 0;box-shadow:0 -10px 34px rgba(0,0,0,.5)}
+#taeBox.aiMini .taeCaps{display:none!important}
+#taeBox.aiMini #taeLog{max-height:18dvh}
+`;document.head.appendChild(st);}
+const btn=document.createElement('button');btn.type='button';btn.id='aiLiveBtn';btn.title='Live voice chat';btn.setAttribute('aria-label','Live voice chat');
+btn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10h2v4H4zm4-4h2v12H8zm4-3h2v18h-2zm4 3h2v12h-2zm4 4h2v4h-2z"/></svg>';
+form.insertBefore(btn,sendBtn||null);
+const bar=document.createElement('div');bar.id='aiLiveBar';bar.hidden=true;
+bar.innerHTML='<button type="button" class="lvOrb" aria-label="Interrupt"></button><div class="lvT"><b class="lvS">Sun raha hu…</b><small class="lvI"></small></div><button type="button" class="lvB" data-a="size" aria-label="Shrink or expand">⤓</button><button type="button" class="lvB lvEnd" data-a="end">End</button>';
+form.parentNode.insertBefore(bar,form);
+const box=document.getElementById('taeBox');
+function voices(){try{LIVE.voices=SS?SS.getVoices()||[]:[]}catch(e){}}voices();if(SS)SS.onvoiceschanged=voices;
+function pickVoice(hi){const vs=LIVE.voices.length?LIVE.voices:(voices(),LIVE.voices),f=rx=>vs.find(v=>rx.test(String(v.lang||'').replace('_','-')));return hi?f(/^hi/i):(f(/^en-IN/i)||f(/^en/i))}
+function plain(s){return String(s||'').replace(/<[^>]+>/g,' ').replace(/https?:\/\/\S+/g,' ').replace(/[*_`#>|~▸▾🗑✏️🔀]/g,' ').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,' ').replace(/\s+/g,' ').trim()}
+function chunks(t){const parts=t.split(/(?<=[.!?।])\s+/).map(x=>x.trim()).filter(Boolean),out=[];let cur='';parts.forEach(p=>{if(cur&&(cur+' '+p).length>150){out.push(cur);cur=p}else cur=(cur+' '+p).trim()});if(cur)out.push(cur);return out}
+function pauseRec(){const r=LIVE.rec;LIVE.rec=null;if(r){r.onend=null;r.onresult=null;r.onerror=null;try{r.abort()}catch(e){}}}
+function resumeRec(){if(LIVE.on&&!LIVE.speaking&&!LIVE.rec)startRec()}
+function speechDone(){clearTimeout(LIVE.safety);LIVE.pending=0;LIVE.speaking=false;if(LIVE.on)setTimeout(resumeRec,350)}
+function speak(t){if(!LIVE.on||!SS)return;t=plain(t);if(!t)return;
+if(t.length>320){const cut=t.slice(0,320),i=Math.max(cut.lastIndexOf('.'),cut.lastIndexOf('।'));t=(i>80?cut.slice(0,i+1):cut)+(/[\u0900-\u097F]/.test(t)?' बाकी स्क्रीन पर देख लीजिए।':' The rest is on screen.')}
+TX.askSave=!!TX.draft&&/save|सेव/i.test(t);
+LIVE.speaking=true;pauseRec();const hi=/[\u0900-\u097F]/.test(t),v=pickVoice(hi);
+chunks(t).forEach(c=>{const u=new SpeechSynthesisUtterance(c);if(v){u.voice=v;u.lang=v.lang}else u.lang=hi?'hi-IN':'en-IN';u.rate=1.03;LIVE.pending++;const d=()=>{LIVE.pending=Math.max(0,LIVE.pending-1);if(!LIVE.pending)speechDone()};u.onend=d;u.onerror=d;SS.speak(u)});
+clearTimeout(LIVE.safety);LIVE.safety=setTimeout(speechDone,Math.min(60000,4000+t.length*120))}
+function interrupt(){try{SS&&SS.cancel()}catch(e){}speechDone()}
+const BYE=/^(?:live\s*)?(?:band\s*karo|band\s*kar\s*do|stop|end\s*call|bye|bye\s*bye|बंद\s*करो|बंद\s*कर\s*दो|बाय|अलविदा)\s*[.!।]*$/i;
+function onUtter(text,alts){text=String(text||'').trim();if(!text)return;
+if(BYE.test(text)){liveOff();return}
+TX.alts=(alts||[]).map(fixSpeech).filter(a=>a&&a!==text);TX.altsFor=text;
+const a=window.TAE_ASSISTANT;if(a&&a.send)a.send(text)}
+function startRec(){if(!LIVE.on||LIVE.speaking||LIVE.rec||!SRC)return;
+const rec=new SRC();LIVE.rec=rec;rec.lang='hi-IN';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=3;
+rec.onresult=e=>{let fin='',interim='',alts=[];for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i],t=r[0].transcript;if(r.isFinal){fin+=' '+t;for(let k=1;k<r.length;k++)alts.push(r[k].transcript)}else interim+=t}
+LIVE.interim=interim;if(fin.trim()){LIVE.interim='';onUtter(fixSpeech(fin.trim()),alts)}};
+rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){liveOff();say('Microphone permission nahi mili. Browser settings me mic allow kijiye.')}};
+rec.onend=()=>{if(LIVE.rec===rec)LIVE.rec=null;if(LIVE.on&&!LIVE.speaking)setTimeout(startRec,250)};
+try{rec.start()}catch(e){LIVE.rec=null;setTimeout(startRec,800)}}
+function botText(n){const c=n.cloneNode(true);c.querySelectorAll('.taeC').forEach(x=>x.remove());return (c.textContent||'').trim()}
+function scan(){if(!LIVE.on)return;const log=document.getElementById('taeLog');if(!log)return;
+log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{const i=n.dataset.i;if(i==null)return;const t=botText(n),k=t;if(LIVE.seen[i]===k)return;LIVE.seen[i]=k;speak(t)})}
+function markSeen(){LIVE.seen={};const log=document.getElementById('taeLog');if(!log)return;log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{if(n.dataset.i!=null)LIVE.seen[n.dataset.i]=botText(n)})}
+function setMini(m){if(!box)return;box.classList.toggle('aiMini',!!m);document.body.classList.toggle('tae-open',!m);bar.querySelector('[data-a=size]').textContent=m?'⤢':'⤓'}
+function liveOn(){if(LIVE.on)return;if(!SRC||!SS){alert('Live voice ke liye Chrome (HTTPS) chahiye. Is browser me speech support nahi hai.');return}
+try{stopMic&&stopMic()}catch(e){}
+LIVE.on=true;markSeen();bar.hidden=false;btn.style.outline='2px solid #34d399';
+const log=document.getElementById('taeLog');if(log&&!LIVE.obs){LIVE.obs=new MutationObserver(scan);LIVE.obs.observe(log,{childList:true,subtree:true,characterData:true})}
+speak('जी बोलिए, मैं सुन रहा हूँ।')}
+function liveOff(){if(!LIVE.on)return;LIVE.on=false;try{SS&&SS.cancel()}catch(e){}clearTimeout(LIVE.safety);LIVE.speaking=false;LIVE.pending=0;pauseRec();bar.hidden=true;btn.style.outline='';TX.askSave=false;if(box){box.classList.remove('aiMini');document.body.classList.add('tae-open')}}
+btn.addEventListener('click',e=>{e.preventDefault();LIVE.on?liveOff():liveOn()});
+bar.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.classList.contains('lvOrb')){if(LIVE.speaking)interrupt();return}const a=b.dataset.a;if(a==='end')liveOff();else if(a==='size')setMini(!(box&&box.classList.contains('aiMini')))});
+if(box)box.addEventListener('click',e=>{if(e.target.closest('[data-x="close"]'))liveOff()});
+setInterval(()=>{if(!LIVE.on)return;const st=LIVE.speaking?'sp':(TX.busy?'th':'');bar.classList.toggle('sp',st==='sp');bar.classList.toggle('th',st==='th');
+bar.querySelector('.lvS').textContent=st==='sp'?'Bol raha hu… (tap = ruk jao)':(st==='th'?'Soch raha hu…':'Sun raha hu…');bar.querySelector('.lvI').textContent=LIVE.interim||'';
+if(!LIVE.speaking&&!LIVE.rec)resumeRec()},300);
+}
 function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
 const sendBtn=form.querySelector('button[aria-label="Send"]');
 const waves=document.createElement('span');waves.id='aiVoiceWaves';for(let i=0;i<9;i++)waves.appendChild(document.createElement('i'));form.insertBefore(waves,sendBtn);
@@ -9612,7 +9734,7 @@ e.preventDefault();e.stopImmediatePropagation();if(TX.voice)stopVoice();else sta
 sendBtn.addEventListener('contextmenu',e=>e.preventDefault());}
 /* typing by hand: stop the mic and show the Send button */
 input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();});setInterval(sync,300);sync();
-
+try{setupLive(form,sendBtn,stopVoice)}catch(e){console.error('live voice',e)}
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
 window.THAR_AI_TX={state:TX,provisional:provisional,showDraft:showDraft,commit:commit,clean:cleanFields,local:localCmd,dupOf:dupOf};
