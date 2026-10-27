@@ -2308,7 +2308,7 @@ function formNameErrors(wf, mark) {
     if (r) { if (r !== v && mark !== false) el.value = r; } else flag(label + ': ' + v, el);
   };
   NAME_STAGES.forEach(([k, l]) => wf.querySelectorAll('#splits-' + k + ' .split-row').forEach(row => {
-    if (!(Number(row.querySelector('.split-qty')?.value || 0) > 0)) return;
+    if (!(splitRowQty(row) > 0)) return;
     check(k, row.querySelector('.split-name'), l);
     if (k === 'carpenter') check('woodSupplier', row.querySelector('.split-supplier'), 'Wood Supplier (Stage 3)');
   }));
@@ -3300,8 +3300,9 @@ function splitRowHtml(stage, name = '', qty = '', done = '0', date = '', link = 
       <div class="field"><label>${stage === 'carpenter' ? 'Carpenter' : 'Contractor'}</label>${nameField}</div>
       ${linkHtml}
       <div class="field"><label><span>Quantity (Done)</span><button type="button" class="quick-link" onclick="const r=this.closest('.split-row');r.querySelector('.split-done').value=document.querySelector('#workForm [name=qty]').value;updateSplitSummary('${stage}');qcChanged()">All</button></label><input type="number" class="split-done" min="0" step="any" value="${Number(done) > 0 ? esc(done) : ''}" placeholder="Done" oninput="updateSplitSummary('${stage}')"></div>
+      <input type="hidden" class="split-qty" value="${Number(qty) > 0 ? esc(qty) : ''}">
       ${stage === 'carpenter' ? `<div class="field"><label>Date</label><input type="date" class="split-date" value="${esc(date || '')}"></div>` : `<input type="hidden" class="split-date" value="">`}
-      <button type="button" class="btn smallbtn danger" style="margin-bottom:12px; height: 42px;" onclick="this.closest('.split-row').remove(); updateSplitSummary('${stage}')">×</button>
+      <button type="button" class="btn smallbtn danger" style="margin-bottom:12px; height: 42px; width:auto; justify-self:end; padding:0 18px" onclick="this.closest('.split-row').remove(); updateSplitSummary('${stage}'); qcChanged()">×</button>
     </div>
   `;
 }
@@ -3425,21 +3426,22 @@ function addPackRow() {
   const box = document.getElementById('splits-packing'); if (!box) return;
   box.insertAdjacentHTML('beforeend', packRowHtml()); updatePackSummary();
 }
+function splitRowQty(r) { return Math.max(Number(r.querySelector('.split-qty')?.value || 0), Number(r.querySelector('.split-done')?.value || 0)); }
 function updateSplitSummary(stage) {
   const rows = [...document.querySelectorAll(`#splits-${stage} .split-row`)];
   let alloc = 0; let done = 0;
-  rows.forEach(r => { alloc += Number(r.querySelector('.split-qty')?.value || 0); done += Number(r.querySelector('.split-done')?.value || 0); });
+  rows.forEach(r => { alloc += splitRowQty(r); done += Number(r.querySelector('.split-done')?.value || 0); });
   const total = Number(document.querySelector('#workForm [name=qty]')?.value || 0);
   const el = document.getElementById(`summary-${stage}`);
   if (el) {
       let pend = total ? Math.max(total - done, 0) : alloc - done;
-      el.innerHTML = `Allocated: <b${total && alloc > total ? ' style="color:var(--amber)"' : ''}>${alloc}</b> / ${total||'-'} | Completed: <b>${done}</b> | Pending: <b style="color:var(--amber)">${pend}</b>${total && alloc > total ? '<br><span style="color:var(--amber);font-weight:700">ℹ Allocated is more than total qty (allowed). Only Completed qty must not exceed total.</span></span>' : ''}`;
+      el.innerHTML = `Completed: <b>${done}</b> / ${total||'-'} | Pending: <b style="color:var(--amber)">${pend}</b>${total && done > total ? '<br><span style="color:var(--red);font-weight:700">⚠ Completed is more than total qty.</span>' : ''}`;
   }
 }
 function getSplitsFromDOM(stage) {
   return [...document.querySelectorAll(`#splits-${stage} .split-row`)].map(r => ({
       name: r.querySelector('.split-name')?.value.trim() || '',
-      qty: Number(r.querySelector('.split-qty')?.value || 0),
+      qty: splitRowQty(r),
       done: Number(r.querySelector('.split-done')?.value || 0),
       date: r.querySelector('.split-date')?.value || '',
       link: r.querySelector('.split-link')?.value || '',
