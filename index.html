@@ -9007,7 +9007,7 @@ function smart(text) {
     .catch(e => { busy = 0; setDot('bad', e && e.message); aiFail(e, 1); try { handle(text); } catch (_) {} pump(); });
   return true;
 }
-function send(text) { text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
+function send(text) { if (window.__tharDynamicSend && window.__tharDynamicSend.active && window.__tharDynamicSend.active()) { const t0 = String(text || '').trim(); if (!t0) return; Q.push({ who: 'u', text: t0 }); pump(); window.__tharDynamicSend(t0); return; } text = String(text || '').trim(); if (!text) return; Q.push({ who: 'u', text }); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
 function pick(pid) {
   const x = workOf(pid); if (!x) return; S.target = pid; Q.push({ who: 'u', text: lbl(x) });
   if (S.editAsk) { const tx = S.editAsk; S.editAsk = null; doEdit(tx, x); return pump(); }
@@ -9208,5 +9208,165 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
   window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
 }
 </script>
+
+<!-- Dynamic AI transaction layer: all writes require explicit confirmation -->
+<style>
+#aiTxnPanel{border:1px solid var(--blue);border-radius:14px;padding:12px;margin:10px 0;background:var(--panel2);color:var(--text)}
+#aiTxnPanel pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace;max-height:240px;overflow:auto}
+#aiVoiceWaves{display:none;gap:3px;align-items:center;height:22px;margin:0 8px}
+#aiVoiceWaves.on{display:inline-flex}
+#aiVoiceWaves i{width:3px;border-radius:4px;background:var(--green2);height:6px;animation:aiwave .65s ease-in-out infinite alternate}
+#aiVoiceWaves i:nth-child(2n){animation-delay:.15s}#aiVoiceWaves i:nth-child(3n){animation-delay:.3s}
+@keyframes aiwave{to{height:20px}}
+#aiTxnPanel .aiCard{border:1px solid var(--line,#8884);border-radius:10px;margin:8px 0;overflow:hidden}
+#aiTxnPanel .aiCardH{padding:6px 10px;font-weight:800;font-size:13px;background:rgba(127,127,127,.12)}
+#aiTxnPanel table{width:100%;border-collapse:collapse;font-size:12.5px}
+#aiTxnPanel th,#aiTxnPanel td{padding:5px 10px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+#aiTxnPanel td.bef{background:rgba(220,38,38,.14);text-decoration:line-through}
+#aiTxnPanel td.aft{background:rgba(22,163,74,.16);font-weight:700}
+#aiTxnPanel .actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px}
+#taeForm>button[aria-label="Send"].aiRec{background:#dc2626!important;color:#fff!important;animation:aipulse 1.1s ease-in-out infinite}
+@keyframes aipulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}100%{box-shadow:0 0 0 14px rgba(220,38,38,0)}}
+#taeForm>button[aria-label="Send"]{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+</style>
+<script id="tharDynamicAI">
+(function(){
+'use strict';
+const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null, opened:null};
+const $=id=>document.getElementById(id);
+const STORES=['work','orders','repairs'];
+function store(n){try{const d=typeof A==='function'?A():window.db;return (d&&d[n])||[]}catch(e){return[]}}
+function setStore(n,arr){const d=typeof A==='function'?A():window.db;d[n]=arr}
+function work(){return store('work')}
+function nstore(a){const t=String((a&&a.store)||'work').toLowerCase();return STORES.includes(t)?t:null}
+function brief(r){const o={};Object.keys(r||{}).filter(k=>r[k]===null||typeof r[k]!=='object').slice(0,8).forEach(k=>o[k]=r[k]);return o}
+function genericFind(st,args){const q=String(args.query||'').toLowerCase(),f=args.filters||{};return store(st).map((r,i)=>({r,i})).filter(({r})=>{if(q&&!JSON.stringify(r).toLowerCase().includes(q))return false;return Object.keys(f).every(k=>f[k]==null||f[k]===''||String(r[k]==null?'':r[k]).toLowerCase().includes(String(f[k]).toLowerCase()))}).slice(0,30).map(({r,i})=>({index:i,id:r.id||'',store:st,summary:brief(r)}))}
+function cfg(){try{return typeof llmCfg==='function'?llmCfg():null}catch(e){return null}}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function ensurePanel(){const log=$('taeLog');if(!log||$('aiTxnPanel'))return;const p=document.createElement('section');p.id='aiTxnPanel';p.hidden=true;log.appendChild(p)}
+function fmt(v){if(v===undefined||v===null||v==='')return '—';return typeof v==='object'?JSON.stringify(v):String(v)}
+function recLabel(r,st){r=r||{};if(st&&st!=='work')return st+' · '+(r.name||r.title||r.orderNo||r.id||'');return 'TAE '+(r.tae||r.taeNo||r.orderNo||'?')+(r.subOrder||r.subOrderNo?' / Sub-order '+(r.subOrder||r.subOrderNo):'')+(r.itemName?' · '+r.itemName:'')}
+function diffCard(c){let h='<div class="aiCard"><div class="aiCardH">';
+if(c.op==='add'){h+='➕ New record in '+esc(c.store||'work')+'</div><table>'+Object.keys(c.record||{}).map(k=>'<tr><td>'+esc(k)+'</td><td class="aft">'+esc(fmt(c.record[k]))+'</td></tr>').join('')+'</table>';}
+else if(c.op==='update'){h+='✏️ '+esc(recLabel(c.before,c.store))+'</div><table><tr><th>Field</th><th>Before</th><th>After</th></tr>'+Object.keys(c.fields||{}).map(k=>'<tr><td>'+esc(k)+'</td><td class="bef">'+esc(fmt((c.before||{})[k]))+'</td><td class="aft">'+esc(fmt(c.fields[k]))+'</td></tr>').join('')+'</table>';}
+else if(c.op==='split'){const old=((c.before||{}).splits||{})[c.stage];h+='🔀 '+esc(recLabel(c.before,c.store))+' · '+esc(c.stage)+'</div><table><tr><th></th><th>Before</th><th>After</th></tr><tr><td>Craftsmen</td><td class="bef">'+esc(old?old.map(x=>x.name+' ('+x.qty+')').join(', '):'—')+'</td><td class="aft">'+esc((c.splits||[]).map(x=>x.name+' ('+x.qty+')').join(', '))+'</td></tr></table>';}
+return h+'</div>'}
+function showDraft(){ensurePanel();const p=$('aiTxnPanel');if(!p)return;p.hidden=!TX.draft;if(!TX.draft)return;const d=TX.draft;
+p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
+$('aiCommit').onclick=commit;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
+function toolDefs(){return [
+{type:'function',function:{name:'search_records',description:'Search records. Read-only. For store=work you can filter by TAE, sub-order, buyer, item, contractor, size. For orders/repairs use query or filters on any field name.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},query:{type:'string'},filters:{type:'object',additionalProperties:true}},required:[]}}},
+{type:'function',function:{name:'open_record',description:'Open one record read-only. For work: by TAE number and optional sub-order. For orders/repairs: by recordId from search_records.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},tae:{type:'string'},subOrder:{type:'string'},recordId:{type:'string'}},required:[]}}},
+{type:'function',function:{name:'propose_update',description:'Stage a field update on the open record (or recordId/TAE). Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},fields:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['fields']}}},
+{type:'function',function:{name:'propose_add',description:'Stage a NEW record. Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['record']}}},
+{type:'function',function:{name:'propose_split',description:'Stage a craftsman/contractor quantity split (store=work only). Never saved.',parameters:{type:'object',properties:{recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},stage:{type:'string'},splits:{type:'array',items:{type:'object',properties:{name:{type:'string'},qty:{type:'number'}},required:['name','qty']}},reason:{type:'string'}},required:['stage','splits']}}}
+] }
+function grp(x){return String(x||'').match(/\d+/g)||[]}
+function taeMatch(r,q){q=String(q||'').trim();if(!q)return true;const rv=String(r.tae||r.taeNo||r.orderNo||'');if(/^\D*\d+\D*$/.test(q)){const d=grp(q)[0];return grp(rv).includes(d)||grp(r.subOrder||r.subOrderNo).includes(d)&&grp(r.subOrder||r.subOrderNo)[0]===d;}return rv.toLowerCase().includes(q.toLowerCase())||String(r.subOrder||'').toLowerCase().includes(q.toLowerCase())}
+function subMatch(r,q){q=String(q||'').trim();if(!q)return true;const sv=String(r.subOrder||r.subOrderNo||'');if(/^\d+$/.test(q)){const g=grp(sv);return g.length>0&&g[g.length-1]===q}return sv.toLowerCase().includes(q.toLowerCase())}
+function shape(r,i,st){return {index:i,store:st||'work',id:r.id||r._id||'',tae:r.tae||r.taeNo||r.orderNo||'',subOrder:r.subOrder||r.subOrderNo||'',buyer:r.buyer||'',itemCode:r.itemCode||'',itemName:r.itemName||'',size:r.size||r.dimensions||'',qty:r.qty,record:r}}
+function findRecords(args){let arr=work().map((r,i)=>({r,i}));const f=args.filters||{},q=String(args.query||'').toLowerCase();
+arr=arr.filter(({r})=>{const vals=[r.tae,r.taeNo,r.orderNo,r.subOrder,r.subOrderNo,r.buyer,r.itemCode,r.itemName,r.size,r.dimensions,r.carpenter,r.contractor,JSON.stringify(r.splits||{})].join(' ').toLowerCase();
+return (!q||vals.includes(q))&&taeMatch(r,args.tae||f.tae)&&subMatch(r,args.subOrder||f.subOrder)&&(!f.buyer||String(r.buyer||'').toLowerCase().includes(f.buyer.toLowerCase()))&&(!f.itemCode||String(r.itemCode||'').toLowerCase().includes(f.itemCode.toLowerCase()))&&(!f.itemName||String(r.itemName||'').toLowerCase().includes(f.itemName.toLowerCase()))&&(!f.dimensions||String(r.size||r.dimensions||'').toLowerCase().includes(f.dimensions.toLowerCase()))&&(!f.contractor||vals.includes(f.contractor.toLowerCase()))});
+return arr.slice(0,30).map(({r,i})=>({index:i,id:r.id||r._id||'',tae:r.tae||r.taeNo||r.orderNo||'',subOrder:r.subOrder||r.subOrderNo||'',buyer:r.buyer||'',itemCode:r.itemCode||'',itemName:r.itemName||'',size:r.size||r.dimensions||'',qty:r.qty,record:r}));}
+function locate(a){const st=nstore(a);if(!st)return {error:'store must be work, orders or repairs'};const L=store(st);
+if(a.recordId){for(let i=0;i<L.length;i++)if(String(L[i].id||L[i]._id)===String(a.recordId))return {hit:shape(L[i],i,st)};return {error:'No record with that recordId in '+st+'. Search first.'};}
+if(!a.tae&&TX.opened&&(!a.store||a.store===TX.opened.store)){const o=TX.opened,r=store(o.store)[o.index];if(r&&(!o.id||String(r.id)===String(o.id)))return {hit:shape(r,o.index,o.store)};}
+if(st!=='work')return {error:'For '+st+' a recordId is required. Use search_records first, then open_record with recordId.'};
+if(!a.tae)return {error:'No record is open. Ask the user for the TAE number (and sub-order) first.'};
+const m=findRecords({tae:a.tae,subOrder:a.subOrder,query:''});
+if(m.length===1)return {hit:Object.assign(m[0],{store:'work'})};
+return {error:m.length?'Multiple records match. Ask the user which sub-order.':'No matching record found.',matches:m.map(z=>({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty}))};}
+function cleanFields(f){const o={},BAD={'__proto__':1,'constructor':1,'prototype':1,'id':1,'_id':1};Object.keys(f||{}).forEach(k=>{if(BAD[k])return;let v=f[k];if(k==='size'&&typeof normSize==='function'){try{const z=normSize(String(v));if(z&&z.size)v=z.size}catch(e){}}o[k]=v});return o}
+function provisional(name,a){a=a||{};const st=nstore(a);if(!st)return {error:'store must be work, orders or repairs'};
+if(name==='search_records'){if(st!=='work')return {matches:genericFind(st,a)};return {matches:findRecords(a).map(z=>({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty}))};}
+if(name==='open_record'){if(st==='work'&&!a.tae&&!a.recordId)return {error:'TAE number is required to open a record.'};const r=locate(a);if(r.error)return r;TX.opened=r.hit;return {opened:true,store:st,record:r.hit.record,notice:'Record opened (read-only, nothing changed). Show the key fields to the user, confirm it is the right one, then ask what to change.'};}
+let change;
+if(name==='propose_add'){if(!a.record||typeof a.record!=='object')return {error:'record is required'};change={op:'add',store:st,record:cleanFields(a.record)};}
+else if(name==='propose_update'||name==='propose_split'){if(name==='propose_split'&&st!=='work')return {error:'Splits only apply to work records.'};const r=locate(a);if(r.error)return r;const hit=r.hit;TX.opened=hit;
+if(name==='propose_update'){const fields=cleanFields(a.fields);if(!Object.keys(fields).length)return {error:'No valid fields to update.'};change={op:'update',store:hit.store,index:hit.index,id:hit.id,before:hit.record,fields};}
+else{const sp=Array.isArray(a.splits)?a.splits:[];const total=sp.reduce((n,z)=>n+Number(z.qty||0),0);if(!sp.length||sp.some(z=>!z.name||!(Number(z.qty)>=0))||(hit.record.qty!=null&&total>Number(hit.record.qty)))return {error:'Split quantities are invalid or exceed record quantity ('+hit.record.qty+').'};change={op:'split',store:'work',index:hit.index,id:hit.id,before:hit.record,stage:a.stage,splits:sp};}}
+else return {error:'Unknown tool '+name};
+TX.draft=TX.draft||{summary:'',changes:[]};if(a.reason)TX.draft.summary=a.reason;
+const same=z=>z.store===change.store&&z.index===change.index;
+if(change.op==='update'){const prior=TX.draft.changes.find(z=>z.op==='update'&&same(z));if(prior){prior.fields=Object.assign({},prior.fields,change.fields);change=prior;}else TX.draft.changes.push(change);}
+else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split'&&same(z)&&z.stage===change.stage);if(k>=0)TX.draft.changes[k]=change;else TX.draft.changes.push(change);}
+else TX.draft.changes.push(change);
+showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys='You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Current work-record summary: '+JSON.stringify(findRecords({query:''}).map(x=>({index:x.index,id:x.id,tae:x.tae,subOrder:x.subOrder,buyer:x.buyer,itemCode:x.itemCode,itemName:x.itemName,size:x.size,qty:x.qty})).slice(0,150));
+let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
+for(let step=0;step<5;step++){
+const res=await fetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
+if(!res.ok)throw Error('AI API error '+res.status);const j=await res.json(),m=j.choices?.[0]?.message;if(!m)throw Error('AI returned an empty response');messages.push(m);
+if(!m.tool_calls?.length){TX.turns.push({role:'user',content:text},{role:'assistant',content:m.content||'I could not complete that request.'});TX.turns=TX.turns.slice(-16);return m.content||'I could not complete that request.';}
+for(const tc of m.tool_calls){let args={};try{args=JSON.parse(tc.function.arguments||'{}')}catch(e){}let result;try{result=provisional(tc.function.name,args)}catch(e){result={error:String(e.message||e)}}messages.push({role:'tool',tool_call_id:tc.id,content:JSON.stringify(result)});}
+}
+return 'I prepared the available tool results. Please clarify the next step.';
+}
+async function commit(){const d=TX.draft;if(!d)return;
+if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode){if(typeof say==='function')say('Only Admin can save changes to the database. Draft kept, nothing written.');return;}
+try{const lists={};const get=st=>lists[st]||(lists[st]=JSON.parse(JSON.stringify(store(st))));
+for(const c of d.changes){const st=c.store||'work';if(!STORES.includes(st))throw Error('Invalid store '+st);
+if(c.op==='add'){get(st).push(Object.assign({id:'ai_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)},c.record));continue;}
+const r=get(st)[c.index];if(!r||(c.id&&r.id&&String(r.id)!==String(c.id)))throw Error('A record changed or disappeared. Search again before confirming.');
+if(c.op==='update')Object.keys(c.fields||{}).forEach(k=>{if(k!=='id'&&k!=='__proto__'&&k!=='constructor'&&k!=='prototype')r[k]=c.fields[k]});
+if(c.op==='split'){r.splits=r.splits||{};r.splits[c.stage]=c.splits.map(x=>({name:x.name,qty:Number(x.qty),done:0}));}}
+Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw);try{if(typeof touch==='function')nw.forEach((r,i)=>{if(!old[i]||JSON.stringify(old[i])!==JSON.stringify(r))touch(st,r)})}catch(e){}});
+if(typeof save==='function')save();
+if(typeof doPushCloud==='function')await doPushCloud();
+try{if(typeof render==='function')render()}catch(e){}
+TX.draft=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Confirmed. Changes saved to the app and synced to Firebase (thar_factory).');}
+catch(e){if(typeof say==='function')say('Could not commit the draft: '+String(e.message||e)+'. No success was reported.');}}
+function downloadLive(){const blob=new Blob(['<!DOCTYPE html>\n'+document.documentElement.outerHTML],{type:'text/html;charset=utf-8'});const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='thar-factory-live-'+new Date().toISOString().slice(0,10)+'.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
+const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
+const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
+async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
+if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('Koi pending change nahi hai, isliye kuch save nahi hua.');return;}await commit();return;}
+if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discard kar diya. Database mein kuch change nahi hua.');}else if(typeof say==='function')say('Koi pending draft nahi hai.');return;}if(TX.busy){if(typeof say==='function')say('Please wait for the current AI response.');return;}TX.busy=true;try{if(typeof say==='function')say('Thinking…');const answer=await ai(text);if(typeof say==='function')say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the selected API key/model in AI settings. No offline canned response was used.');}finally{TX.busy=false;}}
+/* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
+window.__tharDynamicSend=function(text){if(!cfg())return false;sendDynamic(text);return true;};
+window.__tharDynamicSend.active=function(){return !!cfg()};
+function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
+const sendBtn=form.querySelector('button[aria-label="Send"]');
+const download=document.createElement('button');download.type='button';download.className='btn smallbtn';download.textContent='Download Live HTML';download.title='Export the current page HTML';download.onclick=downloadLive;form.parentElement.insertBefore(download,form);
+const waves=document.createElement('span');waves.id='aiVoiceWaves';for(let i=0;i<9;i++)waves.appendChild(document.createElement('i'));form.insertBefore(waves,sendBtn);
+const SEND_ICON=sendBtn?sendBtn.innerHTML:'➤';
+const MIC_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z" fill="currentColor"/></svg>';
+const STOP_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
+const PH=input.placeholder||'Type or speak...';
+let holdTimer=null,holdMode=false,swallowUntil=0;
+function mode(){return input.value.trim()?'send':(TX.voice?'stop':'mic')}
+function sync(){if(!sendBtn)return;const m=mode();if(sendBtn.dataset.m===m)return;sendBtn.dataset.m=m;sendBtn.innerHTML=m==='send'?SEND_ICON:(m==='mic'?MIC_ICON:STOP_ICON);sendBtn.classList.toggle('aiRec',m==='stop');sendBtn.setAttribute('aria-label','Send');sendBtn.title=m==='send'?'Send':(m==='mic'?'Tap or hold to speak':'Stop recording');}
+/* UI is reset immediately: never wait for the browser's onend (Android Chrome often never fires it after stop()). */
+function finishUi(){TX.rec=null;TX.voice=false;holdMode=false;input.placeholder=PH;waves.classList.remove('on');sync();}
+function stopVoice(){const r=TX.rec;finishUi();if(!r)return;r.onend=null;r.onerror=null;try{r.stop()}catch(e){}setTimeout(()=>{try{r.abort()}catch(e){}r.onresult=null;},1500);}
+function startVoice(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert('Speech recognition is not supported in this browser. Try Chrome on HTTPS.');return;}
+if(TX.voice||TX.rec){stopVoice();return;}
+const rec=new SR();TX.rec=rec;TX.voice=true;rec.lang='hi-IN';rec.continuous=true;rec.interimResults=true;waves.classList.add('on');sync();
+rec.onresult=e=>{let fin='',interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t;else interim+=t;}
+if(interim&&!fin&&TX.rec===rec){input.placeholder='🎙 '+interim;}
+if(fin){input.placeholder=TX.rec===rec?'🎙 …':PH;input.value=(input.value+' '+fin).trim();input.dispatchEvent(new Event('input',{bubbles:true}));if(form.requestSubmit)form.requestSubmit();else form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}};
+rec.onerror=e=>{const fatal=['not-allowed','service-not-allowed','audio-capture','network','language-not-supported'].includes(e.error);
+if(e.error!=='no-speech'&&e.error!=='aborted'&&typeof say==='function')say(fatal&&e.error!=='network'?'Mic start nahi hua ('+e.error+'). Mic permission allow karo, aur page ko Chrome mein HTTPS par kholo (content:// ya file:// par mic block ho sakta hai).':'Voice input issue: '+e.error);
+if(fatal)finishUi();};
+rec.onend=()=>{if(TX.rec===rec)finishUi();};
+try{rec.start()}catch(e){finishUi();}}
+if(sendBtn){
+sendBtn.addEventListener('pointerdown',()=>{if(TX.voice||input.value.trim())return;clearTimeout(holdTimer);holdTimer=setTimeout(()=>{holdMode=true;swallowUntil=Date.now()+1e7;startVoice();},450);},true);
+const rel=()=>{clearTimeout(holdTimer);if(holdMode){holdMode=false;swallowUntil=Date.now()+500;stopVoice();}};
+sendBtn.addEventListener('pointerup',rel,true);sendBtn.addEventListener('pointercancel',rel,true);sendBtn.addEventListener('pointerleave',()=>{clearTimeout(holdTimer)},true);
+sendBtn.addEventListener('click',e=>{if(Date.now()<swallowUntil){e.preventDefault();e.stopImmediatePropagation();return;}
+if(input.value.trim()){if(TX.voice)stopVoice();return;}
+e.preventDefault();e.stopImmediatePropagation();if(TX.voice)stopVoice();else startVoice();},true);
+sendBtn.addEventListener('contextmenu',e=>e.preventDefault());}
+/* typing by hand: stop the mic and show the Send button */
+input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();});setInterval(sync,300);sync();
+
+}
+const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
+window.THAR_AI_TX={state:TX,downloadLiveHTML:downloadLive};
+})();
+</script>
+
 </body>
 </html>
