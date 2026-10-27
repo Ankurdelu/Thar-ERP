@@ -9346,6 +9346,18 @@ if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
 #aiTxnPanel td.bef{background:rgba(220,38,38,.14);text-decoration:line-through}
 #aiTxnPanel td.aft{background:rgba(22,163,74,.16);font-weight:700}
 #aiTxnPanel .actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px}
+#aiTxnPanel .aiCardH{display:flex;align-items:center;gap:8px}
+#aiTxnPanel .aiTg{cursor:pointer;-webkit-tap-highlight-color:transparent}
+#aiTxnPanel .aiCar{flex:none;opacity:.7;width:12px}
+#aiTxnPanel .aiSub{flex:none;font-weight:800;font-size:12.5px}
+#aiTxnPanel .aiTx{flex:1;min-width:0;font-weight:500;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#aiTxnPanel .aiRm{flex:none;border:1px solid rgba(220,38,38,.5);background:rgba(220,38,38,.12);color:#f87171;border-radius:8px;padding:3px 9px;font-size:14px;cursor:pointer}
+#aiTxnPanel .aiCard.dup{border-color:#dc2626}
+#aiTxnPanel .aiDup{background:rgba(220,38,38,.2);color:#fca5a5;font-weight:800;font-size:12.5px;padding:6px 10px}
+#aiTxnPanel .aiWarn{color:#fbbf24;font-size:12px;padding:4px 10px 8px}
+#aiTxnPanel input.aiIn{width:100%;box-sizing:border-box;background:rgba(0,0,0,.25);border:1px solid rgba(127,127,127,.4);border-radius:8px;padding:7px 9px;color:inherit;font:inherit;font-size:14px}
+#aiTxnPanel input.aiIn:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 2px rgba(56,189,248,.3)}
+#aiTxnPanel td.lb{width:32%;opacity:.8;white-space:nowrap}
 #taeForm>button[aria-label="Send"].aiRec{background:#dc2626!important;color:#fff!important;animation:aipulse 1.1s ease-in-out infinite}
 @keyframes aipulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}100%{box-shadow:0 0 0 14px rgba(220,38,38,0)}}
 #taeForm>button[aria-label="Send"]{touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -9392,19 +9404,112 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function ensurePanel(){const log=$('taeLog');if(!log||$('aiTxnPanel'))return;const p=document.createElement('section');p.id='aiTxnPanel';p.hidden=true;log.appendChild(p)}
 function fmt(v){if(v===undefined||v===null||v==='')return '—';return typeof v==='object'?JSON.stringify(v):String(v)}
 function recLabel(r,st){r=r||{};if(st&&st!=='work')return st+' · '+(r.name||r.title||r.orderNo||r.id||'');return 'TAE '+(r.tae||r.taeNo||r.orderNo||'?')+(r.subOrder||r.subOrderNo?' / Sub-order '+(r.subOrder||r.subOrderNo):'')+(r.itemName?' · '+r.itemName:'')}
-function diffCard(c){let h='<div class="aiCard"><div class="aiCardH">';
-if(c.op==='add'){h+='➕ New record in '+esc(c.store||'work')+'</div><table>'+Object.keys(c.record||{}).map(k=>'<tr><td>'+esc(k)+'</td><td class="aft">'+esc(fmt(c.record[k]))+'</td></tr>').join('')+'</table>';}
-else if(c.op==='update'){h+='✏️ '+esc(recLabel(c.before,c.store))+'</div><table><tr><th>Field</th><th>Before</th><th>After</th></tr>'+Object.keys(c.fields||{}).map(k=>'<tr><td>'+esc(k)+'</td><td class="bef">'+esc(fmt((c.before||{})[k]))+'</td><td class="aft">'+esc(fmt(c.fields[k]))+'</td></tr>').join('')+'</table>';}
-else if(c.op==='split'){const old=((c.before||{}).splits||{})[c.stage];h+='🔀 '+esc(recLabel(c.before,c.store))+' · '+esc(c.stage)+'</div><table><tr><th></th><th>Before</th><th>After</th></tr><tr><td>Craftsmen</td><td class="bef">'+esc(old?old.map(x=>x.name+' ('+x.qty+')').join(', '):'—')+'</td><td class="aft">'+esc((c.splits||[]).map(x=>x.name+' ('+x.qty+')').join(', '))+'</td></tr></table>';}
-return h+'</div>'}
 function showDraft(){ensurePanel();const p=$('aiTxnPanel');if(!p)return;p.hidden=!TX.draft;if(!TX.draft)return;const d=TX.draft;
-p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
-$('aiCommit').onclick=commit;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
+p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+draftStats(d)+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
+wireDraft(p);$('aiCommit').onclick=commit;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
+/* ===== field normalisation, duplicate check, editable draft, local commands ===== */
+const REC_PROPS={orderNo:{type:'string'},subOrder:{type:'string'},itemCode:{type:'string'},buyer:{type:'string'},itemName:{type:'string'},size:{type:'string'},sizeUnit:{type:'string'},qty:{type:'number'},cbm:{type:'number'},woodSupplier:{type:'string'},date:{type:'string'},targetDate:{type:'string'},notes:{type:'string'},name:{type:'string'},title:{type:'string'},status:{type:'string'},part:{type:'string'},issueType:{type:'string'}};
+const FILTER_PROPS={tae:{type:'string'},subOrder:{type:'string'},buyer:{type:'string'},itemCode:{type:'string'},itemName:{type:'string'},dimensions:{type:'string'},contractor:{type:'string'}};
+const FLD=[['orderNo','Order No'],['subOrder','Sub-order'],['itemCode','Item code'],['buyer','Buyer'],['itemName','Item name'],['size','Size'],['sizeUnit','Size unit'],['qty','Qty'],['cbm','CBM'],['woodSupplier','Supplier'],['date','Date'],['targetDate','Target date']];
+function supOne(x){x=String(x||'').trim();if(!x)return x;try{const h=regLookup('woodSupplier',x);if(h)return h;const z=fuzzyReg('woodSupplier',x);if(z&&z.name)return z.name}catch(e){}return x}
+function supName(raw){raw=String(raw||'').trim();if(!raw)return raw;try{const h=regLookup('woodSupplier',raw);if(h)return h}catch(e){}return raw.split(/\s*,\s*/).map(supOne).filter((v,i,a)=>v&&a.indexOf(v)===i).join(', ')}
+function supKnown(raw){try{return String(raw||'').split(/\s*,\s*/).filter(Boolean).every(x=>regLookup('woodSupplier',x))}catch(e){return true}}
+function cleanFields(f){const o={},BAD={'__proto__':1,'constructor':1,'prototype':1,'id':1,'_id':1};
+Object.keys(f||{}).forEach(k=>{if(BAD[k])return;let v=f[k];if(typeof v==='string')v=v.trim();
+try{
+if(k==='size'&&v!==''){const z=normSize(String(v));if(z&&z.size)v=z.size.replace(/(\d)\.0+(?=×|$)/g,'$1');if(z&&z.unit)o.sizeUnit=z.unit}
+else if(k==='buyer'&&v!==''){v=normBuyer(v);const bk=z=>String(z).toLowerCase().replace(/[\s\-]/g,'');const b=((A()||{}).buyers||[]).find(x=>bk(x)===bk(v));if(b)v=b}
+else if(k==='woodSupplier'&&v!=='')v=supName(v);
+else if(k==='itemCode'&&v!=='')v=String(v).replace(/\s*\/\s*/g,'/').replace(/-\s+/g,'-').replace(/\s+-/g,'-').replace(/\s{2,}/g,' ').trim();
+else if((k==='qty'||k==='cbm')&&v!==''){const n=parseFloat(String(v).replace(/,/g,''));if(isFinite(n))v=k==='cbm'?Math.round(n*100)/100:n}
+}catch(e){}
+o[k]=v});return o}
+function dupOf(c){if(!c||c.op!=='add'||(c.store||'work')!=='work')return '';const r=c.record||{};if(!String(r.subOrder||'').trim())return '';
+let ex=null;try{ex=dupFind(r.orderNo,r.itemCode,r.subOrder)}catch(e){}
+if(ex)return 'Entry already exists';
+const k=String(r.subOrder).trim().toLowerCase();
+if(TX.draft&&TX.draft.changes.some(z=>z!==c&&z.op==='add'&&String((z.record||{}).subOrder||'').trim().toLowerCase()===k))return 'Entry already exists (repeated in this draft)';
+return ''}
+function rmBtn(ci){return '<button type="button" class="aiRm" data-rm="'+ci+'" aria-label="Remove entry">🗑</button>'}
+function addCard(c,ci){const r=c.record||{},dup=dupOf(c),open=!!c._open;
+const keys=FLD.map(x=>x[0]).concat(Object.keys(r).filter(k=>!FLD.some(x=>x[0]===k)&&(r[k]===null||typeof r[k]!=='object')));
+let h='<div class="aiCard'+(dup?' dup':'')+'"><div class="aiCardH aiTg" data-tg="'+ci+'"><span class="aiCar">'+(open?'▾':'▸')+'</span><span class="aiSub">'+esc(r.subOrder||'New entry')+'</span><span class="aiTx">'+esc([r.itemName,r.itemCode,r.size,(r.qty!==undefined&&r.qty!==''?r.qty+' pcs':''),r.woodSupplier].filter(Boolean).join(' · '))+'</span>'+rmBtn(ci)+'</div>';
+if(dup)h+='<div class="aiDup">⚠ '+esc(dup)+'</div>';
+if(open){h+='<table>'+keys.map(k=>{const lab=(FLD.find(x=>x[0]===k)||[k,k])[1],num=(k==='qty'||k==='cbm');return '<tr><td class="lb">'+esc(lab)+'</td><td class="ed"><input class="aiIn" data-ci="'+ci+'" data-k="'+esc(k)+'" type="'+((k==='date'||k==='targetDate')?'date':'text')+'"'+(num?' inputmode="decimal"':'')+' value="'+esc(r[k]==null?'':r[k])+'" autocomplete="off"></td></tr>'}).join('')+'</table>';
+if(r.woodSupplier&&!supKnown(r.woodSupplier))h+='<div class="aiWarn">This supplier is not in your supplier list. Type its code or a registered name.</div>'}
+return h+'</div>'}
+function draftStats(d){const a=d.changes.filter(c=>c.op==='add');if(!a.length)return '';let q=0,m=0;a.forEach(c=>{q+=Number(c.record.qty)||0;m+=Number(c.record.cbm)||0});return '<p class="muted" style="margin:4px 0">'+a.length+' new entr'+(a.length>1?'ies':'y')+' · '+q+' pcs · '+(Math.round(m*100)/100)+' CBM · tap an entry to edit it</p>'}
+function redraw(){const lg=$('taeLog'),y=lg?lg.scrollTop:0;showDraft();if(lg)lg.scrollTop=y}
+function editField(ci,k,v){const c=TX.draft&&TX.draft.changes[ci];if(!c||c.op!=='add')return;const f=cleanFields({[k]:v});c.record=Object.assign({},c.record,f);if(String(v).trim()==='')c.record[k]='';redraw()}
+function removeChanges(list){if(!TX.draft)return '';const names=list.map(c=>(c.record&&c.record.subOrder)||'entry').join(', ');TX.draft.changes=TX.draft.changes.filter(c=>list.indexOf(c)<0);
+if(!TX.draft.changes.length){TX.draft=null;return 'Removed '+names+'. The draft is now empty.'}
+const n=TX.draft.changes.length;return 'Removed '+names+'. '+n+' '+(n>1?'items are':'item is')+' left in the draft. Not saved yet.'}
+function removeChange(ci){const c=TX.draft&&TX.draft.changes[ci];if(!c)return;const m=removeChanges([c]);redraw();say(m)}
+function wireDraft(p){
+p.onclick=function(e){const rm=e.target.closest('[data-rm]');if(rm){e.stopPropagation();removeChange(+rm.dataset.rm);return}
+const tg=e.target.closest('[data-tg]');if(tg){const c=TX.draft&&TX.draft.changes[+tg.dataset.tg];if(c){c._open=!c._open;redraw()}}};
+p.onchange=function(e){const t=e.target;if(t&&t.classList&&t.classList.contains('aiIn'))editField(+t.dataset.ci,t.dataset.k,t.value)}}
+function diffCard(c,ci){
+if(c.op==='add')return addCard(c,ci);
+let h='<div class="aiCard"><div class="aiCardH"><span>';
+if(c.op==='update'){h+='✏️ '+esc(recLabel(c.before,c.store))+'</span>'+rmBtn(ci)+'</div><table><tr><th>Field</th><th>Before</th><th>After</th></tr>'+Object.keys(c.fields||{}).map(k=>'<tr><td>'+esc(k)+'</td><td class="bef">'+esc(fmt((c.before||{})[k]))+'</td><td class="aft">'+esc(fmt(c.fields[k]))+'</td></tr>').join('')+'</table>';}
+else if(c.op==='split'){const old=((c.before||{}).splits||{})[c.stage];h+='🔀 '+esc(recLabel(c.before,c.store))+' · '+esc(c.stage)+'</span>'+rmBtn(ci)+'</div><table><tr><th></th><th>Before</th><th>After</th></tr><tr><td>Craftsmen</td><td class="bef">'+esc(old?old.map(x=>x.name+' ('+x.qty+')').join(', '):'—')+'</td><td class="aft">'+esc((c.splits||[]).map(x=>x.name+' ('+x.qty+')').join(', '))+'</td></tr></table>';}
+else h+='</span></div>';
+return h+'</div>'}
+/* ---- typed / spoken edit commands that work without the AI ---- */
+const FWORDS=[['woodSupplier',/^(?:wood\s*)?(?:supplier|suplier|vendor|sup)s?\b/i],['itemName',/^(?:item\s*name|itemname|description|desc)\b/i],['itemCode',/^(?:item\s*code|itemcode|code)\b/i],['buyer',/^buyer\b/i],['size',/^(?:size|dimension|dimensions)\b/i],['qty',/^(?:qty|quantity|pcs|pieces)\b/i],['cbm',/^cbm\b/i]];
+const FLBL={woodSupplier:'Supplier',itemName:'Item name',itemCode:'Item code',buyer:'Buyer',size:'Size',qty:'Qty',cbm:'CBM'};
+function draftAdds(){return TX.draft?TX.draft.changes.map(c=>({c})).filter(z=>z.c.op==='add'&&(z.c.store||'work')==='work'):[]}
+function pickTargets(low,adds){
+let m=low.match(/(?:tae\s*\/?\s*)?(\d{3,6})\s*\/\s*(\d{1,3})\b/);
+if(m){const l=adds.filter(z=>String(z.c.record.subOrder||'').replace(/\s/g,'').toLowerCase().endsWith(m[1]+'/'+m[2]));return {list:l,ref:m[1]+'/'+m[2]}}
+m=low.match(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*(\d{1,3})\b/)||low.match(/^\s*#?(\d{1,3})\b(?=\s*(?:ka|ki|ke|me|mein|ko|:)|\s+(?:size|buyer|supplier|qty|code|item|cbm|hata|hta|hatao|delete|remove))/)||low.match(/\b(?:hata|hatao|hta|delete|remove|nikal)\s*(?:do|de)?\s*(?:entry|sub\s*order|sr)?\s*#?(\d{1,3})\b/);
+if(m){const n=+m[1];let l=adds.filter(z=>{const g=grp(z.c.record.subOrder);return g.length&&+g[g.length-1]===n});if(!l.length&&adds[n-1])l=[adds[n-1]];return {list:l,ref:'entry '+n}}
+if(/\b(last|aakhri|akhri|akhir)\b/.test(low)&&adds.length)return {list:[adds[adds.length-1]],ref:'the last entry'};
+return null}
+function localCmd(raw){
+const adds=draftAdds();if(!adds.length)return null;
+const t=String(raw||'').trim().replace(/\s+/g,' ');if(!t||t.length>200)return null;
+const low=t.toLowerCase(),tg=pickTargets(low,adds),ALL=/\b(sab|sabhi|saare|sare|all|every|har)\b/.test(low);
+const sh=r=>(r&&r.subOrder)||'entry';
+/* 1) remove an entry */
+if(/\b(hata|hatao|hatado|hta|delete|remove|nikal|nikaal|drop)\b/.test(low)&&!/\b(supplier|code|size|buyer|qty|cbm)\b/.test(low)){
+if(!tg)return 'Which entry should I remove? Say for example "remove 6", or tap the 🗑 button on that entry.';
+if(!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';
+return removeChanges(tg.list.map(z=>z.c))}
+/* 2) keep only item codes that start with the given prefixes */
+if(/\bcode\b/.test(low)&&/\b(wale|wala|wali|waale|only|rakho|rkho|rakh|rkh|rakhna|keep|sirf)\b/.test(low)){
+const stop=new Set('code item wale wala wali waale rakho rkho rakh rkh rakhna keep only sirf bas sab sabhi all ka ke ki me mein entry entries or aur and ko hi se of the'.split(' '));
+const body=low.replace(/(?:tae\s*\/?\s*)?\d{3,6}\s*\/\s*\d{1,3}/g,' ').replace(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*\d{1,3}\b/g,' ');
+const toks=body.split(/[^a-z0-9]+/).filter(w=>w&&!stop.has(w)&&/[a-z]/.test(w));
+if(!toks.length)return 'Tell me which code prefixes to keep, for example "code DIAM AM FF only".';
+if(tg&&!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';
+const L=tg?tg.list:adds;let ch=0;const none=[];
+L.forEach(z=>{const r=z.c.record,parts=String(r.itemCode||'').split('/').map(x=>x.trim()).filter(Boolean),keep=parts.filter(p=>toks.some(x=>p.toLowerCase().startsWith(x)));
+if(!keep.length){none.push(sh(r));return}
+const nv=keep.join('/');if(nv!==r.itemCode){r.itemCode=nv;ch++}});
+return 'Item code: kept only the '+toks.map(x=>x.toUpperCase()).join(' / ')+' code on '+ch+' of '+L.length+' entries.'+(none.length?' No matching code on: '+none.join(', ')+'.':'')+' Not saved yet.'}
+/* 3) set one field */
+let body=t.replace(/(?:tae\s*\/?\s*)?\d{3,6}\s*\/\s*\d{1,3}/i,' ').replace(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*\d{1,3}\b/i,' ').replace(/^\s*#?\d{1,3}\b(?=\s*(?:ka|ki|ke|me|mein|ko|:)|\s+(?:size|buyer|supplier|qty|code|item|cbm))/i,' ').replace(/\b(?:last|aakhri|akhri)\s*(?:wali|wala|wale|entry)?\b/i,' ');
+body=body.replace(/^[\s,:\-]*(?:(?:sab|sabhi|saare|sare|all|every|har)\s*(?:entry|entries|me|mein|ka|ki|ke|ko)?\s*)?(?:(?:ka|ki|ke|ko|me|mein|of|for|entry|entries)\s*)*/i,'').trim();
+let key=null,rest='';
+for(const [k,rx] of FWORDS){const m=body.match(rx);if(m){key=k;rest=body.slice(m[0].length);break}}
+if(!key)return null;
+rest=rest.replace(/^[\s:=\-]+/,'').replace(/^(?:to|as|ko|me|mein|se|is|hai)\b\s*/i,'').replace(/\s*\b(?:kar\s*do|kardo|kar\s*dijiye|karo|karna|kro|kar|set|rakho|rkho|rakh|please|pls|chahiye|daal\s*do|dalo|likho|change|update)\s*$/i,'').trim();
+if(!rest)return 'What should the '+FLBL[key].toLowerCase()+' be?';
+if(tg&&!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';
+const L=tg?tg.list:((ALL||adds.length===1||key==='buyer')?adds:null);
+if(!L)return 'Which entry? Say for example "6 '+(key==='woodSupplier'?'supplier':FLBL[key].toLowerCase())+' '+rest+'", or "all '+(key==='woodSupplier'?'supplier':FLBL[key].toLowerCase())+' '+rest+'".';
+const f=cleanFields({[key]:rest});L.forEach(z=>{z.c.record=Object.assign({},z.c.record,f)});
+let msg='Updated '+FLBL[key].toLowerCase()+' to "'+f[key]+'" on '+(L.length===1?sh(L[0].c.record):L.length+' entries')+'.';
+if(key==='woodSupplier'&&!supKnown(f[key]))msg+=' Note: this supplier is not in your supplier list.';
+return msg+' Not saved yet.'}
+function tfetch(u,o){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),45000);return fetch(u,Object.assign({},o,{signal:ac.signal})).catch(e=>{throw Error(e&&e.name==='AbortError'?'The AI took too long (45 s). Try again.':String((e&&e.message)||e))}).finally(()=>clearTimeout(t))}
 function toolDefs(){return [
-{type:'function',function:{name:'search_records',description:'Search records. Read-only. For store=work you can filter by TAE, sub-order, buyer, item, contractor, size. For orders/repairs use query or filters on any field name.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},query:{type:'string'},filters:{type:'object',additionalProperties:true}},required:[]}}},
+{type:'function',function:{name:'search_records',description:'Search records. Read-only. For store=work you can filter by TAE, sub-order, buyer, item, contractor, size. For orders/repairs use query or filters on any field name.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},query:{type:'string'},filters:{type:'object',properties:FILTER_PROPS}},required:[]}}},
 {type:'function',function:{name:'open_record',description:'Open one record read-only. For work: by TAE number and optional sub-order. For orders/repairs: by recordId from search_records.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},tae:{type:'string'},subOrder:{type:'string'},recordId:{type:'string'}},required:[]}}},
-{type:'function',function:{name:'propose_update',description:'Stage a field update on the open record (or recordId/TAE). Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},fields:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['fields']}}},
-{type:'function',function:{name:'propose_add',description:'Stage a NEW record. Fields merge into the new record already in the draft. Kept in memory only, never saved.',parameters:{type:'object',properties:{new_record:{type:'boolean',description:'true only to start a SECOND separate new record'},store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',additionalProperties:true},reason:{type:'string'}},required:['record']}}},
+{type:'function',function:{name:'propose_update',description:'Stage a field update on the open record (or recordId/TAE). Kept in memory only, never saved.',parameters:{type:'object',properties:{store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},fields:{type:'object',properties:REC_PROPS},reason:{type:'string'}},required:['fields']}}},
+{type:'function',function:{name:'propose_add',description:'Stage a NEW record. Fields merge into the new record already in the draft. Kept in memory only, never saved.',parameters:{type:'object',properties:{new_record:{type:'boolean',description:'true only to start a SECOND separate new record'},store:{type:'string',enum:['work','orders','repairs'],description:'Which list. Default work (production records with TAE numbers).'},record:{type:'object',properties:REC_PROPS},reason:{type:'string'}},required:['record']}}},
 {type:'function',function:{name:'propose_split',description:'Stage a craftsman/contractor quantity split (store=work only). Never saved.',parameters:{type:'object',properties:{recordId:{type:'string'},tae:{type:'string'},subOrder:{type:'string'},stage:{type:'string'},splits:{type:'array',items:{type:'object',properties:{name:{type:'string'},qty:{type:'number'}},required:['name','qty']}},reason:{type:'string'}},required:['stage','splits']}}}
 ] }
 function grp(x){return String(x||'').match(/\d+/g)||[]}
@@ -9423,7 +9528,6 @@ if(!a.tae)return {error:'No record is open. Ask the user for the TAE number (and
 const m=findRecords({tae:a.tae,subOrder:a.subOrder,query:''});
 if(m.length===1)return {hit:Object.assign(m[0],{store:'work'})};
 return {error:m.length?'Multiple records match. Ask the user which sub-order.':'No matching record found.',matches:m.map(z=>({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty}))};}
-function cleanFields(f){const o={},BAD={'__proto__':1,'constructor':1,'prototype':1,'id':1,'_id':1};Object.keys(f||{}).forEach(k=>{if(BAD[k])return;let v=f[k];if(k==='size'&&typeof normSize==='function'){try{const z=normSize(String(v));if(z&&z.size)v=z.size}catch(e){}}o[k]=v});return o}
 function provisional(name,a){a=a||{};const st=nstore(a);if(!st)return {error:'store must be work, orders or repairs'};
 if(name==='search_records'){if(st!=='work')return {matches:genericFind(st,a)};return {matches:findRecords(a).map(z=>Object.assign({id:z.id,tae:z.tae,subOrder:z.subOrder,buyer:z.buyer,itemCode:z.itemCode,itemName:z.itemName,size:z.size,qty:z.qty},dtl(z.record)))};}
 if(name==='open_record'){if(st==='work'&&!a.tae&&!a.recordId)return {error:'TAE number is required to open a record.'};const r=locate(a);if(r.error)return r;TX.opened=r.hit;return {opened:true,store:st,record:r.hit.record,notice:'Record opened (read-only, nothing changed). Show the key fields to the user, confirm it is the right one, then ask what to change.'};}
@@ -9440,11 +9544,11 @@ else if(change.op==='split'){const k=TX.draft.changes.findIndex(z=>z.op==='split
 else if(change.op==='add'){const sk=String((change.record||{}).subOrder||'').toLowerCase();const prior=a.new_record?null:TX.draft.changes.find(z=>z.op==='add'&&z.store===change.store&&(!sk||String((z.record||{}).subOrder||'').toLowerCase()===sk));if(prior){prior.record=Object.assign({},prior.record,change.record);change=prior;}else TX.draft.changes.push(change);}
 else TX.draft.changes.push(change);
 showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||change.splits||change.record,notice:'Provisional only, kept in memory. NOT saved. Tell the user what is staged and ask if they want more changes or to say "save".'};}
-async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. Reply in the same language the user writes in (Hindi, Hinglish or English); keep replies short. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
+async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. ALWAYS reply in plain English only, never Hindi or Hinglish, even when the user writes Hindi or Hinglish; keep replies short. Formatting rules for every field you stage: buyer uses a hyphen instead of a space (M 2 = M-2); size uses the × sign between numbers (140×45×75); supplier is the registered supplier name (a supplier code means that registered name); item code has no spaces around - or /. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
-const res=await fetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
-if(!res.ok)throw Error('AI API error '+res.status);const j=await res.json(),m=j.choices?.[0]?.message;if(!m)throw Error('AI returned an empty response');messages.push(m);
+const res=await tfetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
+if(!res.ok){let eb='';try{eb=(await res.text()).slice(0,200)}catch(e){}throw Error('AI API error '+res.status+(eb?': '+eb:''))}const j=await res.json(),m=j.choices?.[0]?.message;if(!m)throw Error('AI returned an empty response');messages.push(m);
 if(!m.tool_calls?.length){TX.turns.push({role:'user',content:text},{role:'assistant',content:m.content||'I could not complete that request.'});TX.turns=TX.turns.slice(-16);return m.content||'I could not complete that request.';}
 for(const tc of m.tool_calls){let args={};try{args=JSON.parse(tc.function.arguments||'{}')}catch(e){}let result;try{result=provisional(tc.function.name,args)}catch(e){result={error:String(e.message||e)}}messages.push({role:'tool',tool_call_id:tc.id,content:JSON.stringify(result)});}
 }
@@ -9452,26 +9556,28 @@ return 'I prepared the available tool results. Please clarify the next step.';
 }
 async function commit(){const d=TX.draft;if(!d)return;
 if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode){if(typeof say==='function')say('Only Admin can save changes to the database. Draft kept, nothing written.');return;}
-try{const lists={};const get=st=>lists[st]||(lists[st]=JSON.parse(JSON.stringify(store(st))));
+let skipped=0;try{const lists={};const get=st=>lists[st]||(lists[st]=JSON.parse(JSON.stringify(store(st))));
 for(const c of d.changes){const st=c.store||'work';if(!STORES.includes(st))throw Error('Invalid store '+st);
+if(c.op==='add'&&dupOf(c)){skipped++;continue}
 if(c.op==='add'){get(st).push(Object.assign({id:'ai_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)},c.record));continue;}
 const r=get(st)[c.index];if(!r||(c.id&&r.id&&String(r.id)!==String(c.id)))throw Error('A record changed or disappeared. Search again before confirming.');
 if(c.op==='update')Object.keys(c.fields||{}).forEach(k=>{if(k!=='id'&&k!=='__proto__'&&k!=='constructor'&&k!=='prototype')r[k]=c.fields[k]});
 if(c.op==='split'){r.splits=r.splits||{};r.splits[c.stage]=c.splits.map(x=>({name:x.name,qty:Number(x.qty),done:0}));}}
+if(!Object.keys(lists).length){if(typeof say==='function')say('Nothing was saved. Every entry in the draft already exists. Remove them or change the sub-order.');return}
 Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw);try{if(typeof touch==='function')nw.forEach((r,i)=>{if(!old[i]||JSON.stringify(old[i])!==JSON.stringify(r))touch(st,r)})}catch(e){}});
 if(typeof save==='function')save();
 if(typeof doPushCloud==='function')await doPushCloud();
 try{if(typeof render==='function')render()}catch(e){}
-TX.draft=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Confirmed. Changes saved to the app and synced to Firebase (thar_factory).');}
-catch(e){if(typeof say==='function')say('Could not commit the draft: '+String(e.message||e)+'. No success was reported.');}}
+TX.draft=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app and synced to the cloud.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
+catch(e){if(typeof say==='function')say('Could not save the draft: '+String(e.message||e)+'. Nothing was reported as saved.');}}
 const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
-if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('Koi pending change nahi hai, isliye kuch save nahi hua.');return;}await commit();return;}
-if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discard kar diya. Database mein kuch change nahi hua.');}else if(typeof say==='function')say('Koi pending draft nahi hai.');return;}if(TX.busy){TX.q.push(text);return;}TX.busy=true;let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the selected API key/model in AI settings. No offline canned response was used.');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
+if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('There is nothing pending, so nothing was saved.');return;}await commit();return;}
+if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. Nothing was changed in the database.');}else if(typeof say==='function')say('There is no pending draft.');return;}{const lc=localCmd(text);if(lc){say(lc);showDraft();return}}if(!cfg()){say('Free-text commands need an AI key (⚙ settings). You can still tap an entry in the draft to edit it, or use commands like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6".');return}if(TX.busy&&Date.now()-(TX.busyAt||0)>60000)TX.busy=false;if(TX.busy){TX.q.push(text);return;}TX.busy=true;TX.busyAt=Date.now();let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the API key and model in the AI settings (⚙).');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
 /* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
-window.__tharDynamicSend=function(text){if(!cfg())return false;sendDynamic(text);return true;};
-window.__tharDynamicSend.active=function(){return !!cfg()};
+window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft)return false;sendDynamic(text);return true;};
+window.__tharDynamicSend.active=function(){return !!cfg()||!!TX.draft};
 function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
 const sendBtn=form.querySelector('button[aria-label="Send"]');
 const waves=document.createElement('span');waves.id='aiVoiceWaves';for(let i=0;i<9;i++)waves.appendChild(document.createElement('i'));form.insertBefore(waves,sendBtn);
@@ -9492,7 +9598,7 @@ rec.onresult=e=>{let fin='',interim='',alts=[];for(let i=e.resultIndex;i<e.resul
 if(interim&&!fin&&TX.rec===rec){input.placeholder='🎙 '+interim;}
 if(fin){input.placeholder=TX.rec===rec?'🎙 …':PH;fin=fixSpeech(fin);TX.alts=alts.map(fixSpeech).filter(a=>a&&a!==fin);input.value=(input.value+' '+fin).trim();TX.altsFor=input.value.trim();input.dispatchEvent(new Event('input',{bubbles:true}));if(form.requestSubmit)form.requestSubmit();else form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));}};
 rec.onerror=e=>{const fatal=['not-allowed','service-not-allowed','audio-capture','network','language-not-supported'].includes(e.error);
-if(e.error!=='no-speech'&&e.error!=='aborted'&&typeof say==='function')say(fatal&&e.error!=='network'?'Mic start nahi hua ('+e.error+'). Mic permission allow karo, aur page ko Chrome mein HTTPS par kholo (content:// ya file:// par mic block ho sakta hai).':'Voice input issue: '+e.error);
+if(e.error!=='no-speech'&&e.error!=='aborted'&&typeof say==='function')say(fatal&&e.error!=='network'?'The microphone could not start ('+e.error+'). Allow microphone permission and open the page in Chrome over HTTPS (the mic can be blocked on content:// or file://).':'Voice input issue: '+e.error);
 if(fatal)finishUi();};
 rec.onend=()=>{if(TX.rec===rec)finishUi();};
 try{rec.start()}catch(e){finishUi();}}
@@ -9509,7 +9615,7 @@ input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();}
 
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
-window.THAR_AI_TX={state:TX,provisional:provisional,showDraft:showDraft,commit:commit};
+window.THAR_AI_TX={state:TX,provisional:provisional,showDraft:showDraft,commit:commit,clean:cleanFields,local:localCmd,dupOf:dupOf};
 })();
 </script>
 
@@ -9708,7 +9814,7 @@ function openAssistant(){var b=document.getElementById('taeBox');if(b&&b.classLi
 /* ---------- files -> images ---------- */
 function toJpeg(src,w,h,max){var s=Math.min(1,max/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.round(w*s);c.height=Math.round(h*s);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.88)}
 async function imgFile(f){var bm=await createImageBitmap(f,{imageOrientation:'from-image'});var u=toJpeg(bm,bm.width,bm.height,2000);if(bm.close)bm.close();return u}
-function loadPdfJs(){return new Promise(function(res,rej){if(window.pdfjsLib)return res(window.pdfjsLib);var s=document.createElement('script');s.src=PDFJS;s.onload=function(){res(window.pdfjsLib)};s.onerror=function(){rej(Error('PDF reader load nahi hua (internet check karo)'))};document.head.appendChild(s)})}
+function loadPdfJs(){return new Promise(function(res,rej){if(window.pdfjsLib)return res(window.pdfjsLib);var s=document.createElement('script');s.src=PDFJS;s.onload=function(){res(window.pdfjsLib)};s.onerror=function(){rej(Error('The PDF reader could not load. Check your internet connection.'))};document.head.appendChild(s)})}
 async function pdfFile(f){
   var lib=await loadPdfJs();
   try{var w=await (await fetch(PDFW)).blob();lib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(w)}catch(e){lib.GlobalWorkerOptions.workerSrc=PDFW}
@@ -9731,20 +9837,21 @@ function getCfg(){
     s.url=g?'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions':'https://api.openai.com/v1/chat/completions';
     if(g){if(!s.model||/^gpt/i.test(s.model))s.model='gemini-3.5-flash-lite'}else if(!s.model||/^gemini/i.test(s.model))s.model='gpt-6-luna';
     return s}catch(e){return null}}
+function fetchT(u,o){var ac=new AbortController(),t=setTimeout(function(){ac.abort()},90000);return fetch(u,Object.assign({},o,{signal:ac.signal})).catch(function(e){throw Error(e&&e.name==='AbortError'?'The AI took too long (90 s)':String((e&&e.message)||e))}).finally(function(){clearTimeout(t)})}
 async function askAI(imgs,txt,note){
   var c=getCfg();if(!c)throw Error('NOAI');
   var content=[{type:'text',text:'Read these order sheet page(s) and return the JSON.'+(note?'\nUser instruction (follow it, e.g. which rows/supplier/code to take): '+note:'')+(txt?'\nExtra text layer from the PDF (use to double-check digits):'+txt.slice(0,9000):'')}];
   imgs.forEach(function(u){content.push({type:'image_url',image_url:{url:u}})});
-  var r=await fetch(c.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.key},body:JSON.stringify({model:c.model,messages:[{role:'system',content:SYS},{role:'user',content:content}]})});
+  var r=await fetchT(c.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.key},body:JSON.stringify({model:c.model,messages:[{role:'system',content:SYS},{role:'user',content:content}]})});
   if(!r.ok)throw Error('AI error '+r.status);
   var j=await r.json(),m=j.choices&&j.choices[0]&&j.choices[0].message,t=String((m&&m.content)||'').replace(/```json|```/g,'');
-  var a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<a)throw Error('AI se sheet ka data nahi mila');
+  var a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<a)throw Error('The AI did not return any sheet data');
   return JSON.parse(t.slice(a,b+1));
 }
 
 /* ---------- stage drafts ---------- */
 function stage(d){
-  var T=P();if(!T||!T.provisional)throw Error('Assistant draft system ready nahi hai, page refresh karo');
+  var T=P();if(!T||!T.provisional)throw Error('The assistant draft system is not ready. Refresh the page.');
   var items=(d.items||[]).slice(),anyMarks=!!d.anyMarks,mk=items.filter(function(i){return i.marked});
   if(anyMarks&&mk.length)items=mk;
   var buyer=String(d.buyer||'').replace(/^buyer\s*:?/i,'').trim(),orderNo=String(d.orderNo||'').trim(),tgt='';
@@ -9758,8 +9865,9 @@ function stage(d){
       size:String(it.size||'').replace(/(\d)\.0+(?!\d)/g,'$1').replace(/\s*cm/i,'').replace(/\s+/g,''),sizeUnit:'Cm',qty:qty,cbm:tot,woodSupplier:vend,date:today()};
     if(tgt)rec.targetDate=tgt;
     var ex=((T.provisional('search_records',{store:'work',query:sub})||{}).matches||[]).some(function(x){return String(x.subOrder).toLowerCase()===sub.toLowerCase()});
-    if(ex){skipped.push(sub);return}
-    T.provisional('propose_add',{store:'work',new_record:true,record:rec,reason:'Order sheet '+(rec.orderNo)+' se '+items.length+' entry'});
+    if(ex)skipped.push(sub);
+    if(T.clean)rec=Object.assign({},rec,T.clean(rec));
+    T.provisional('propose_add',{store:'work',new_record:true,record:rec,reason:'From order sheet '+rec.orderNo+': '+items.length+' entries'});
     rows.push(rec);qtyS+=qty;cbmS+=tot;
   });
   if(T.showDraft)T.showDraft();
@@ -9767,17 +9875,17 @@ function stage(d){
 }
 function report(s){
   var L=[];
-  if(!s.rows.length){say('Sheet padh li, par nayi entry nahi bani'+(s.skipped.length?' — ye sub-order pehle se maujood hain: '+s.skipped.join(', ')+'.':'. Photo saaf/seedhi lekar dobara try karo.'));return}
-  L.push('📄 '+s.orderNo+' · Buyer '+s.buyer+' — '+s.rows.length+' entry taiyar'+(s.marked?' (sirf marked/underline wali rows li)':''));
+  if(!s.rows.length){say('I read the sheet but could not create any entry. Please retake the photo flat and clear.');return}
+  L.push('📄 '+s.orderNo+' · Buyer '+s.buyer+' — '+s.rows.length+' entries ready'+(s.marked?' (only the marked/underlined rows were taken)':''));
   L.push('');L.push('| Sub-order | Item code | Item | Size | Qty | Total CBM | Supplier |');L.push('|---|---|---|---|---|---|---|');
-  s.rows.forEach(function(r){L.push('| '+[r.subOrder,r.itemCode,r.itemName,r.size,r.qty,r.cbm.toFixed(2),r.woodSupplier||'?'].join(' | ')+' |')});
+  s.rows.forEach(function(r){L.push('| '+[r.subOrder,r.itemCode,r.itemName,r.size,r.qty,Number(r.cbm).toFixed(2),r.woodSupplier||'?'].join(' | ')+' |')});
   L.push('');L.push('Total: '+s.qty+' pcs · '+s.cbm.toFixed(2)+' CBM');
   var sq=num(s.d.sheetTotalQty),sc=num(s.d.sheetTotalCbm);
-  if(!s.marked&&sc){L.push(Math.abs(sc-s.cbm)<=0.05&&(!sq||sq===s.qty)?'✓ Sheet ke TOTAL ('+sc.toFixed(2)+' CBM) se match hai.':'⚠ Sheet ka TOTAL '+(sq?sq+' pcs · ':'')+sc.toFixed(2)+' CBM hai, mera hisaab alag hai — photo/rows check karo.')}
-  if(s.skipped.length)L.push('Pehle se maujood (skip): '+s.skipped.join(', '));
-  var many=s.rows.filter(function(r){return r.woodSupplier.indexOf(',')>0}).map(function(r){return r.subOrder});
-  if(many.length)L.push('Supplier ek se zyada hain ('+many.join(', ')+') — sheet par jo supplier underline hai ya batao kaun sa lena hai.');
-  L.push('');L.push('Abhi SAVE nahi hua. Galat ho to bolo, jaise: "'+s.rows[0].subOrder+' ka size 140x43x80 karo" ya "supplier Kala Handicrafts karo". Sahi ho to Confirm & save dabao.');
+  if(!s.marked&&sc){L.push(Math.abs(sc-s.cbm)<=0.05&&(!sq||sq===s.qty)?'✓ Matches the sheet TOTAL ('+sc.toFixed(2)+' CBM).':'⚠ The sheet TOTAL is '+(sq?sq+' pcs · ':'')+sc.toFixed(2)+' CBM but my sum differs. Please check the photo or the rows.')}
+  if(s.skipped.length)L.push('⚠ Entry already exists: '+s.skipped.join(', ')+' (shown in red, skipped on save).');
+  var many=s.rows.filter(function(r){return String(r.woodSupplier||'').indexOf(',')>0}).map(function(r){return r.subOrder});
+  if(many.length)L.push('More than one supplier on '+many.join(', ')+'. Type the supplier code or name for each, for example "'+many[0].split('/').pop()+' supplier SRSI".');
+  L.push('');L.push('NOT saved yet. Tap an entry in the draft to edit it, or type a command like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6". Tap Confirm & save when it looks right.');
   say(L.join('\n'));
 }
 
@@ -9790,11 +9898,11 @@ async function run(parts,label,note){
       if(typeof p==='string')imgs.push(p);
       else if(/pdf$/i.test(p.type)||/\.pdf$/i.test(p.name)){var r=await pdfFile(p);imgs=imgs.concat(r.imgs);txt+=r.txt}
       else imgs.push(await imgFile(p));}
-    if(!imgs.length)throw Error('Koi page nahi mila');
+    if(!imgs.length)throw Error('No page found');
     var d=await askAI(imgs.slice(0,8),txt,note);report(stage(d));
   }catch(e){
-    if(e.message==='NOAI')say('Photo/PDF padhne ke liye AI key chahiye. Assistant ke ⚙ settings mein Gemini ya ChatGPT key daalo, phir dobara bhejo.');
-    else say('Sheet nahi padh paya: '+(e.message||e)+'. Photo seedhi aur saaf lekar dobara try karo.');
+    if(e.message==='NOAI')say('An AI key is needed to read a photo or PDF. Add a Gemini or ChatGPT key in the assistant ⚙ settings, then send it again.');
+    else say('Could not read the sheet: '+(e.message||e)+'. Retake the photo flat and clear and try again.');
   }finally{a.hold(-1)}
 }
 
@@ -9803,11 +9911,11 @@ function camera(){
   if(document.getElementById('aiCam'))return;
   var md=navigator.mediaDevices;if(!md||!md.getUserMedia)return pickCapture();
   var o=document.createElement('div');o.id='aiCam';
-  o.innerHTML='<video playsinline autoplay muted></video><div class="hint">Sheet ko seedha rakho, poora frame mein. Kai page hon to sab ki photo lo.</div><div class="tray"></div><div class="bar"><button data-x="close">Band</button><button class="shot" data-x="shot" aria-label="Photo lo"></button><button class="go" data-x="go" disabled>Scan (0)</button></div>';
+  o.innerHTML='<video playsinline autoplay muted></video><div class="hint">Hold the sheet flat and fit the whole page in the frame. If there are several pages, take a photo of each one.</div><div class="tray"></div><div class="bar"><button data-x="close">Close</button><button class="shot" data-x="shot" aria-label="Take photo"></button><button class="go" data-x="go" disabled>Scan (0)</button></div>';
   document.body.appendChild(o);
   var v=o.querySelector('video'),tray=o.querySelector('.tray'),go=o.querySelector('.go'),shots=[],st=null;
   function close(){if(st)st.getTracks().forEach(function(t){t.stop()});o.remove()}
-  md.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:2560},height:{ideal:1920}},audio:false}).then(function(s){st=s;v.srcObject=s;if(!document.getElementById('aiCam'))close()}).catch(function(){close();say('Camera permission nahi mili. Browser/app ki settings mein Camera allow karo, ya 📎 se photo upload karo.')});
+  md.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:2560},height:{ideal:1920}},audio:false}).then(function(s){st=s;v.srcObject=s;if(!document.getElementById('aiCam'))close()}).catch(function(){close();say('Camera permission was denied. Allow the camera in your browser or app settings, or upload a photo with the 📎 button.')});
   o.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;var x=b.dataset.x;
     if(x==='close')close();
     else if(x==='shot'){if(!v.videoWidth)return;var u=toJpeg(v,v.videoWidth,v.videoHeight,2000);shots.push(u);var im=new Image();im.src=u;tray.appendChild(im);go.disabled=false;go.textContent='Scan ('+shots.length+')'}
@@ -9824,7 +9932,7 @@ function renderTray(){var t=ensureTray();if(!t)return;t.innerHTML='';t.hidden=!a
   att.forEach(function(a,i){var c=document.createElement('div');c.className='aiAtt';
     if(a.thumb){var im=new Image();im.src=a.thumb;c.appendChild(im)}else{var s=document.createElement('span');s.textContent='📄';c.appendChild(s)}
     var n=document.createElement('em');n.textContent=a.name;c.appendChild(n);
-    var x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('aria-label','Hatao');x.onclick=function(){att.splice(i,1);renderTray()};c.appendChild(x);t.appendChild(c)});
+    var x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('aria-label','Remove');x.onclick=function(){att.splice(i,1);renderTray()};c.appendChild(x);t.appendChild(c)});
   if(att.length){var g=document.createElement('button');g.type='button';g.className='aiAttGo';g.textContent='Scan ➤';g.onclick=fire;t.appendChild(g)}}
 function stageAdd(list){list.forEach(function(p){
     if(typeof p==='string')att.push({data:p,thumb:p,name:'Photo '+(att.length+1)});
@@ -9839,7 +9947,7 @@ var pt=setInterval(function(){var f=document.getElementById('taeForm');if(f){cle
 window.__aiScan={camera:camera,pick:pick,run:run};
 
 /* let the AI correct one pending scanned record by its sub-order */
-var EXTRA=' A scanned order sheet may leave several NEW pending records in the draft. To correct one, call propose_add with record containing its subOrder (e.g. TAE/2927/1) plus only the corrected fields; it merges into that pending record (never set new_record for a correction). Record fields: orderNo, subOrder, itemCode, buyer, itemName, size (e.g. 141x43x80), sizeUnit, qty, cbm (TOTAL CBM of the row), woodSupplier. Supplier means the factory/vendor name only.';
+var EXTRA=' A scanned order sheet may leave several NEW pending records in the draft. To correct one, call propose_add with record containing its subOrder (e.g. TAE/2927/1) plus only the corrected fields; it merges into that pending record (never set new_record for a correction). Record fields: orderNo, subOrder, itemCode, buyer, itemName, size (e.g. 141x43x80), sizeUnit, qty, cbm (TOTAL CBM of the row), woodSupplier. Supplier means the factory/vendor name only. Formatting: buyer uses hyphens instead of spaces (M 2 = M-2); size uses the × sign between numbers; a supplier code means the registered supplier name; to remove a pending new entry the user taps Remove or says remove <n> (the app handles that).';
 var base=window.TAE_FMT;
 try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){return (base||'')+EXTRA},set:function(v){base=v}})}catch(e){}
 })();
