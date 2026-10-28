@@ -1599,10 +1599,10 @@ async function cloudPushOnce() {
   for (let i = 0; i < ops.length; i += 400) {
     const chunk = ops.slice(i, i + 400), b = window.cloudDb.batch();
     chunk.forEach(o => { if (o.t === 's') b.set(o.ref, JSON.parse(o.json)); else b.delete(o.ref); });
-    await b.commit();
+    await Promise.race([b.commit(), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
     chunk.forEach(o => { if (o.t === 's') cloudSig[o.col].set(o.idv, o.sig); else cloudSig[o.col].delete(o.idv); });
   }
-  await window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: Date.now() }), { merge: true });
+  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: Date.now() }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
   cloudSig.meta = metaSig;
 }
 
@@ -1721,7 +1721,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.81-live';
+const APP_VER = 'V1.0.82-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -9265,7 +9265,7 @@ function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
   typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
-  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 140; let added = false;
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 140; let added = false, firstNew = null;
   const dots = el.querySelector(':scope > .taeDots');
   const nodes = [...el.querySelectorAll(':scope > .taeM[data-i]')];
   const mk = h => { const t = document.createElement('div'); t.innerHTML = h; return t.firstChild; };
@@ -9279,14 +9279,18 @@ function draw(typing) {
     else if (looksMd(m.text)) h = '<div class="taeM b md' + g + '" data-i="' + i + '">' + mdHtml(m.rev != null ? m.text.split('\n').slice(0, m.rev).join('\n') : m.text) + tail;
     else h = '<div class="taeM b' + g + '" data-i="' + i + '">' + esc(m.text) + tail;
     const old = nodes[i];
-    if (!old) { const n = mk(h); n.__k = h; el.insertBefore(n, dots || keep || null); added = true; }
+    if (!old) { const n = mk(h); n.__k = h; el.insertBefore(n, dots || keep || null); added = true; if (!firstNew) firstNew = n; }
     else if (old.__k !== h) { const n = mk(h); n.classList.add('nA'); n.__k = h; old.replaceWith(n); }
   });
   for (let i = log.length; i < nodes.length; i++) nodes[i].remove();
-  if (typing && !dots) { const d = mk('<div class="taeM b taeDots"><i></i><i></i><i></i></div>'); el.insertBefore(d, keep || null); added = true; }
+  if (typing && !dots) { const d = mk('<div class="taeM b taeDots"><i></i><i></i><i></i></div>'); el.insertBefore(d, keep || null); added = true; if (!firstNew) firstNew = d; }
   else if (!typing && dots) dots.remove();
   if (keep && keep.parentNode === el && keep !== el.lastElementChild) el.appendChild(keep);
-  if (added || near || typing) el.scrollTop = el.scrollHeight;
+  if (added && keep && !keep.hidden && keep.parentNode === el) {
+    /* tall draft panel is the last child: scroll to the newest message (with the question above it), not to the panel's bottom */
+    let t = firstNew; if (t && t.previousElementSibling && t.previousElementSibling.classList.contains('u')) t = t.previousElementSibling;
+    if (t) el.scrollTop += t.getBoundingClientRect().top - el.getBoundingClientRect().top - 6; else el.scrollTop = el.scrollHeight;
+  } else if (added || near || typing) el.scrollTop = el.scrollHeight;
 }
 function pendCtx() { try { return S.items.map(u => (u.tae ? 'TAE/' + u.tae.n + (u.sub ? '/' + u.sub : '') : 'TAE ?') + ' ' + (u.name || u.raw || 'unknown') + ' ' + (STL[u.stage] || u.stage) + ' done ' + (u.done != null ? u.done : '?') + (u.qty != null ? ' of ' + u.qty : '')).join('; '); } catch (_) { return ''; } }
 function smart(text) {
@@ -9300,7 +9304,7 @@ function smart(text) {
     .catch(e => { wait = Math.max(0, wait - 1); setDot('bad', e && e.message); aiFail(e, 1); try { handle(text); } catch (_) {} pump(); });
   return true;
 }
-function send(text) { if (window.__tharDynamicSend && window.__tharDynamicSend.active && window.__tharDynamicSend.active()) { const t0 = String(text || '').trim(); if (!t0) return; pushU(t0); window.__tharDynamicSend(t0); return; } text = String(text || '').trim(); if (!text) return; pushU(text); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
+function send(text) { if (window.__tharDynamicSend && window.__tharDynamicSend.active && window.__tharDynamicSend.active(text)) { const t0 = String(text || '').trim(); if (!t0) return; pushU(t0); window.__tharDynamicSend(t0); return; } text = String(text || '').trim(); if (!text) return; pushU(text); const um = /^use\s+(.+)$/i.exec(text), up = um && profs().list.find(x => x.label.toLowerCase() === um[1].trim().toLowerCase()); if (up) { useAi(up.id); pump(); return; } try { if (!smart(text)) handle(text); } catch (e) { console.error(e); say('Something went wrong: ' + e.message); } pump(); }
 function pick(pid) {
   const x = workOf(pid); if (!x) return; S.target = pid; Q.push({ who: 'u', text: lbl(x) });
   if (S.editAsk) { const tx = S.editAsk; S.editAsk = null; doEdit(tx, x); return pump(); }
@@ -9331,6 +9335,7 @@ document.addEventListener('change', e => { const t = e.target; if (!t || !t.form
   else if (t.name === 'buyer') t.value = normBuyer(t.value); }, true);
 const api = { handle, send, pick, S, log, fast: false, say, hold(n) { wait = Math.max(0, wait + n); draw(); } };
 window.TAE_ASSISTANT = api;
+api.mkWork = mkWork;
 window.__tharDigest = dataDigest;
 /* registered craftsmen by stage, read by the speech/AI layer */
 window.__tharVocab = function () { try { const o = {}; STORD.forEach(k => { o[STL[k] || k] = candNames(k, null).map(v => v.name); }); return o; } catch (e) { return {}; } };
@@ -9584,8 +9589,8 @@ function ensurePanel(){const log=$('taeLog');if(!log||$('aiTxnPanel'))return;con
 function fmt(v){if(v===undefined||v===null||v==='')return '—';return typeof v==='object'?JSON.stringify(v):String(v)}
 function recLabel(r,st){r=r||{};if(st&&st!=='work')return st+' · '+(r.name||r.title||r.orderNo||r.id||'');return 'TAE '+(r.tae||r.taeNo||r.orderNo||'?')+(r.subOrder||r.subOrderNo?' / Sub-order '+(r.subOrder||r.subOrderNo):'')+(r.itemName?' · '+r.itemName:'')}
 function showDraft(){ensurePanel();const p=$('aiTxnPanel');if(!p)return;p.hidden=!TX.draft;if(!TX.draft){TX.focus=null;return}const d=TX.draft;
-p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+draftStats(d)+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
-wireDraft(p);$('aiCommit').onclick=commit;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
+p.innerHTML='<b>Proposed database changes — not saved</b><p>'+esc(d.summary||'Review the proposed changes below.')+'</p>'+draftStats(d)+d.changes.map(diffCard).join('')+'<div class="actions"><button class="btn primary" id="aiCommit">Confirm &amp; save</button><button class="btn" id="aiToDraft">📥 Save to Draft</button><button class="btn" id="aiRevise">Keep editing</button><button class="btn danger" id="aiDiscard">Discard</button><button class="btn" id="aiOpenDr">📂 Drafts ('+drCount()+')</button></div><small class="muted">Nothing is written until you press Confirm &amp; save.</small>';
+wireDraft(p);$('aiCommit').onclick=commit;$('aiToDraft').onclick=toDrafts;$('aiOpenDr').onclick=openDrafts;$('aiRevise').onclick=()=>{if(typeof say==='function')say('Tell me the next correction. I will update this draft without saving it.');};$('aiDiscard').onclick=()=>{TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. No database changes were made.');};}
 /* ===== field normalisation, duplicate check, editable draft, local commands ===== */
 const REC_PROPS={orderNo:{type:'string'},subOrder:{type:'string'},itemCode:{type:'string'},buyer:{type:'string'},itemName:{type:'string'},size:{type:'string'},sizeUnit:{type:'string'},qty:{type:'number'},cbm:{type:'number'},woodSupplier:{type:'string'},date:{type:'string'},targetDate:{type:'string'},notes:{type:'string'},name:{type:'string'},title:{type:'string'},status:{type:'string'},part:{type:'string'},issueType:{type:'string'}};
 const FILTER_PROPS={tae:{type:'string'},subOrder:{type:'string'},buyer:{type:'string'},itemCode:{type:'string'},itemName:{type:'string'},dimensions:{type:'string'},contractor:{type:'string'}};
@@ -9787,22 +9792,23 @@ if(c.op==='add'){get(st).push(Object.assign({id:'ai_'+Date.now()+'_'+Math.random
 const r=get(st)[c.index];if(!r||(c.id&&r.id&&String(r.id)!==String(c.id)))throw Error('A record changed or disappeared. Search again before confirming.');
 if(c.op==='update')Object.keys(c.fields||{}).forEach(k=>{if(k!=='id'&&k!=='__proto__'&&k!=='constructor'&&k!=='prototype')r[k]=c.fields[k]});
 if(c.op==='split'){r.splits=r.splits||{};r.splits[c.stage]=c.splits.map(x=>({name:x.name,qty:Number(x.qty),done:0}));}}
-if(!Object.keys(lists).length){if(typeof say==='function')say('Nothing was saved. Every entry in the draft already exists. Remove them or change the sub-order.');return}
+if(!Object.keys(lists).length){if(typeof say==='function')say('Nothing was saved. Every entry in the draft already exists. Remove them or change the sub-order.',{chips:[{l:'📥 Save to Draft',send:'save to draft'}]});return}
 Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw);try{if(typeof touch==='function')nw.forEach((r,i)=>{if(!old[i]||JSON.stringify(old[i])!==JSON.stringify(r))touch(st,r)})}catch(e){}});
 if(typeof save==='function')save();
-if(typeof doPushCloud==='function')await doPushCloud();
+if(typeof doPushCloud==='function'){try{Promise.resolve(doPushCloud()).catch(function(){})}catch(e){}}
 try{if(typeof render==='function')render()}catch(e){}
-TX.draft=null;TX.focus=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app and synced to the cloud.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
-catch(e){if(typeof say==='function')say('Could not save the draft: '+String(e.message||e)+'. Nothing was reported as saved.');}}
+TX.draft=null;TX.focus=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app; cloud sync runs in the background.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
+catch(e){if(typeof say==='function')say('Could not save the draft: '+String(e.message||e)+'. Nothing was reported as saved.',{chips:[{l:'📥 Save to Draft',send:'save to draft'}]});}}
 const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
+if(DR_SAVE.test(text)){toDrafts();return}if(DR_OPEN.test(text)){openDrafts();return}
 if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('There is nothing pending, so nothing was saved.');return;}await commit();return;}
 if(LIVE.on&&TX.draft&&TX.askSave){if(YESW.test(text)){TX.askSave=false;await commit();return}if(NOW.test(text)){TX.askSave=false;say('OK, not saved. What else should I change?');return}}
 if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. Nothing was changed in the database.');}else if(typeof say==='function')say('There is no pending draft.');return;}{const oc=draftOpenCmd(text)||openCmd(text);if(oc){say(oc);return}}{const lc=localCmd(text);if(lc){say(lc);showDraft();return}}if(!cfg()){say('Free-text commands need an AI key (⚙ settings). You can still tap an entry in the draft to edit it, or use commands like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6".');return}if(TX.busy&&Date.now()-(TX.busyAt||0)>60000)TX.busy=false;if(TX.busy){TX.q.push(text);return;}TX.busy=true;TX.busyAt=Date.now();let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the API key and model in the AI settings (⚙).');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
 /* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
-window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft&&!LIVE.on)return false;sendDynamic(text);return true;};
-window.__tharDynamicSend.active=function(){return !!cfg()||!!TX.draft||!!LIVE.on};
+window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft&&!LIVE.on&&!DR_CMD.test(String(text||'').trim()))return false;sendDynamic(text);return true;};
+window.__tharDynamicSend.active=function(t){return !!cfg()||!!TX.draft||!!LIVE.on||(t!=null&&DR_CMD.test(String(t).trim()))};
 
 function setupLive(form,sendBtn,stopMic){
 const SRC=window.SpeechRecognition||window.webkitSpeechRecognition,SS=window.speechSynthesis;
@@ -9912,7 +9918,152 @@ input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();}
 try{setupLive(form,sendBtn,stopVoice)}catch(e){console.error('live voice',e)}
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
-window.THAR_AI_TX={state:TX,provisional:provisional,showDraft:showDraft,commit:commit,clean:cleanFields,local:localCmd,dupOf:dupOf};
+/* ===================== DRAFTS: park entries (even with problems), review one by one, save later. Max 500. ===================== */
+const DR_MAX=500;
+const DR_REQ=['orderNo','subOrder','itemCode','size','qty','cbm'];
+const DR_SAVE=/^(?:(?:save|put|add|move|rakho|daalo|dalo)\s*(?:it\s*|this\s*|all\s*)?(?:to|in|into|as)\s*drafts?|drafts?\s*(?:me|mein|men)\s*(?:save|rakho|rakh\s*do|daalo|dalo|dal\s*do)(?:\s*(?:kar\s*do|karo|kardo))?)\s*[.!।]*$/i;
+const DR_OPEN=/^(?:(?:open|show|my|see)\s+)?drafts?(?:\s*list)?\s*[.!।]*$|^drafts?\s*(?:dikhao|dikha\s*do|kholo|khol\s*do|dekho)\s*[.!।]*$/i;
+const DR_CMD={test:t=>DR_SAVE.test(t)||DR_OPEN.test(t)};
+let DRV={mode:'list',id:null,err:''};
+function drList(){try{if(!Array.isArray(db.drafts))db.drafts=[];return db.drafts}catch(e){return[]}}
+function drCount(){return drList().length}
+function drLbl(k){const f=FLD.find(x=>x[0]===k);return f?f[1]:k}
+function drKey(r){r=r||{};const s=String(r.subOrder||'').trim().toLowerCase();return s?(String(r.orderNo||'').trim().toLowerCase()+'|'+s+'|'+String(r.itemCode||'').trim().toLowerCase()):''}
+function drPersist(){try{save()}catch(e){console.error(e)}}
+function drGuard(){
+  if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode){toast('Only Admin can use Drafts.');return false}
+  if(typeof isViewMode!=='undefined'&&isViewMode){toast('Close the backup view first.');return false}
+  return true}
+/* block = must be fixed before the entry can go into the Work list; warn = allowed, shown for your review */
+function drIssues(rec,selfId){
+  const block=[],warn=[];rec=rec||{};
+  const miss=DR_REQ.filter(k=>!String(rec[k]==null?'':rec[k]).trim());
+  if(miss.length)block.push('Missing: '+miss.map(drLbl).join(', '));
+  if(String(rec.qty==null?'':rec.qty).trim()!==''&&!(Number(rec.qty)>=0))block.push('Qty must be a number');
+  if(String(rec.cbm==null?'':rec.cbm).trim()!==''&&!(Number(rec.cbm)>=0))block.push('CBM must be a number');
+  const so=String(rec.subOrder||'').trim(),on=String(rec.orderNo||'').trim(),ic=String(rec.itemCode||'').trim();
+  if(on&&so&&!(so.toLowerCase().startsWith(on.toLowerCase()+'/')&&/^\d{1,3}$/.test(so.slice(on.length+1))))block.push('Sub Order format is wrong: '+so);
+  try{if(on&&so&&ic&&dupFind(on,ic,so))block.push('Already in Work list (duplicate)')}catch(e){}
+  const k=drKey(rec);
+  if(k&&drList().some(x=>x.id!==selfId&&drKey(x.record)===k))warn.push('Same entry is repeated in Drafts');
+  const sup=String(rec.woodSupplier==null?'':rec.woodSupplier).trim();
+  if(!sup)warn.push('Supplier is empty');
+  else if(!supKnown(sup)){let sg='';try{const z=fuzzyReg('woodSupplier',sup);sg=(z&&z.name)||((z&&z.alts&&z.alts.length===1)?z.alts[0]:'')}catch(e){}warn.push('Supplier "'+sup+'" is not registered'+(sg?' (did you mean '+sg+'?)':'')+'. It will be saved as typed.')}
+  return {block,warn}}
+/* ---- "Save to Draft": every new entry in the open draft panel, problems or not ---- */
+function toDrafts(){
+  if(!drGuard())return;
+  const d=TX.draft;
+  if(!d){say('There is no pending draft to put in Drafts.');return}
+  const adds=d.changes.filter(c=>c.op==='add'&&(c.store||'work')==='work');
+  if(!adds.length){say('Only new entries can be saved to Drafts. Nothing moved.');return}
+  const L=drList(),moved=[];let added=0,updated=0,full=0;
+  adds.forEach(c=>{
+    let rec;try{rec=JSON.parse(JSON.stringify(c.record||{}))}catch(e){rec=Object.assign({},c.record)}
+    const k=drKey(rec),ex=k?L.findIndex(x=>drKey(x.record)===k):-1;
+    if(ex>=0){L[ex].record=rec;L[ex].savedAt=Date.now();updated++;moved.push(c);return}
+    if(L.length>=DR_MAX){full++;return}
+    L.push({id:'dr_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),record:rec,savedAt:Date.now()});added++;moved.push(c)});
+  if(moved.length){drPersist();d.changes=d.changes.filter(c=>moved.indexOf(c)<0);if(!d.changes.length){TX.draft=null;TX.focus=null}}
+  showDraft();drBadge();
+  const parts=[];if(added)parts.push(added+' saved to Drafts');if(updated)parts.push(updated+' already in Drafts (updated)');
+  let msg=(parts.join(', ')||'Nothing saved')+'. Drafts: '+drList().length+'/'+DR_MAX+'.';
+  if(full)msg+='\n⚠ Drafts is full ('+DR_MAX+'). '+full+' entr'+(full>1?'ies were':'y was')+' NOT moved and stay in this draft. Save or delete some drafts first.';
+  say(msg,{chips:[{l:'📂 Open Drafts',send:'drafts'}]})}
+/* ---- Drafts window ---- */
+function drCss(){if($('aiDrCss'))return;const st=document.createElement('style');st.id='aiDrCss';st.textContent=`
+#aiDr{position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+#aiDr .box{width:100%;max-width:720px;max-height:92vh;max-height:92dvh;background:var(--panel2,#1b2236);color:var(--text,#fff);border:1px solid var(--line,#8884);border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden}
+#aiDr .hd{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line,#8884);font-weight:800}
+#aiDr .hd span{flex:1;min-width:0}
+#aiDr .bd{overflow:auto;padding:10px 12px;flex:1;-webkit-overflow-scrolling:touch}
+#aiDr .ft{display:flex;gap:8px;flex-wrap:wrap;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line,#8884)}
+#aiDr .dRow{border:1px solid var(--line,#8884);border-radius:12px;padding:10px;margin:8px 0;cursor:pointer}
+#aiDr .dRow small{opacity:.8;overflow-wrap:anywhere}
+#aiDr .dTag{display:inline-block;font-size:12px;border-radius:8px;padding:3px 8px;margin:4px 4px 0 0;overflow-wrap:anywhere}
+#aiDr .dTag.b{background:rgba(220,38,38,.2);color:#f87171}
+#aiDr .dTag.w{background:rgba(251,191,36,.18);color:#d99a06}
+#aiDr .dTag.ok{background:rgba(22,163,74,.2);color:#22a05a}
+#aiDr .dF{margin:8px 0}
+#aiDr .dF label{display:block;font-size:12px;opacity:.75;margin-bottom:3px}
+#aiDr input.aiIn{width:100%;box-sizing:border-box;background:rgba(0,0,0,.18);border:1px solid rgba(127,127,127,.4);border-radius:8px;padding:8px 10px;color:inherit;font:inherit;font-size:15px}
+#aiDr input.aiIn:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 2px rgba(56,189,248,.3)}
+#aiDr button:disabled{opacity:.45}
+#aiDrBtn small{font-size:11px}`;document.head.appendChild(st)}
+function drTags(z){return z.block.map(t=>'<span class="dTag b">⛔ '+esc(t)+'</span>').concat(z.warn.map(t=>'<span class="dTag w">⚠ '+esc(t)+'</span>')).join('')||'<span class="dTag ok">✔ Ready</span>'}
+function drListHtml(){
+  const L=drList();let ready=0;
+  const rows=L.map(d=>{const r=d.record||{},z=drIssues(r,d.id);if(!z.block.length&&!z.warn.length)ready++;
+    return '<div class="dRow" data-dr="'+esc(d.id)+'"><b>'+esc(r.subOrder||'(no sub-order)')+'</b> <small>'+esc([r.itemName,r.itemCode,r.size,(r.qty!==undefined&&r.qty!==''?r.qty+' pcs':''),r.woodSupplier].filter(Boolean).join(' · '))+'</small><div>'+drTags(z)+'</div></div>'}).join('');
+  return '<div class="box"><div class="hd"><span>📂 Drafts ('+L.length+'/'+DR_MAX+')</span><button class="btn" data-dx="close">✕</button></div><div class="bd">'+(rows||'<p class="muted">No drafts yet. In the assistant, tap “📥 Save to Draft” on proposed entries.</p>')+'</div>'+(L.length?'<div class="ft"><button class="btn primary" data-dx="all"'+(ready?'':' disabled')+'>✅ Save all ready ('+ready+')</button><button class="btn danger" data-dx="clear">🗑 Delete all</button></div>':'')+'</div>'}
+function drEditHtml(){
+  const L=drList(),i=L.findIndex(x=>x.id===DRV.id),d=L[i],r=d.record||{},z=drIssues(r,d.id);
+  const form=FLD.map(x=>{const k=x[0],num=(k==='qty'||k==='cbm');return '<div class="dF"><label>'+esc(x[1])+'</label><input class="aiIn" data-dk="'+k+'" type="'+((k==='date'||k==='targetDate')?'date':'text')+'"'+(num?' inputmode="decimal"':'')+' value="'+esc(r[k]==null?'':r[k])+'" autocomplete="off"></div>'}).join('');
+  return '<div class="box"><div class="hd"><button class="btn" data-dx="back">◀ List</button><span>Draft '+(i+1)+' of '+L.length+'</span><button class="btn" data-dx="close">✕</button></div><div class="bd">'+form+'<div id="aiDrIss">'+drTags(z)+'</div>'+(DRV.err?'<div class="dTag b" id="aiDrErr">'+esc(DRV.err)+'</div>':'')+'</div><div class="ft"><button class="btn primary" data-dx="save">✅ Save entry</button><button class="btn" data-dx="prev"'+(i>0?'':' disabled')+'>◀ Prev</button><button class="btn" data-dx="next"'+(i<L.length-1?'':' disabled')+'>Next ▶</button><button class="btn danger" data-dx="del">🗑 Delete draft</button></div></div>'}
+function drRender(){
+  let m=$('aiDr');
+  if(!m){drCss();m=document.createElement('div');m.id='aiDr';document.body.appendChild(m);m.addEventListener('click',drClick);m.addEventListener('change',drChange)}
+  if(DRV.mode==='edit'&&!drList().some(x=>x.id===DRV.id))DRV.mode='list';
+  m.innerHTML=DRV.mode==='edit'?drEditHtml():drListHtml()}
+function drClose(){const m=$('aiDr');if(m)m.remove();DRV={mode:'list',id:null,err:''};drBadge()}
+function openDrafts(){if(!drGuard())return;DRV={mode:'list',id:null,err:''};drRender()}
+function drApply(id,k,v){const d=drList().find(x=>x.id===id);if(!d)return;const f=cleanFields({[k]:v});d.record=Object.assign({},d.record,f);if(String(v).trim()==='')d.record[k]=''}
+function drCollect(){ /* read what is typed on screen into the draft (a tap on a button may come before the field's own change event) */
+  const m=$('aiDr');if(!m||DRV.mode!=='edit')return;
+  const d=drList().find(x=>x.id===DRV.id);if(!d)return;
+  m.querySelectorAll('input[data-dk]').forEach(inp=>{const k=inp.dataset.dk,cur=d.record[k]==null?'':String(d.record[k]);if(inp.value!==cur)drApply(d.id,k,inp.value)});
+  drPersist()}
+function drChange(e){
+  const t=e.target;if(!t||!t.dataset||!t.dataset.dk||DRV.mode!=='edit')return;
+  const m=$('aiDr'),d=drList().find(x=>x.id===DRV.id);if(!d)return;
+  drApply(d.id,t.dataset.dk,t.value);drPersist();
+  m.querySelectorAll('input[data-dk]').forEach(inp=>{if(inp===t||document.activeElement!==inp){const v=d.record[inp.dataset.dk];inp.value=v==null?'':v}});
+  const z=drIssues(d.record,d.id),box=$('aiDrIss');if(box)box.innerHTML=drTags(z);
+  const er=$('aiDrErr');if(er)er.remove()}
+/* put one draft record into the real Work list */
+function drCommit(rec){
+  const T=window.TAE_ASSISTANT;if(!T||!T.mkWork)throw Error('Assistant is not ready yet');
+  const o=T.mkWork(Object.assign({},rec));
+  Object.keys(rec).forEach(k=>{if(!(k in o)&&k!=='id'&&rec[k]!==''&&rec[k]!=null&&typeof rec[k]!=='object')o[k]=rec[k]});
+  db.work.push(o);touch('work',o)}
+function drAfterSave(){try{if(typeof render==='function')render()}catch(e){}}
+function drSaveOne(){
+  if(!drGuard())return;drCollect();
+  const L=drList(),i=L.findIndex(x=>x.id===DRV.id);if(i<0)return;
+  const d=L[i],z=drIssues(d.record,d.id);
+  if(z.block.length){DRV.err='Cannot save yet: '+z.block.join(' · ');drRender();return}
+  try{drCommit(d.record)}catch(e){DRV.err='Save failed: '+String(e.message||e);drRender();return}
+  L.splice(i,1);DRV.err='';drPersist();drAfterSave();
+  toast('Entry saved'+(z.warn.length?' (with warnings)':''));
+  const nx=L[Math.min(i,L.length-1)];if(nx)DRV.id=nx.id;else DRV.mode='list';
+  drBadge();drRender()}
+function drSaveAll(){
+  if(!drGuard())return;
+  const L=drList();let n=0;
+  for(let i=0;i<L.length;){const d=L[i],z=drIssues(d.record,d.id);
+    if(!z.block.length&&!z.warn.length){try{drCommit(d.record);L.splice(i,1);n++;continue}catch(e){console.error(e)}}
+    i++}
+  if(n){drPersist();drAfterSave()}
+  toast(n?n+' entr'+(n>1?'ies':'y')+' saved from Drafts':'Nothing is ready to save');
+  drBadge();drRender()}
+function drClick(e){
+  const t=e.target,m=$('aiDr');if(t===m)return drClose();
+  const row=t.closest('[data-dr]');
+  if(row&&DRV.mode==='list'){DRV={mode:'edit',id:row.dataset.dr,err:''};drRender();return}
+  const b=t.closest('[data-dx]');if(!b||b.disabled)return;const a=b.dataset.dx;
+  if(a==='close'){drCollect();return drClose()}
+  if(a==='back'){drCollect();DRV.mode='list';DRV.err='';return drRender()}
+  if(a==='prev'||a==='next'){drCollect();const L=drList(),i=L.findIndex(x=>x.id===DRV.id),j=a==='next'?i+1:i-1;if(L[j]){DRV.id=L[j].id;DRV.err=''}return drRender()}
+  if(a==='save')return drSaveOne();
+  if(a==='all')return drSaveAll();
+  if(a==='del'){if(!confirm('Delete this draft?'))return;const L=drList(),i=L.findIndex(x=>x.id===DRV.id);if(i>=0){L.splice(i,1);drPersist()}const nx=L[Math.min(i,L.length-1)];if(nx)DRV.id=nx.id;else DRV.mode='list';DRV.err='';drBadge();return drRender()}
+  if(a==='clear'){const n=drCount();if(!n||!confirm('Delete ALL '+n+' drafts? This cannot be undone.'))return;drList().length=0;drPersist();DRV.mode='list';drBadge();return drRender()}}
+function drBadge(){const n=$('aiDrN');if(n){const c=drCount();n.textContent=c?String(c):''}}
+function mountDrBtn(){
+  const first=document.querySelector('#taeBox .taeH > button');if(!first||$('aiDrBtn'))return;
+  const b=document.createElement('button');b.type='button';b.id='aiDrBtn';b.setAttribute('aria-label','Drafts');b.innerHTML='📂<small id="aiDrN"></small>';b.onclick=openDrafts;first.before(b);drBadge()}
+setInterval(()=>{try{if(!$('aiDrBtn'))mountDrBtn();else drBadge()}catch(e){}},1500);
+window.THAR_AI_TX={openDrafts:openDrafts,toDrafts:toDrafts,state:TX,provisional:provisional,showDraft:showDraft,commit:commit,clean:cleanFields,local:localCmd,dupOf:dupOf};
 })();
 </script>
 
@@ -10247,6 +10398,378 @@ window.__aiScan={camera:camera,pick:pick,run:run};
 var EXTRA=' A scanned order sheet may leave several NEW pending records in the draft. To correct one, call propose_add with record containing its subOrder (e.g. TAE/2927/1) plus only the corrected fields; it merges into that pending record (never set new_record for a correction). Record fields: orderNo, subOrder, itemCode, buyer, itemName, size (e.g. 141x43x80), sizeUnit, qty, cbm (TOTAL CBM of the row), woodSupplier. Supplier means the factory/vendor name only. Formatting: buyer uses hyphens instead of spaces (M 2 = M-2); size uses the × sign between numbers; a supplier code means the registered supplier name; to remove a pending new entry the user taps Remove or says remove <n> (the app handles that).';
 var base=window.TAE_FMT;
 try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){return (base||'')+EXTRA},set:function(v){base=v}})}catch(e){}
+})();
+</script>
+
+
+<!-- ===================================================================
+  AI PRO ASSISTANT  (added in V1.0.82-live)
+  Self-contained module: CSS + JS in one block, injected before </body>.
+  It does NOT modify the old assistants (taeAssistant / tharDynamicAI).
+  ARCHITECTURE
+   1. Storage   - own IndexedDB 'thar_ai_pro_v1' (localStorage fallback). Chats never touch ERP backups.
+   2. Sessions  - sidebar, auto titles, pin (kept forever), unpinned auto-purged after 180 days.
+   3. Agent     - OpenAI-compatible tool-calling loop (re-uses the key saved in the old assistant's settings
+                  via window.__llmCfg). READ tools run instantly; WRITE tools only build a PREVIEW card.
+   4. Safety    - nothing changes until the user taps Confirm (or says "haan / confirm"). Deletes go to the
+                  Recycle Bin via the app's own delNow(). Applied edits can be undone.
+   5. Voice     - continuous Web Speech STT (hi-IN / en-IN) with silence auto-send, optional TTS replies,
+                  "Live" mode = listen -> think -> speak -> listen loop.
+=================================================================== -->
+<style id="apCss">
+#apFab{position:fixed;left:10px;bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:8990;width:46px;height:46px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:linear-gradient(135deg,#6366f1,#10b981);color:#fff;font-size:20px;box-shadow:0 6px 20px rgba(0,0,0,.4);cursor:pointer}
+#apFab.hidden,#apRoot.hidden{display:none}
+#apRoot{position:fixed;inset:0;z-index:9600;display:flex;background:var(--bg);color:var(--text);font-size:15px}
+#apRoot *{box-sizing:border-box}
+.apSb{width:290px;max-width:84vw;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column;z-index:2}
+.apSb button,#apRoot header button,.apF button{font:inherit;color:inherit;cursor:pointer}
+.apNew{margin:10px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--panel3);font-weight:700}
+.apSrch{margin:0 10px 6px;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:16px}
+.apList{flex:1;overflow:auto;padding:0 6px}
+.apG{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:10px 8px 4px}
+.apI{display:flex;align-items:center;gap:6px;padding:8px;border-radius:10px;cursor:pointer}
+.apI:hover,.apI.on{background:var(--panel3)}
+.apI .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apI small{display:block;color:var(--amber);font-size:10px}
+.apI .pin{color:var(--amber);display:flex}
+.apI b{display:flex;gap:2px;opacity:.75}
+.apI b button{background:none;border:0;padding:3px;font-size:13px}
+.apFoot{padding:8px 12px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+.apMain{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+#apRoot header{display:flex;align-items:center;gap:6px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top,0px));border-bottom:1px solid var(--line);background:var(--panel2)}
+#apRoot header .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+#apRoot header button{background:var(--panel3);border:1px solid var(--line);border-radius:10px;padding:6px 9px}
+#apRoot header button.on{background:var(--green);color:#fff}
+.apLog{flex:1;overflow:auto;padding:14px 12px;width:100%;max-width:820px;margin:0 auto}
+.apM{margin:0 0 12px;display:flex;flex-direction:column;gap:4px}
+.apM.u{align-items:flex-end}
+.apB{max-width:92%;padding:10px 13px;border-radius:16px;line-height:1.5;word-break:break-word;background:var(--panel);border:1px solid var(--line)}
+.apM.u .apB{background:rgba(99,102,241,.25)}
+.apB table{border-collapse:collapse;font-size:13px}.apB td,.apB th{border:1px solid var(--line);padding:3px 7px}
+.apB code{background:var(--panel3);padding:1px 5px;border-radius:5px}.apB ul{margin:4px 0;padding-left:20px}
+.apEd{font-size:12px;color:var(--muted);background:none;border:0;cursor:pointer}
+.apChip{font-size:12px;color:var(--muted);padding:2px 10px;border:1px dashed var(--line);border-radius:20px;align-self:flex-start}
+.apCard{width:100%;max-width:520px;border:1px solid var(--amber);border-radius:14px;background:var(--panel);padding:12px}
+.apCard.done{border-color:var(--green)}.apCard.no{opacity:.6;border-color:var(--line)}
+.apCard h4{margin:0 0 6px;font-size:14px}.apCard li{font-family:ui-monospace,monospace;font-size:12.5px;margin:2px 0}
+.apCard .w{color:var(--amber);font-size:12.5px}.apCard .r{display:flex;gap:8px;margin-top:10px}
+.apCard .r button{flex:1;padding:9px;border-radius:10px;border:1px solid var(--line);font-weight:700;background:var(--panel3);color:var(--text);cursor:pointer}
+.apCard .r .ok{background:var(--green);color:#fff;border:0}.apCard .r .x{background:var(--red);color:#fff;border:0}
+.apF{display:flex;gap:6px;align-items:flex-end;padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--panel2)}
+.apF textarea{flex:1;resize:none;max-height:140px;padding:10px 12px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:16px}
+.apF button{width:42px;height:42px;border-radius:50%;border:0;background:var(--panel3);font-size:18px}
+.apF .mic.on{background:var(--red);color:#fff;animation:apP 1.2s infinite}.apF .go{background:var(--green);color:#fff}
+@keyframes apP{50%{box-shadow:0 0 0 8px rgba(244,63,94,.25)}}
+.apLive{position:absolute;left:0;right:0;bottom:70px;text-align:center;font-size:12px;color:var(--green2);pointer-events:none}
+@media(max-width:899px){.apSb{position:absolute;inset:0 auto 0 0;transform:translateX(-100%);transition:transform .2s}.apSb.open{transform:none;box-shadow:8px 0 30px rgba(0,0,0,.5)}}
+@media(min-width:900px){#apMenu{display:none}}
+</style>
+<script id="apJs">
+(function () {
+'use strict';
+/* ---------- tiny helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const KEEP = 180 * 864e5;                                   // retention for UNPINNED chats = 6 months
+const DB = () => curDB();                                   // live ERP data (global from main app)
+const canWrite = () => !isEmployeeMode && !(typeof ENTRY !== 'undefined' && ENTRY) && !isViewMode;   // Admin only
+const PIN = '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M14 3l7 7-2 1-3.5 3.5.5 4-1.5 1.5-3.5-3.5L6 21l-1-1 4.5-5.5L6 10.5 7.5 9l4 .5L15 6z"/></svg>';
+
+/* ---------- 1. STORAGE (IndexedDB, localStorage fallback) ---------- */
+let idb = null, SS = [], S = null, PEND = {}, busy = false, AC = null;
+const rq = r => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const store = m => idb.transaction('s', m).objectStore('s');
+function dbOpen() { return new Promise(res => { try { const q = indexedDB.open('thar_ai_pro_v1', 1); q.onupgradeneeded = () => q.result.createObjectStore('s', { keyPath: 'id' }); q.onsuccess = () => { idb = q.result; res(); }; q.onerror = () => res(); } catch (e) { res(); } }); }
+async function dbAll() { if (idb) return rq(store('readonly').getAll()); try { return JSON.parse(localStorage.getItem('apS') || '[]'); } catch (e) { return []; } }
+async function dbPut(s) { if (idb) return rq(store('readwrite').put(s)); const a = await dbAll(), i = a.findIndex(x => x.id === s.id); i < 0 ? a.push(s) : a[i] = s; localStorage.setItem('apS', JSON.stringify(a)); }
+async function dbDel(id) { if (idb) return rq(store('readwrite').delete(id)); localStorage.setItem('apS', JSON.stringify((await dbAll()).filter(x => x.id !== id))); }
+/* auto-purge: unpinned + older than 180 days. Pinned chats are never touched. */
+async function purge() { const L = await dbAll(); for (const s of L) if (!s.pinned && Date.now() - s.updated > KEEP) await dbDel(s.id); SS = (await dbAll()).sort((a, b) => b.updated - a.updated); }
+let saveT = 0; const save = () => { if (!S) return; S.updated = Date.now(); clearTimeout(saveT); saveT = setTimeout(() => dbPut(JSON.parse(JSON.stringify(S))).catch(() => {}), 250); if (!SS.includes(S)) SS.unshift(S); };
+
+/* ---------- 2. ERP RECORD HELPERS ---------- */
+const STG = ['sanding', 'polish', 'carpenter', 'fitting'];
+const stageKey = s => { s = String(s || '').toLowerCase(); return /gap|balance|carpent|kaarigar|mistri/.test(s) ? 'carpenter' : /sand|sending|ghis/.test(s) ? 'sanding' : /pol/.test(s) ? 'polish' : /fit/.test(s) ? 'fitting' : ''; };
+const key = w => String(w.subOrder || w.orderNo || '').toLowerCase().replace(/^tae\W*/, '').replace(/\W+/g, '/').replace(/\/$/, '');
+const refKey = r => { const m = String(r || '').toLowerCase().match(/(\d{2,6})(?:\W+(?:sub\w*\W*)?(\d{1,3}|[a-z]\b))?/); return m ? [m[1], m[2] || ''] : null; };
+const sameRef = (o, k) => taeNum(o.orderNo) == k[0] && (!k[1] || key({ subOrder: o.subOrder, orderNo: o.orderNo }) == k[0] + '/' + k[1]);
+const label = w => [w.subOrder || w.orderNo, w.itemCode, w.itemName].filter(Boolean).join(' · ');
+function D(v) { v = String(v || '').trim().toLowerCase(); const d = new Date(); if (/^(today|aaj|आज)/.test(v)) return todayStr(); if (/^(tomorrow|kal|कल)/.test(v)) { d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); } if (/^\d{4}-\d\d-\d\d$/.test(v)) return v; throw new Error('Date must be YYYY-MM-DD (or today/tomorrow): ' + v); }
+function names() { const s = new Set(); (DB().peopleCodes || []).forEach(p => p.name && s.add(p.name)); DB().work.forEach(w => STG.forEach(k => splitsOf(w, k).forEach(p => p.name && s.add(p.name)))); return [...s]; }
+const canon = n => { n = String(n || '').trim(); const l = n.toLowerCase(), all = names(); return all.find(x => x.toLowerCase() === l) || all.find(x => x.toLowerCase().split(' ')[0] === l.split(' ')[0] && l.length > 2) || n; };
+const stgTxt = w => STG.map(k => { const r = splitsOf(w, k); return r.length ? k + ': ' + r.map(p => `${p.name} ${p.done || 0}/${p.qty || 0}`).join(', ') : ''; }).filter(Boolean).join(' | ');
+const sumW = w => ({ ref: w.subOrder || w.orderNo, tae: w.orderNo, item: w.itemCode, name: w.itemName, buyer: w.buyer, qty: w.qty, cbm: w.cbm, size: w.size, woodSupplier: w.woodSupplier, target: w.targetDate, complete: !!statusOf(w).complete, stages: stgTxt(w), repair: w.needsRepair ? repairPartsText(w) + (w.fitRepairReceiveDate ? ' (received ' + w.fitRepairReceiveDate + ')' : ' (open)') : '' });
+const sumO = o => ({ tae: o.orderNo, supplier: o.supplier, buyer: o.buyer, orderDate: o.orderDate, est: o.estDate, received: o.receivedDate || 'pending', lines: (o.lines || []).map((l, i) => `#${i + 1} ${l.itemCode || l.sub || ''} qty ${l.qty} dmg ${l.damaged || 0}`).join('; '), notes: o.notes });
+const sumR = r => ({ tae: r.orderNo, sub: r.subOrder, item: r.itemCode, qty: r.qty, issue: r.issueType, handover: r.handoverName, polish: r.polishContractor, sent: r.sentDate, received: r.receiveDate || 'pending' });
+const clone = o => JSON.parse(JSON.stringify(o));
+/* two edits to the same record in one turn are CHAINED: the 2nd starts from the 1st's pending result and both merge into one preview card */
+const base = (rec) => { for (const p of Object.values(PEND)) { if (p.msg.state !== 'pending' || p.del) continue; const it = p.items.find(i => i.rec === rec); if (it) return it.after; } return null; };
+
+/* ---------- 3. TOOLS the model can call ---------- */
+const TOOLS = [
+  fn('find_records', 'Search ERP data. READ ONLY. store: work|orders|repairs. ref e.g. "TAE/2849/1" or "2849"; q = free text (name, buyer, item code, supplier).', { store: { type: 'string', enum: ['work', 'orders', 'repairs'] }, ref: { type: 'string' }, q: { type: 'string' }, limit: { type: 'number' } }, ['store']),
+  fn('edit_work', 'Propose edit of ONE work entry (preview only, user confirms). fields: qty,cbm,itemName,itemCode,buyer,size,sizeUnit,woodSupplier,date,targetDate. stage: add/update a contractor row {stage: sanding|polish|carpenter(=Gap/Balance)|fitting, name, qty?, done?, date?, remove?}.', { ref: { type: 'string' }, fields: { type: 'object' }, stage: { type: 'object' } }, ['ref']),
+  fn('edit_repair', 'Propose edit of the repairing record of a work entry. fields: receiveDate (use "today" to mark received), sentDate, issueType, qty, polishContractor, handoverName.', { ref: { type: 'string' }, fields: { type: 'object' } }, ['ref', 'fields']),
+  fn('edit_order', 'Propose edit of a wood/material order found by TAE. fields: supplier,buyer,estDate,receivedDate ("today" = mark received),notes. line: {index (1-based) or itemCode, qty, damaged}.', { ref: { type: 'string' }, fields: { type: 'object' }, line: { type: 'object' } }, ['ref']),
+  fn('delete_record', 'Propose deleting one record (goes to Recycle Bin after confirmation).', { store: { type: 'string', enum: ['work', 'orders', 'repairs'] }, ref: { type: 'string' } }, ['store', 'ref'])
+];
+function fn(name, description, properties, required) { return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } }; }
+
+function listFor(store, ref) {
+  const k = ref ? refKey(ref) : null;
+  if (ref && !k) throw new Error('Could not read TAE number from "' + ref + '"');
+  if (store === 'work') return k ? DB().work.filter(w => sameRef(w, k)) : DB().work;
+  if (store === 'orders') return k ? DB().orders.filter(o => taeNum(o.orderNo) == k[0]) : DB().orders;
+  return k ? DB().repairs.filter(r => sameRef(r, k)) : DB().repairs;
+}
+function one(store, ref) {
+  const L = listFor(store, ref);
+  if (!L.length) throw new Error('No ' + store + ' record found for ' + ref);
+  if (L.length > 1) throw new Error('Multiple matches (' + L.length + '): ' + L.slice(0, 8).map(x => store === 'work' ? label(x) : [x.orderNo, x.supplier || x.itemCode].join(' ')).join(' || ') + ' -> ask the user which one');
+  return L[0];
+}
+function run(name, a) {
+  if (name === 'find_records') {
+    let L = listFor(a.store, a.ref); const t = String(a.q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (t.length) L = L.filter(x => { const h = JSON.stringify(x).toLowerCase(); return t.every(w => h.includes(w)); });
+    const f = a.store === 'work' ? sumW : a.store === 'orders' ? sumO : sumR;
+    return { count: L.length, items: L.slice(0, Math.min(a.limit || 10, 15)).map(f) };
+  }
+  if (!canWrite()) return { error: 'READ-ONLY: only the Admin login can change records. Tell the user.' };
+  if (name === 'edit_work') return editWork(a);
+  if (name === 'edit_repair') return editRepair(a);
+  if (name === 'edit_order') return editOrder(a);
+  if (name === 'delete_record') { const r = one(a.store, a.ref); return propose('🗑 Delete ' + a.store + ': ' + (a.store === 'work' ? label(r) : [r.orderNo, r.supplier || r.itemCode].join(' ')), [{ store: a.store, rec: r }], ['Moves record to Recycle Bin' + (a.store === 'work' ? ' (with its linked repairs)' : '')], [], true); }
+  return { error: 'unknown tool ' + name };
+}
+const chg = (L, k, o, n) => { if (String(o ?? '') !== String(n ?? '')) { L.push(k + ': ' + (o === '' || o == null ? '—' : o) + ' → ' + n); return true; } return false; };
+function editWork(a) {
+  const w = one('work', a.ref), x = clone(base(w) || w), L = [], W = [], f = a.fields || {};
+  const T = { qty: 1, cbm: 1, itemName: 1, itemCode: 1, buyer: 1, size: 1, sizeUnit: 1, woodSupplier: 1, date: 1, targetDate: 1 };
+  Object.keys(f).forEach(k => { if (!T[k]) throw new Error('Field not editable via chat: ' + k); let v = f[k]; if (k === 'qty') { v = Number(v); if (!(v > 0)) throw new Error('qty must be > 0'); } else if (/date/i.test(k)) v = D(v); else v = String(v).trim(); if (chg(L, k, x[k], v)) x[k] = k === 'cbm' ? String(v) : v; });
+  const s = a.stage;
+  if (s) {
+    const k = stageKey(s.stage); if (!k) throw new Error('stage must be sanding, polish, carpenter(Gap/Balance) or fitting');
+    const rows = splitsOf(x, k).map(r => ({ ...r })), nm = canon(s.name), i = rows.findIndex(r => String(r.name).toLowerCase() === nm.toLowerCase());
+    if (!names().some(n => n.toLowerCase() === nm.toLowerCase())) W.push('"' + nm + '" is not a registered name - check spelling');
+    if (s.remove) { if (i < 0) throw new Error(nm + ' has no ' + k + ' row'); rows.splice(i, 1); L.push(k + ': remove ' + nm); }
+    else if (i < 0) { rows.push({ name: nm, qty: Number(s.qty || x.qty), done: Number(s.done || 0), date: s.date ? D(s.date) : todayStr() }); L.push(k + ': add ' + nm + ' ' + (s.done || 0) + '/' + (s.qty || x.qty)); }
+    else { const r = rows[i]; if (s.qty != null) chg(L, k + ' ' + nm + ' qty', r.qty, r.qty = Number(s.qty)); if (s.done != null) chg(L, k + ' ' + nm + ' done', r.done || 0, r.done = Number(s.done)); if (s.date) chg(L, k + ' ' + nm + ' date', r.date, r.date = D(s.date)); }
+    x[k + 'Splits'] = rows;
+  }
+  STG.forEach(k => { const rs = splitsOf(x, k); if (rs.some(r => Number(r.done || 0) > Number(r.qty || 0))) throw new Error(k + ': done is more than allocated qty'); if (rs.reduce((t, r) => t + Number(r.done || 0), 0) > Number(x.qty)) throw new Error(k + ': total done is more than entry qty ' + x.qty); });
+  if (!L.length) throw new Error('Nothing would change (values already the same)');
+  return propose('✏️ Edit ' + label(w), [{ store: 'work', rec: w, after: x }], L, W);
+}
+function editRepair(a) {
+  const ws = listFor('work', a.ref).filter(w => w.needsRepair || DB().repairs.some(r => r.workId === w.id));
+  if (!ws.length) throw new Error('No repairing record found for ' + a.ref);
+  if (ws.length > 1) throw new Error('Multiple repair matches: ' + ws.map(label).join(' || ') + ' -> ask which one');
+  const w = ws[0], rep = DB().repairs.find(r => r.workId === w.id), x = clone(base(w) || w), y = rep ? clone(base(rep) || rep) : null, L = [], f = a.fields || {};
+  const M = { receiveDate: ['receiveDate', 'fitRepairReceiveDate'], sentDate: ['sentDate', 'fitRepairSendDate'], polishContractor: ['polishContractor', 'fitRepairPolishContractor'], handoverName: ['handoverName', 'fitRepairHandover'], issueType: ['issueType', 'fitRepairIssue'], qty: ['qty', 'fitRepairQty'] };
+  Object.keys(f).forEach(k => { if (!M[k]) throw new Error('Repair field not editable: ' + k); let v = f[k]; v = /Date/.test(k) ? D(v) : k === 'qty' ? Number(v) : String(v).trim(); if (/issueType|qty/.test(k) && repairPartsOf(x).length > 1) throw new Error('This repair has several parts - edit parts in the Work form'); if (chg(L, k, x[M[k][1]] ?? (y && y[M[k][0]]), v)) { x[M[k][1]] = v; if (y) y[M[k][0]] = v; if (k === 'qty' && x.fitRepairParts && x.fitRepairParts[0]) x.fitRepairParts[0].qty = v; if (k === 'issueType' && x.fitRepairParts && x.fitRepairParts[0]) x.fitRepairParts[0].part = v; } });
+  if (!L.length) throw new Error('Nothing would change');
+  const items = [{ store: 'work', rec: w, after: x }]; if (rep) items.push({ store: 'repairs', rec: rep, after: y });
+  return propose('🔧 Repair ' + label(w), items, L, x.fitRepairReceiveDate ? [] : ['Repair stays OPEN (no return date) so the entry is not complete']);
+}
+function editOrder(a) {
+  const o = one('orders', a.ref), x = clone(base(o) || o), L = [], f = a.fields || {};
+  Object.keys(f).forEach(k => { if (!/^(supplier|buyer|estDate|receivedDate|notes)$/.test(k)) throw new Error('Order field not editable: ' + k); const v = /Date/.test(k) ? D(f[k]) : String(f[k]).trim(); if (chg(L, k, x[k], v)) x[k] = v; });
+  const l = a.line;
+  if (l) { const i = l.index ? l.index - 1 : (x.lines || []).findIndex(q => String(q.itemCode || q.sub).toLowerCase() === String(l.itemCode || '').toLowerCase()); if (i < 0 || !x.lines[i]) throw new Error('Order line not found'); ['qty', 'damaged'].forEach(k => { if (l[k] != null) chg(L, 'line ' + (i + 1) + ' ' + k, x.lines[i][k] || 0, x.lines[i][k] = Number(l[k])); }); }
+  if (!L.length) throw new Error('Nothing would change');
+  return propose('📦 Order ' + o.orderNo + ' · ' + (o.supplier || ''), [{ store: 'orders', rec: o, after: x }], L, []);
+}
+
+/* ---------- 4. PREVIEW -> CONFIRM -> APPLY (+ undo) ---------- */
+function propose(title, items, lines, warn, del) {
+  Object.values(PEND).forEach(p => { if (p.msg.state === 'pending' && !p.del && !del && p.items.some(a => items.some(b => b.rec === a.rec))) { lines = p.msg.lines.concat(lines); warn = (p.msg.warn || []).concat(warn); p.msg.state = 'no'; p.msg.title += ' (merged below)'; } });
+  const pid = uid(), m = { role: 'card', pid, title, lines, warn, del: !!del, state: 'pending', ts: Date.now() };
+  PEND[pid] = { items, del: !!del, msg: m }; S.messages.push(m);
+  return { status: 'PREVIEW_SHOWN_TO_USER', note: 'Nothing is changed yet. Tell the user briefly to confirm (Confirm button or say "haan/confirm") or cancel.', changes: lines, warnings: warn };
+}
+function decide(pid, yes) {
+  const p = PEND[pid]; if (!p || p.msg.state !== 'pending') return;
+  if (!yes) { p.msg.state = 'no'; return finish('Cancelled ✖ — kuch change nahi hua.'); }
+  try {
+    const undo = [];
+    p.items.forEach(it => {
+      if (p.del) return window.delNow(it.store, it.rec.id, true);
+      const r = it.rec, before = JSON.stringify(r); Object.keys(r).forEach(k => delete r[k]); Object.assign(r, it.after); inval(r);
+      if (it.store === 'work') { const st = statusOf(r); r.workComplete = st.complete; r.packingStatus = st.complete ? 'Send' : 'Pending'; }
+      slim(r); inval(r); touch(it.store, r); undo.push({ store: it.store, id: r.id, before });
+    });
+    if (!p.del) { save2(); }
+    p.msg.state = 'done'; p.msg.undo = undo; finish('✅ Done — ' + p.msg.title.replace(/^\S+\s/, '') + ' update ho gaya.' + (p.del ? ' (Recycle Bin se restore ho sakta hai)' : ''));
+  } catch (e) { p.msg.state = 'no'; finish('⚠ Apply failed: ' + e.message); }
+}
+function save2() { window.save && window.save(); try { render(); } catch (e) { } }   // ERP's own save()+render()
+function undoCard(m) {
+  (m.undo || []).forEach(u => { const r = DB()[u.store].find(x => x.id === u.id); if (!r) return; Object.keys(r).forEach(k => delete r[k]); Object.assign(r, JSON.parse(u.before)); inval(r); touch(u.store, r); });
+  m.state = 'no'; m.undo = null; save2(); finish('↩ Undo ho gaya.');
+}
+function finish(t) { S.messages.push({ role: 'assistant', text: t, ts: Date.now() }); save(); draw(); say(t); }
+
+/* ---------- 5. AGENT LOOP (OpenAI-compatible tool calling) ---------- */
+function sys() {
+  const d = DB(), reg = (DB().peopleCodes || []).filter(p => p.name).map(p => p.type + ':' + p.name).join(', ');
+  return `You are "AI Pro", the assistant inside THAR furniture-factory ERP. Chat like Gemini/ChatGPT/Claude: warm, natural, concise. Users write English, Hindi (Devanagari) or Hinglish (Roman Hindi); reply in the SAME style/script they used. Voice input can contain recognition errors: keep numbers digit-for-digit (do sau pachaas = 250), match names phonetically to the registered list.
+FACTORY JARGON: TAE no = order number (TAE/2849); Sub order = TAE/2849/1; Sanding, Polish, Carpenter (Gap / Balance = carpenter stage), Fitting; Wood Supplier; Repairing = parts sent back for repair with send/return (receive) date; CBM = cubic metre volume; Work entry = production record; Order = material/wood order to a supplier.
+RULES: (1) Never invent data - use find_records. (2) To change/delete anything call edit_work / edit_repair / edit_order / delete_record: they only show a PREVIEW; say clearly the change is NOT done until the user confirms. (3) If ref/name is ambiguous or a value missing, ask ONE short question. (4) Never delete without the user clearly asking. (5) "received", "aaj mila" => receivedDate/receiveDate = "today". (6) After tool results answer in 1-3 short lines (voice friendly, no tables unless asked).
+TODAY: ${todayStr()}. Entries: ${d.work.length} work, ${d.orders.length} orders, ${d.repairs.length} repairs. Write access: ${canWrite() ? 'yes (admin)' : 'NO - read only'}. Registered people: ${reg.slice(0, 1500)}. Buyers: ${(d.buyers || []).slice(0, 60).join(', ')}.`;
+}
+async function llm(msgs, tools) {
+  const c = window.__llmCfg && window.__llmCfg(); if (!c) throw new Error('NOKEY');
+  const post = (x, plain) => fetch(c.url, { method: 'POST', signal: AC.signal, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify(Object.assign({ model: c.model, messages: msgs }, tools ? { tools, tool_choice: 'auto' } : {}, plain ? {} : { temperature: 0.3 }, x)) });
+  let r = await post({ reasoning_effort: c.think || 'low' }); if (r.status === 400) r = await post({}, true);
+  if (!r.ok) throw new Error('API ' + r.status); return (await r.json()).choices[0].message;
+}
+async function agent() {
+  const msgs = [{ role: 'system', content: sys() }].concat(S.messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-30).map(m => ({ role: m.role, content: m.text })));
+  for (let i = 0; i < 6; i++) {
+    const m = await llm(msgs, TOOLS); msgs.push(m);          // raw message pushed back as-is (keeps provider metadata)
+    if (!m.tool_calls || !m.tool_calls.length) return String(m.content || '').trim();
+    for (const t of m.tool_calls) {
+      let out, a = {}; try { a = JSON.parse(t.function.arguments || '{}'); out = run(t.function.name, a); } catch (e) { out = { error: String(e.message || e) }; }
+      S.messages.push({ role: 'chip', text: (out.error ? '⚠ ' : '🔎 ') + t.function.name + (a.ref ? ' ' + a.ref : '') + (out.count != null ? ' → ' + out.count + ' found' : out.error ? ' → ' + out.error.slice(0, 80) : '') });
+      msgs.push({ role: 'tool', tool_call_id: t.id, content: JSON.stringify(out).slice(0, 6000) }); draw();
+    }
+  }
+  return 'Bahut steps ho gaye - kripya request thodi simple karke dobara bhejein.';
+}
+const YES = /^(haan|han|ha|yes|y|ok|okay|confirm|kar ?do|kardo|theek|thik|sahi|go|हाँ|हां|ठीक|कर दो|करदो|कन्फर्म)\b/i, NO = /^(cancel|nahi|nahin|no|ruko|stop|rehne do|नहीं|नही|रुको|रद्द)/i;
+async function send(text, voice) {
+  text = String(text || '').trim(); if (!text || busy) return;
+  if (!S) newChat();
+  const pend = Object.values(PEND).filter(p => p.msg.state === 'pending');
+  S.messages.push({ role: 'user', text, ts: Date.now() });
+  if (S.titleAuto && S.messages.filter(m => m.role === 'user').length === 1) S.title = heur(text);
+  if (pend.length && (YES.test(text) || NO.test(text))) {
+    const ok = YES.test(text);
+    if (ok && voice && pend.some(p => p.del) && !/confirm|delete|hata|हटा|डिलीट|कन्फर्म/i.test(text)) { S.messages.push({ role: 'assistant', text: 'Delete ke liye bolein: "haan confirm delete".', ts: Date.now() }); save(); draw(); return say('Delete ke liye bolein: haan confirm delete.'); }
+    save(); pend.forEach(p => decide(p.msg.pid, ok)); return;
+  }
+  save(); await go(voice);
+}
+async function go(voice) {
+  busy = true; AC = new AbortController(); draw();
+  let out;
+  try { out = await agent(); }
+  catch (e) { out = e.name === 'AbortError' ? 'Stopped ⏹' : e.message === 'NOKEY' ? '⚠ AI key set nahi hai. Robot assistant → ⚙ settings me Gemini/ChatGPT key daalein - AI Pro wahi key use karta hai.' : '⚠ AI error: ' + e.message; }
+  busy = false; if (out) S.messages.push({ role: 'assistant', text: out, ts: Date.now() });
+  save(); draw(); if (out) say(out); smartTitle();
+}
+/* titles: instant heuristic from intent + TAE ref, then upgraded by the model (if a key exists) */
+function heur(t) { const m = t.match(/tae\W*\d+(?:\W+\d+)?/i), k = /delete|hata|remove|हटा/i.test(t) ? 'Delete' : /repair/i.test(t) ? 'Repair' : /order/i.test(t) ? 'Order' : /qty|quantity|change|update|badal|add|kar ?do|मात्रा/i.test(t) ? 'Update' : ''; return m ? (k || 'Check') + ' · ' + m[0].toUpperCase().replace(/\W+/g, '/') : t.replace(/\s+/g, ' ').slice(0, 38); }
+async function smartTitle() { const s = S; if (!s || !s.titleAuto || s.smart || s.messages.filter(m => m.role === 'assistant').length < 1) return; s.smart = 1; try { AC = new AbortController(); const m = await llm([{ role: 'system', content: 'Reply with ONLY a concise chat title (max 5 words, same language as the user, no quotes).' }, { role: 'user', content: s.messages.find(x => x.role === 'user').text.slice(0, 300) }]); const t = String(m.content || '').replace(/["\n]/g, '').trim().slice(0, 48); if (t && s.titleAuto) { s.title = t; save(); draw(); } } catch (e) { } }
+
+/* ---------- 6. VOICE (continuous STT, silence auto-send, TTS, Live loop) ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition, TS = window.speechSynthesis;
+let rec = null, micOn = false, live = false, buf = '', silT = 0, tts = localStorage.apTts === '1', lang = localStorage.apLang || 'hi-IN', spk = 0;
+function mic(on) {
+  micOn = on; clearTimeout(silT); try { rec && (rec.onend = null, rec.stop()); } catch (e) { } rec = null;
+  if (on) {
+    if (!SR) { micOn = false; note('Voice input is not supported here - use Chrome/Edge (or Safari) over HTTPS.'); return head(); }
+    rec = new SR(); rec.lang = lang; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = e => { let f = '', t = ''; for (let i = e.resultIndex; i < e.results.length; i++) (e.results[i].isFinal ? (f += e.results[i][0].transcript) : (t += e.results[i][0].transcript)); if (f) buf += (buf ? ' ' : '') + f.trim(); const IN = $('#apIn'); IN.value = (buf + ' ' + t).trim(); fit(); clearTimeout(silT); silT = setTimeout(flush, 1800); };
+    rec.onerror = e => { if (/not-allowed|service-not-allowed/.test(e.error)) { note('Microphone permission blocked - allow it in browser settings.'); mic(false); } };
+    rec.onend = () => { if (micOn) try { rec.start(); } catch (e) { } };         // browsers close the stream on pauses: re-open = "mic stays on"
+    try { rec.start(); } catch (e) { }
+  }
+  head();
+}
+function flush() { const IN = $('#apIn'), t = IN.value.trim(); if (!t) return; if (busy) { silT = setTimeout(flush, 800); return; } buf = ''; IN.value = ''; fit(); send(t, true); }   // silence => auto-send
+function say(t, cb) {
+  const was = micOn; if (!(tts || live) || !TS || !t) { if (live && !busy) mic(true); return; }
+  if (was) mic(false); TS.cancel(); const id = ++spk;
+  const c = String(t).replace(/[*_`#>|]/g, ' ').replace(/\p{Extended_Pictographic}/gu, '').replace(/\s+/g, ' ').trim(), parts = c.match(/[^.!?।\n]+[.!?।]?/g) || [c], dev = /[\u0900-\u097F]/.test(c), vs = TS.getVoices();
+  const v = vs.find(x => x.lang.startsWith(dev ? 'hi' : 'en-IN')) || vs.find(x => x.lang.startsWith('hi')) || null; let i = 0;
+  const nx = () => { if (id !== spk) return; if (i >= parts.length) { if (was || live) mic(true); return; } const u = new SpeechSynthesisUtterance(parts[i++]); if (v) u.voice = v; u.lang = v ? v.lang : (dev ? 'hi-IN' : 'en-IN'); u.onend = u.onerror = nx; TS.speak(u); };
+  nx();
+}
+function note(t) { S && S.messages.push({ role: 'chip', text: t }); draw(); }
+
+/* ---------- 7. UI ---------- */
+let root, q = '';
+function newChat() { S = { id: uid(), title: 'New chat', titleAuto: true, pinned: false, created: Date.now(), updated: Date.now(), messages: [] }; PEND = {}; draw(); }
+function openChat(id) { const s = SS.find(x => x.id === id); if (!s) return; S = s; PEND = {}; S.messages.forEach(m => { if (m.role === 'card' && m.state === 'pending') m.state = 'expired'; }); draw(); $('.apSb', root).classList.remove('open'); }
+function md(s) {
+  const L = esc(s).split('\n'), o = []; let ul = false, tb = false;
+  const il = t => t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>');
+  L.forEach(l => {
+    const li = /^\s*([-*•]|\d+\.)\s+(.*)/.exec(l), tr = /^\|.*\|\s*$/.test(l);
+    if (ul && !li) { o.push('</ul>'); ul = false; } if (tb && !tr) { o.push('</table>'); tb = false; }
+    if (li) { if (!ul) { o.push('<ul>'); ul = true; } o.push('<li>' + il(li[2]) + '</li>'); }
+    else if (tr) { if (/^\|[\s:|-]+\|$/.test(l)) return; if (!tb) { o.push('<table>'); tb = true; } o.push('<tr>' + l.slice(1, -1).split('|').map(c => '<td>' + il(c.trim()) + '</td>').join('') + '</tr>'); }
+    else o.push(l.trim() ? il(l) + '<br>' : '');
+  }); if (ul) o.push('</ul>'); if (tb) o.push('</table>'); return o.join('');
+}
+function draw() { side(); head(); log(); const g = $('#apGo'); if (g) g.textContent = busy ? '⏹' : '➤'; }
+function head() { if (!root) return; $('.ti', root).textContent = S ? S.title : 'AI Pro'; $('#apTts', root).classList.toggle('on', tts); $('#apLive', root).classList.toggle('on', live); $('#apLang', root).textContent = lang === 'hi-IN' ? 'हि' : 'EN'; const m = $('#apMic', root); m && m.classList.toggle('on', micOn); }
+function side() {
+  const L = $('.apList', root), qq = q.toLowerCase(), now = Date.now(), G = {};
+  SS.filter(s => !qq || (s.title + s.messages.map(m => m.text || '').join(' ')).toLowerCase().includes(qq)).sort((a, b) => (b.pinned - a.pinned) || b.updated - a.updated).forEach(s => {
+    const d = (now - s.updated) / 864e5, g = s.pinned ? '📌 Pinned' : d < 1 ? 'Today' : d < 2 ? 'Yesterday' : d < 8 ? 'Previous 7 days' : d < 31 ? 'Previous 30 days' : 'Older (up to 6 months)'; (G[g] = G[g] || []).push(s);
+  });
+  L.innerHTML = Object.keys(G).map(g => '<div class="apG">' + g + '</div>' + G[g].map(s => { const left = Math.ceil(180 - (now - s.updated) / 864e5); return '<div class="apI' + (S && S.id === s.id ? ' on' : '') + '" data-id="' + s.id + '">' + (s.pinned ? '<span class="pin">' + PIN + '</span>' : '') + '<span class="t">' + esc(s.title) + (!s.pinned && left <= 30 ? '<small>auto-deletes in ' + left + 'd</small>' : '') + '</span><b><button data-a="pin" title="Pin">' + (s.pinned ? '📍' : '📌') + '</button><button data-a="ren" title="Rename">✎</button><button data-a="del" title="Delete">🗑</button></b></div>'; }).join('')).join('') || '<div class="apG">No chats yet</div>';
+}
+function log() {
+  const el = $('.apLog', root); if (!el) return; const M = S ? S.messages : [], near = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+  el.innerHTML = (M.length ? '' : '<div class="apChip" style="margin:30px auto;text-align:center;border:0">Namaste 👋 Poochhiye ya bolkar boliye — jaise: <i>"TAE/2849/1 ki quantity 12 kardo"</i>, <i>"TAE/2900 ka repair received mark karo"</i>, <i>"Sub order 2882/1 me carpenter Chunaram add kardo"</i></div>') + M.map((m, i) => {
+    if (m.role === 'user') return '<div class="apM u"><div class="apB">' + esc(m.text).replace(/\n/g, '<br>') + '</div><button class="apEd" data-e="' + i + '">✎ Edit</button></div>';
+    if (m.role === 'assistant') return '<div class="apM"><div class="apB">' + md(m.text) + '</div></div>';
+    if (m.role === 'chip') return '<div class="apM"><span class="apChip">' + esc(m.text) + '</span></div>';
+    const st = m.state === 'expired' ? 'no' : m.state;
+    return '<div class="apM"><div class="apCard ' + (st === 'done' ? 'done' : st === 'no' ? 'no' : '') + '"><h4>' + esc(m.title) + (st === 'done' ? ' — applied ✓' : m.state === 'expired' ? ' — expired' : st === 'no' ? ' — cancelled' : ' — PREVIEW') + '</h4><ul>' + m.lines.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' + (m.warn || []).map(x => '<div class="w">⚠ ' + esc(x) + '</div>').join('') + (m.state === 'pending' ? '<div class="r"><button class="ok" data-c="' + m.pid + '">Confirm</button><button class="x" data-n="' + m.pid + '">Cancel</button></div>' : m.state === 'done' && m.undo && m.undo.length ? '<div class="r"><button data-u="' + i + '">↩ Undo</button></div>' : '') + '</div></div>';
+  }).join('') + (busy ? '<div class="apM"><span class="apChip">AI soch raha hai…</span></div>' : '');
+  if (near || busy) el.scrollTop = el.scrollHeight;
+}
+function fit() { const t = $('#apIn'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
+/* Edit ANY past user message: everything after it is dropped and the answer is regenerated (re-branch). */
+function editMsg(i) {
+  const m = S.messages[i], b = $('.apM.u [data-e="' + i + '"]', root).parentNode; if (busy) return;
+  b.innerHTML = '<textarea style="width:100%;min-height:70px;padding:8px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:16px">' + esc(m.text) + '</textarea><div style="display:flex;gap:8px;margin-top:6px"><button class="apEd" data-k="1">✔ Save & regenerate</button><button class="apEd" data-k="0">✖ Cancel</button></div>';
+  b.querySelector('[data-k="0"]').onclick = draw;
+  b.querySelector('[data-k="1"]').onclick = () => {
+    const t = b.querySelector('textarea').value.trim(); if (!t) return;
+    if (S.messages.slice(i).some(x => x.role === 'card' && x.state === 'done') && !confirm('Is message ke baad confirm hue DATABASE changes wapas nahi hote (sirf chat dobara banegi). Continue?')) return;
+    S.messages.length = i; PEND = {}; S.messages.push({ role: 'user', text: t, ts: Date.now(), edited: true }); if (i === 0 && S.titleAuto) { S.title = heur(t); S.smart = 0; } save(); draw(); go();
+  };
+}
+function build() {
+  root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
+  root.innerHTML = '<aside class="apSb"><button class="apNew">＋ New chat</button><input class="apSrch" placeholder="Search chats…"><div class="apList"></div><div class="apFoot">📌 Pinned chats are kept forever. Other chats auto-delete after 6 months.</div></aside><section class="apMain"><header><button id="apMenu">☰</button><span class="ti">AI Pro</span><button id="apLang" title="Voice language">हि</button><button id="apTts" title="Speak replies">🔊</button><button id="apLive" title="Live voice chat">🎧 Live</button><button id="apX">✕</button></header><div class="apLog"></div><div class="apF"><textarea id="apIn" rows="1" placeholder="Type or speak (Hindi / Hinglish / English)…"></textarea><button class="mic" id="apMic" title="Mic (stays on, auto-sends on silence)">🎙</button><button class="go" id="apGo">➤</button></div></section>';
+  document.body.appendChild(root);
+  const fab = document.createElement('button'); fab.id = 'apFab'; fab.className = 'hidden no-print'; fab.title = 'AI Pro Assistant'; fab.textContent = '✨'; document.body.appendChild(fab);
+  fab.onclick = open; $('#apX', root).onclick = close; $('#apMenu', root).onclick = () => $('.apSb', root).classList.toggle('open');
+  $('.apNew', root).onclick = () => { newChat(); $('.apSb', root).classList.remove('open'); };
+  $('.apSrch', root).oninput = e => { q = e.target.value; side(); };
+  $('#apTts', root).onclick = () => { tts = !tts; localStorage.apTts = tts ? '1' : '0'; if (!tts && TS) TS.cancel(); head(); };
+  $('#apLang', root).onclick = () => { lang = lang === 'hi-IN' ? 'en-IN' : 'hi-IN'; localStorage.apLang = lang; if (micOn) mic(true); head(); };
+  $('#apLive', root).onclick = () => { live = !live; if (live) { tts = true; mic(true); } else { mic(false); if (TS) TS.cancel(); spk++; } head(); };
+  $('#apMic', root).onclick = () => mic(!micOn);
+  $('#apGo', root).onclick = () => { if (busy) { AC && AC.abort(); } else { const t = $('#apIn'), v = t.value; t.value = ''; fit(); send(v); } };
+  $('#apIn', root).addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !(matchMedia && matchMedia('(pointer:coarse)').matches)) { e.preventDefault(); $('#apGo', root).click(); } });
+  $('#apIn', root).addEventListener('input', fit);
+  $('.apList', root).onclick = e => {
+    const it = e.target.closest('.apI'); if (!it) return; const s = SS.find(x => x.id === it.dataset.id), a = e.target.closest('button'); if (!s) return;
+    if (!a) return openChat(s.id);
+    if (a.dataset.a === 'pin') { s.pinned = !s.pinned; dbPut(clone(s)); side(); }
+    else if (a.dataset.a === 'ren') { const t = prompt('Rename chat', s.title); if (t && t.trim()) { s.title = t.trim().slice(0, 60); s.titleAuto = false; dbPut(clone(s)); draw(); } }
+    else if (a.dataset.a === 'del' && confirm('Delete this chat permanently?')) { dbDel(s.id); SS = SS.filter(x => x !== s); if (S === s) newChat(); else side(); }
+  };
+  $('.apLog', root).onclick = e => { const b = e.target.closest('button'); if (!b) return; const d = b.dataset; if (d.c) decide(d.c, true); else if (d.n) decide(d.n, false); else if (d.e) editMsg(+d.e); else if (d.u) undoCard(S.messages[+d.u]); };
+}
+async function open() { if (!root) return; root.classList.remove('hidden'); document.body.style.overflow = 'hidden'; await purge(); if (!S) { SS.length && SS[0].messages.length < 1 ? openChat(SS[0].id) : newChat(); } draw(); setTimeout(() => $('#apIn').focus(), 60); }
+function close() { mic(false); live = false; if (TS) TS.cancel(); spk++; root.classList.add('hidden'); document.body.style.overflow = ''; head(); }
+async function init() {
+  await dbOpen(); build(); await purge(); setInterval(purge, 36e5);
+  /* same visibility rule as the old assistant: logged in, Admin or Entry user, not in view-only mode */
+  setInterval(() => { const ent = typeof ENTRY !== 'undefined' && ENTRY && !ENTRY.view, ok = (!isEmployeeMode || ent) && authDone && !isViewMode && !document.body.classList.contains('auth') && !document.body.classList.contains('booting') && !(typeof VIEWAS !== 'undefined' && VIEWAS); $('#apFab').classList.toggle('hidden', !ok || !root.classList.contains('hidden')); if (!ok && !root.classList.contains('hidden')) close(); }, 1000);
+}
+window.AIPRO = { open, close, send };
+if (document.body) init(); else document.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 
