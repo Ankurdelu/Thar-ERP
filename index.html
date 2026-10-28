@@ -2437,14 +2437,14 @@ function stg(x, k) { const a = splitsOf(x, k); return { alloc: a.reduce((t, p) =
 function rowPend(x, k, q) { const t = Number(x.qty || 0); if (t > 0 && stg(x, k).done >= t) return 0; return Math.max(Number(q.qty || 0) - Number(q.done || 0), 0); }
 function who(x, k) { return splitsOf(x, k).map(p => p.name).filter(Boolean).join(', ') || '—'; }
 function statusCalc(x) {
-  const legacy = !!x.workComplete && x.qcV !== 2, total = Number(x.qty || 0), fit = x.noFitting ? total : stg(x, 'fitting').done;
+  const legacy = !!x.workComplete && x.qcV !== 2, total = Number(x.qty || 0), req = ['sanding','polish','carpenter'].filter(k => !noSt(x, k)), fit = req.length ? Math.min(total, ...req.map(k => stg(x, k).done)) : total;
   const qcMissing = (legacy || x.noQC) ? [] : QC_ITEMS.filter(q => !x[q[0]]).map(q => q[1]);
   const repairOpen = !!x.needsRepair && repairPartsOf(x).length > 0 && !x.fitRepairReceiveDate;
   const needsAll = !legacy && !x.allComplete;
   const complete = !needsAll && qcMissing.length === 0 && !repairOpen;
   return { legacy, total, fit, qcMissing, repairOpen, needsAll, complete, pend: complete ? 0 : Math.max(total - fit, 0) };
 }
-const PROG_W = { sanding: 15, polish: 20, carpenter: 20, fitting: 20, packing: 10, qc: 15 };
+const PROG_W = { sanding: 35, polish: 30, carpenter: 35 };
 const PC_REPAIR = 'Pc (Full Piece)';
 function repairPartsOf(w) {
   if (Array.isArray(w && w.fitRepairParts) && w.fitRepairParts.length) return w.fitRepairParts.map(p => ({ part: String(p.part || p.issueType || '').trim(), qty: Math.max(Number(p.qty || 0), 1) })).filter(p => p.part);
@@ -2462,9 +2462,6 @@ function progressInfo(w) {
     const na = noSt(w, k), f = na ? 1 : Math.min(stg(w, k).done / t, 1);
     parts.push({ l: lbl[k] || k, wt: PROG_W[k] || 0, f, na });
   });
-  const packed = (w.packingSplits || []).reduce((a, q) => a + Number(q.qty || 0), 0);
-  parts.push({ l: 'Packing', wt: PROG_W.packing, f: w.noPacking ? 1 : Math.min(packed / t, 1), na: !!w.noPacking });
-  parts.push({ l: 'Quality Check', wt: PROG_W.qc, f: (s.legacy || w.noQC) ? 1 : QC_ITEMS.filter(([k]) => w[k]).length / QC_ITEMS.length, na: !!w.noQC });
   let base = parts.reduce((a, q) => a + q.wt * q.f, 0), ded = 0, rep = null;
   if (s.repairOpen) {
     const rp = repairPartsOf(w);
@@ -2490,7 +2487,7 @@ function workCard(x, o = {}) {
     ${fixBox(x)}
     <div class="wc-g">${g('Sub Order', x.subOrder)}${g('Item Code', x.itemCode)}${g('Item Name', x.itemName)}${g('Size', sizeTxt(x))}${g('Sanding', who(x, 'sanding'))}${g('Polish', who(x, 'polish'))}${g('Carpenter', who(x, 'carpenter'))}${g('Wood Supplier', x.woodSupplier)}</div>
     <div class="qchips"><span class="small muted">${s.complete ? 'QC' : 'Pending QC'}</span>${s.complete ? '<span class="pill">✓ All checks passed</span>' : [...s.qcMissing, ...(s.repairOpen ? ['Repair Return'] : []), ...(s.needsAll ? ['All Complete not ticked'] : [])].map(q => `<span class="pill red">${q}</span>`).join('')}</div>
-    <div class="qty3"><div><small>TOTAL</small><b>${s.total}</b></div><div><small>FITTED</small><b>${s.fit}</b></div><div><small>PENDING</small><b style="color:${s.pend ? 'var(--amber)' : 'var(--green2)'}">${s.pend}</b></div></div>
+    <div class="qty3"><div><small>TOTAL</small><b>${s.total}</b></div><div><small>DONE</small><b>${s.fit}</b></div><div><small>PENDING</small><b style="color:${s.pend ? 'var(--amber)' : 'var(--green2)'}">${s.pend}</b></div></div>
     <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${p}%"></div></div>
     ${o.act ? `<div class="actions" onclick="event.stopPropagation()"><button class="btn smallbtn blue" onclick="viewWork('${x.id}')">👁 Details & PDF</button>${!isEmployeeMode ? `<button class="btn smallbtn" onclick="editWork('${x.id}')">✎ Edit</button><button class="btn smallbtn" onclick="copyWork('${x.id}')">⎘ Clone</button><button class="btn smallbtn danger" onclick="del('work','${x.id}')">🗑</button>` : ''}</div>` : ''}
   </div>`;
@@ -3121,7 +3118,7 @@ let stK = '', stQ = '', stLim = 40;
 function topCarp(A) {
   const t = todayStr(), f = prAdd(t, -6), m = new Map(), rows = []; let cbm = 0;
   A.work.forEach(x => {
-    if (!x.qcBalance || x.noBalance) return;
+    if (x.noBalance) return;
     splitsOf(x, 'carpenter').forEach(p => {
       const q = Number(p.done) || 0, nm = String(p.name || '').trim();
       if (!(q > 0) || !nm || !prValid(p.date) || p.date < f || p.date > t) return;
@@ -3471,8 +3468,6 @@ function completeIssues(wf) {
     if (!sp.length) add(l + ': no contractor / quantity added', box);
     else if (done < total) add(l + ': only ' + done + ' of ' + total + ' pcs completed', box);
   });
-  const hw = [...HWK, 'fitCustomHardwareEnabled'].some(k => wf.elements[k]?.checked);
-  if (!hw && !wf.elements.noHardware?.checked) add('Hardware Checklist: select items or "No Hardware Attached"', document.getElementById('hwBox'));
   if (wf.elements.needsRepair?.checked) { if (!wf.elements.fitRepairReceiveDate?.value) add('Repairing: Return Receive Date missing', wf.elements.fitRepairReceiveDate); }
   else if (!wf.elements.noRepair?.checked && !lhAllOn(wf)) add('Repairing: select "No Repairing Pending" or send a part to repairing', document.getElementById('repToggle'));
   const pk = getPackFromDOM(), pkSent = pk.reduce((t, p) => t + p.qty, 0), pkBox = document.getElementById('splits-packing');
@@ -3597,7 +3592,7 @@ function addRepairPartRow(p){ const box=document.getElementById('repairPartsWrap
 function syncRepairPartRows(parts){ const box=document.getElementById('repairPartsWrap'); if(!box) return; const ps=(parts&&parts.length)?parts:[{}]; box.innerHTML=ps.map((p,i)=>repairPartRowHtml(i,p)).join(''); box.querySelectorAll('.repair-part-issue').forEach(toggleRepairPartCustom); }
 function bindWorkFormEvents() {
   const f = document.getElementById('workForm'); if (!f) return;
-  if (!workEditId && !f.querySelector('.split-row')) { ['sanding', 'polish', 'carpenter'].forEach(k => addSplitRow(k)); document.getElementById('splits-fitting').innerHTML = splitRowHtml('fitting', 'Chandaram', '', '0', ''); }
+  if (!workEditId && !f.querySelector('.split-row')) { ['sanding', 'polish', 'carpenter'].forEach(k => addSplitRow(k)); }
   ['orderNo','itemCode','subOrder'].forEach(n => f.elements[n]?.addEventListener('input', () => checkSubOrderDuplicate(false)));
   ['orderNo','itemCode'].forEach(n => f.elements[n]?.addEventListener('input', () => checkItemCodeDuplicate(false)));
   f.addEventListener('change', e => {
@@ -3831,7 +3826,7 @@ function wlResults() {
 function wlRender() { refreshTerms(); const el = document.getElementById('wlList'); if (el) el.innerHTML = wlResults(); }
 
 function workListPage() {
-  const chips = [['all', 'All'], ['fitting', 'Fitting'], ['pending', '⏳ Pending'], ['packed', 'Complete'], ['fix', 'Fix Needed'], ['fixnames', 'Name Fix']].filter(c => !isEmployeeMode || !['fix', 'fixnames'].includes(c[0]));
+  const chips = [['all', 'All'], ['pending', '⏳ Pending'], ['packed', 'Complete'], ['fix', 'Fix Needed'], ['fixnames', 'Name Fix']].filter(c => !isEmployeeMode || !['fix', 'fixnames'].includes(c[0]));
   const banner = isViewMode ? `<div style="background:var(--amber); color:#000; padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center;"><span>Viewing Old File: ${esc(viewFileName)}</span><button onclick="exitViewMode()" style="background:#000; color:var(--amber); border:none; padding:6px 12px; border-radius:8px; font-weight:bold; cursor:pointer;">Exit View</button></div>` : '';
   return banner + card('Work List', `
     <button class="btn smallbtn" style="margin-bottom:12px" onclick="go('lists')">← Back</button>
@@ -3881,7 +3876,7 @@ function renderWorkDetailCard(x) {
         <div class="small muted">${hl(x.itemCode || '—')} · ${hl(x.itemName || '—')} · Size: ${hl(sizeTxt(x) || '—')}</div><div class="small muted">Buyer: ${hl(x.buyer || '—')}</div></div>
       <div class="ring" data-p="${p}" style="--p:${p};--rc:hsl(${Math.round(p * 1.2)},78%,52%)"><b>${p}%</b></div>
     </div>
-    <div class="kpis">${kp('TOTAL', s.total)}${kp('FITTED', s.fit, 'var(--green2)')}${kp('PENDING', s.pend, s.pend ? 'var(--amber)' : 'var(--green2)')}${kp('CBM', esc(x.cbm || '—'))}</div>
+    <div class="kpis">${kp('TOTAL', s.total)}${kp('DONE', s.fit, 'var(--green2)')}${kp('PENDING', s.pend, s.pend ? 'var(--amber)' : 'var(--green2)')}${kp('CBM', esc(x.cbm || '—'))}</div>
     <div class="actions">${!isEmployeeMode ? `<button class="btn primary smallbtn" onclick="editWork('${x.id}')">Edit</button>` : ''}<button class="btn blue smallbtn" onclick="printPDF('single','${x.id}')">PDF · This Entry</button><button class="btn blue smallbtn" onclick="printPDF('single','${x.id}',true)">PNG · This Entry</button><button class="btn blue smallbtn" onclick="printPDF('tae','${x.id}')">PDF · Full TAE</button><button class="btn blue smallbtn" onclick="printPDF('tae','${x.id}',true)">PNG · Full TAE</button><button class="btn smallbtn" onclick="shareWork('${x.id}')">Share</button></div>
     ${sibs.length ? `<div class="dsec"><h4>Other Sub Orders in ${esc(x.orderNo)}</h4><div class="stage-chips wrapchips subgrid" style="margin:0;grid-template-rows:repeat(${Math.ceil(sibs.length / 2)},auto)">${sibs.map(w => `<button class="chip" onclick="viewWork('${w.id}')">${esc(w.subOrder || w.itemCode)} ${statusOf(w).complete ? '' : '⏳'}</button>`).join('')}</div></div>` : ''}
     <div class="dsec"><h4>Progress Breakdown</h4>${s.complete ? '<div class="small muted">Complete — 100%</div>' : pi.parts.map(q => row(q.l + ' <small class="muted">(' + q.wt + '%)</small>', q.na ? 'Not required' : Math.round(q.wt * q.f * 10) / 10 + ' / ' + q.wt + '%')).join('') + (pi.rep ? row('<span style="color:var(--red)">Repair pending (' + pi.rep.qty + '× ' + esc(pi.rep.part) + ')</span>', '<span style="color:var(--red)">−' + Math.round(pi.rep.ded * 10) / 10 + '%</span>') : '') + row('<b>Progress</b>', p + '%')}</div>
@@ -7704,7 +7699,11 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
     return _sib.apply(this, arguments);
   };
   document.addEventListener('focusin', e => { if (isField(e.target)) schedule(e.target); });
-  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { const a = document.activeElement; if (isField(a)) schedule(a); });
+  /* Stop re-centering the focused field once the person scrolls: touch/wheel/key scrolling cancels pending reveals,
+     and viewport resizes only trigger a reveal when the keyboard really opened/closed (not on URL-bar show/hide). */
+  const stopRv = () => { rvT.forEach(clearTimeout); rvT = []; };
+  ['touchstart', 'touchmove', 'wheel'].forEach(ev => window.addEventListener(ev, stopRv, { passive: true }));
+  if (window.visualViewport) { let lastVh = window.visualViewport.height; window.visualViewport.addEventListener('resize', () => { const h = window.visualViewport.height, d = Math.abs(h - lastVh); lastVh = h; const a = document.activeElement; if (d > 120 && isField(a)) schedule(a); }); }
 
   /* ---------- Typing mode: slide the bottom nav away while a text box is active ---------- */
   const isTextField = el => el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|hidden|file|range|color|image)$/i.test(el.type || 'text')));
@@ -8190,8 +8189,8 @@ const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const A = () => curDB();
 const isEnt = () => typeof ENTRY !== 'undefined' && !!ENTRY;
 const lev = (a, b) => { if (a === b) return 0; const m = a.length, n = b.length; if (!m || !n) return Math.max(m, n); let p = Array.from({ length: n + 1 }, (_, j) => j); for (let i = 1; i <= m; i++) { const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; };
-const STG = { sanding: /\b(sanding|sending|sandin|sand)\b/, polish: /\b(polish|palish|pollish)\b/, carpenter: /\b(carpenter|carpentar|balance|gap)\b/, fitting: /\b(fitting|fiting)\b/ };
-const STL = { sanding: 'Sanding', polish: 'Polish', carpenter: 'Balance/Carpenter', fitting: 'Fitting' };
+const STG = { sanding: /\b(sanding|sending|sandin|sand)\b/, polish: /\b(polish|palish|pollish)\b/, carpenter: /\b(carpenter|carpentar|balance|gap)\b/ };
+const STL = { sanding: 'Sanding', polish: 'Polish', carpenter: 'Balance/Carpenter' };
 const KW = [['orderNo', 'tae no|order no|tae|order'], ['subOrder', 'sub order|suborder|sub'], ['itemCode', 'item code|itemcode|code'], ['itemName', 'item name|description|desc|name'], ['buyer', 'buyer'], ['size', 'size'], ['sizeUnit', 'unit'], ['qty', 'quantity|qty'], ['cbm', 'cbm'], ['woodSupplier', 'wood supplier|supplier|sup'], ['date', 'entry date|date'], ['targetDate', 'target date|target|dispatch']];
 const KMAP = {}; KW.forEach(([f, a]) => a.split('|').forEach(w => KMAP[w] = f));
 const KRE = new RegExp('\\b(' + Object.keys(KMAP).sort((a, b) => b.length - a.length).join('|') + ')\\b\\s*[:=\\-]?\\s*', 'ig');
@@ -8475,7 +8474,7 @@ function IX() {
 }
 
 // ---------- CONTRACTOR UPDATES (single or many in one message) ----------
-const STORD = ['sanding', 'polish', 'carpenter', 'fitting'];
+const STORD = ['sanding', 'polish', 'carpenter'];
 const STOP = /^(done|bheja|bhej|diya|pcs|pc|piece|pieces|add|alloc\w*|allot\w*|assign\w*|the|for|and|aur|ne|ko|ka|ki|me|se|mein|out|of|karo|kar|do|dena|sub|order|code|item|tae|more|extra|plus|also|sanding|polish|fitting|carpenter|balance|gap|entry|update|kal|aaj|today|please|plz)$/;
 function rawName(rest) { const w = (rest || '').split(/[^a-z]+/).filter(x => x.length >= 3 && !STOP.test(x)); return w.length ? w[0].charAt(0).toUpperCase() + w[0].slice(1) : ''; }
 function fuzzy(stage, name, x) { let b = '', bd = 3; const f = prNorm(name).split(' ')[0]; candNames(stage, x).forEach(c => { const d = lev(prNorm(c.name).split(' ')[0], f); if (d < bd) { bd = d; b = c.name; } }); return b; }
