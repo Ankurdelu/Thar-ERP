@@ -1721,7 +1721,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.87-live';
+const APP_VER = 'V1.0.88-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -10404,6 +10404,7 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.88-live: drawer key list with a per-key editor (key, label, account email, model, load models, test connection).
   V1.0.87-live: plain-English quick options, automatic reply language, drawer with Gemini/ChatGPT key manager, Theme/Settings, top bar cleanup.
   V1.0.84-live: Attendance read/write, CBM + totals tools, rename-contractor edits, edit branches (1/2 > ),
   assistant memory, copy/regenerate, quick chips, richer Markdown, voice language switch, sliding panel)
@@ -10535,6 +10536,30 @@ body:not(.light) .apSeg button.on{background:linear-gradient(135deg,#38bdf8,#a85
 body:not(.light) .apDb.apPri{background:var(--green);color:#04130d}
 body:not(.light) .apAi select,body:not(.light) .apAi .apFi{background:#191b24;border-color:rgba(255,255,255,.08);color:#e6e8f2}
 body:not(.light) .apAi,body:not(.light) .apNav{border-bottom-color:rgba(255,255,255,.08)}
+
+/* ===== V1.0.88-live key list + editor ===== */
+.apKl{display:flex;flex-direction:column;gap:6px;margin:6px 0 8px}
+.apKi{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;background:var(--panel3);padding:2px 8px 2px 2px}
+.apKi.on{border-color:var(--green)}
+.apKo{flex:1;min-width:0;text-align:left;background:none;border:0;padding:8px 10px}
+.apKn{display:block;font-weight:800}
+.apKs{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apKt{font-size:11px;color:var(--green);font-weight:800}
+.apDb.apSm{width:auto;flex:none;padding:6px 10px;font-size:12px;text-align:center;margin:0}
+.apDb.apRed{background:var(--red);color:#fff;border:0;text-align:center}
+.apKmod{position:absolute;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:calc(14px + env(safe-area-inset-top,0px)) 12px 14px}
+.apKmod.hidden{display:none}
+.apKc{width:100%;max-width:440px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:4px}
+.apKc input,.apKc select{width:100%;min-width:0;margin:0 0 4px;padding:9px 11px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:inherit;font-size:16px}
+.apKc .apRow{margin-bottom:0}.apKc .apRow select,.apKc .apRow input{flex:1}
+.apKc .apDb{margin-top:4px}
+.apStat{border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:6px 0;font-size:13px}
+.apKb{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+body:not(.light) .apKi{background:#1f2230;border-color:rgba(255,255,255,.08)}
+body:not(.light) .apKi.on{border-color:var(--green)}
+body:not(.light) .apKc{background:#191b24;border-color:rgba(255,255,255,.08);color:#e9ebf5}
+body:not(.light) .apKc input,body:not(.light) .apKc select{background:#12131a;border-color:rgba(255,255,255,.08);color:#e6e8f2}
+body:not(.light) .apStat{border-color:rgba(255,255,255,.08)}
 
 </style>
 <script id="apJs">
@@ -10919,15 +10944,16 @@ function log() {
 }
 function fit() { const t = $('#apIn'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 140) + 'px'; }
 
-/* ---------- V1.0.87 drawer: provider + model + multiple saved API keys ----------
-   Keys live in localStorage ('taeLlmProfiles' = every saved key, 'taeLlm' = the ACTIVE key used for API calls).
-   Same format as the ERP Assistant settings, so photo/PDF reading and the classic assistant use the same active key. */
+/* ---------- V1.0.88 drawer: provider switch, saved key list, per-key editor ----------
+   Keys live in localStorage ('taeLlmProfiles' = every saved key with label, email, model and last test result;
+   'taeLlm' = the ACTIVE key used for API calls). Same format as the ERP Assistant settings. */
 const AIP = {
   gemini: { name: 'Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', def: 'gemini-3.5-flash-lite', models: [['gemini-3.5-flash-lite', '3.5 Flash-Lite'], ['gemini-3.8-flash', '3.8 Flash'], ['gemini-3.1-pro', '3.1 Pro'], ['gemini-4-argon', '4 Argon']] },
   openai: { name: 'ChatGPT', url: 'https://api.openai.com/v1/chat/completions', def: 'gpt-6-luna', models: [['gpt-6-luna', 'GPT-6 Luna'], ['gpt-5.4-mini', 'GPT-5.4 mini'], ['gpt-6-sol', 'GPT-6 Sol'], ['gpt-6-astra', 'GPT-6 Astra']] }
 };
 let aiView = 'gemini', aiInit = false;
-const aiMask = k => { k = String(k || ''); return k.length > 10 ? k.slice(0, 4) + '••••' + k.slice(-4) : '••••'; };
+const aiMask = k => { k = String(k || ''); return k.length > 10 ? k.slice(0, 4) + '\u2022\u2022\u2022\u2022' + k.slice(-4) : '\u2022\u2022\u2022\u2022'; };
+const aiModelName = (pr, id) => { const m = AIP[pr].models.find(x => x[0] === id); return m ? m[1] : id; };
 function aiProfs() {
   try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) return p; } catch (e) { }
   const p = { list: [], active: '' };
@@ -10943,50 +10969,148 @@ function aiSave(P) {
     const a = P.list.find(x => x.id === P.active);
     if (a) localStorage.setItem('taeLlm', JSON.stringify({ key: a.key, provider: a.provider, url: AIP[a.provider].url, model: a.model, think: a.think || 'low', label: a.label, pid: a.id }));
     else localStorage.removeItem('taeLlm');
-  } catch (e) { aiMsg('Could not save to this browser storage', 1); }
+    return true;
+  } catch (e) { aiMsg('Could not save to this browser storage', 1); return false; }
 }
 function aiMsg(t, bad) { const m = $('#apAiMsg', root); if (!m) return; m.textContent = t || ''; m.style.color = bad ? '#f87171' : '#34d399'; }
 function aiNextLabel(P, pr) { let n = 1; while (P.list.some(x => x.label.toLowerCase() === (AIP[pr].name + ' ' + n).toLowerCase())) n++; return AIP[pr].name + ' ' + n; }
+function aiActivate(P, id) { P.active = id; const x = P.list.find(z => z.id === id); if (x) { P.last = P.last || {}; P.last[x.provider] = id; } aiSave(P); }
 function aiDraw() {
   if (!root) return; const P = aiProfs(), act = P.list.find(x => x.id === P.active);
   if (!aiInit) { aiInit = true; if (act) aiView = act.provider; }
-  const keys = P.list.filter(x => x.provider === aiView), cur = act && act.provider === aiView ? act : null, PR = AIP[aiView];
   root.querySelectorAll('[data-pv]').forEach(b => b.classList.toggle('on', b.dataset.pv === aiView));
-  const sel = $('#apKeySel', root);
-  sel.innerHTML = (keys.length ? (cur ? '' : '<option value="">Select a key</option>') + keys.map(x => '<option value="' + esc(x.id) + '"' + (cur && x.id === cur.id ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('') : '<option value="">No saved keys</option>');
-  sel.disabled = !keys.length; $('#apKeyDel', root).disabled = !cur;
-  $('#apKeyMask', root).textContent = cur ? 'Key: ' + aiMask(cur.key) : (act ? 'In use: ' + act.label + ' (' + AIP[act.provider].name + ')' : 'No API key is active');
-  const ms = $('#apModSel', root), list = PR.models.slice(); if (cur && !list.some(m => m[0] === cur.model)) list.unshift([cur.model, cur.model]);
-  ms.innerHTML = list.map(m => '<option value="' + esc(m[0]) + '"' + (cur ? (m[0] === cur.model ? ' selected' : '') : (m[0] === PR.def ? ' selected' : '')) + '>' + esc(m[1]) + '</option>').join(''); ms.disabled = !cur;
-  $('#apKeyName', root).placeholder = 'Label (e.g. ' + aiNextLabel(P, aiView) + ')';
+  const keys = P.list.filter(x => x.provider === aiView);
+  $('#apKeyList', root).innerHTML = keys.length ? keys.map(x => {
+    const sub = [aiMask(x.key), x.email, x.st ? (x.st.ok ? 'Connected' : 'Disconnected') : ''].filter(Boolean).join(' \u00b7 '), on = x.id === P.active;
+    return '<div class="apKi' + (on ? ' on' : '') + '"><button class="apKo" data-open="' + esc(x.id) + '"><span class="apKn">' + esc(x.label) + '</span><span class="apKs">' + esc(sub) + '</span></button>' + (on ? '<span class="apKt">In use</span>' : '<button class="apDb apSm" data-use="' + esc(x.id) + '">Use</button>') + '</div>';
+  }).join('') : '<div class="apKm">No ' + AIP[aiView].name + ' keys saved yet.</div>';
+  $('#apKeyMask', root).textContent = act ? 'In use: ' + act.label + ' (' + aiModelName(act.provider, act.model) + ')' : 'No API key is in use';
 }
-function aiActivate(P, id) { P.active = id; const x = P.list.find(z => z.id === id); if (x) { P.last = P.last || {}; P.last[x.provider] = id; } aiSave(P); }
-function aiPick() { const P = aiProfs(), id = $('#apKeySel', root).value; if (!id || !P.list.some(x => x.id === id)) return; aiActivate(P, id); aiDraw(); aiMsg('Now using ' + P.list.find(x => x.id === id).label); }
-function aiModel() { const P = aiProfs(), a = P.list.find(x => x.id === P.active); if (!a) return; a.model = $('#apModSel', root).value || AIP[a.provider].def; aiSave(P); aiMsg('Model set'); }
 function aiClick(e) {
-  const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.pv) {   // provider switch: use that provider's last-used (or first) saved key
-    aiView = b.dataset.pv; const P = aiProfs(), keys = P.list.filter(x => x.provider === aiView), act = P.list.find(x => x.id === P.active);
-    if (keys.length && !(act && act.provider === aiView)) { const lastId = P.last && P.last[aiView], pick = keys.find(x => x.id === lastId) || keys[0]; aiActivate(P, pick.id); aiMsg('Now using ' + pick.label); }
-    else aiMsg(keys.length ? '' : 'No ' + AIP[aiView].name + ' key saved yet. Add one below.');
+  const b = e.target.closest('button'); if (!b) return; const d = b.dataset;
+  if (d.pv) {   // provider switch: use that provider's last-used (or first) saved key
+    aiView = d.pv; const P = aiProfs(), keys = P.list.filter(x => x.provider === aiView), act = P.list.find(x => x.id === P.active);
+    if (keys.length && !(act && act.provider === aiView)) { const pick = keys.find(x => x.id === (P.last && P.last[aiView])) || keys[0]; aiActivate(P, pick.id); aiMsg('Now using ' + pick.label); }
+    else aiMsg('');
     return aiDraw();
   }
-  if (b.id === 'apKeyDel') {
-    const P = aiProfs(), id = $('#apKeySel', root).value, x = P.list.find(z => z.id === id); if (!x) return;
-    if (!confirm('Remove ' + x.label + '? Your other saved keys stay.')) return;
-    P.list = P.list.filter(z => z.id !== id);
-    if (P.active === id) { const nx = P.list.find(z => z.provider === x.provider); P.active = nx ? nx.id : ''; }
-    aiSave(P); aiDraw(); return aiMsg(x.label + ' removed');
-  }
-  if (b.id === 'apKeyAdd') {
-    const kv = $('#apKeyVal', root), nm = $('#apKeyName', root), key = kv.value.trim(); if (!key) return aiMsg('Paste the API key first', 1);
-    if (aiView === 'gemini' && /^sk-/.test(key)) return aiMsg('This looks like a ChatGPT key. Switch to ChatGPT above.', 1);
-    if (aiView === 'openai' && /^(AIza|AQ\.)/.test(key)) return aiMsg('This looks like a Gemini key. Switch to Gemini above.', 1);
-    const P = aiProfs(); let label = nm.value.trim().slice(0, 30) || aiNextLabel(P, aiView);
-    if (P.list.some(x => x.label.toLowerCase() === label.toLowerCase())) return aiMsg('A key named "' + label + '" already exists. Use another label.', 1);
-    const x = { id: 'a' + Date.now().toString(36), provider: aiView, label, key, model: AIP[aiView].def, think: 'low' };
-    P.list.push(x); aiActivate(P, x.id); kv.value = ''; nm.value = ''; aiDraw(); aiMsg(label + ' saved and in use');
-  }
+  if (d.open) return kOpen(d.open);
+  if (d.use) { const P = aiProfs(), x = P.list.find(z => z.id === d.use); if (x) { aiActivate(P, x.id); aiDraw(); aiMsg('Now using ' + x.label); } return; }
+  if (b.id === 'apKeyNew') return kOpen('new');
+}
+
+/* ----- per-key editor (modal) ----- */
+const KMOD = `<div class="apKmod hidden" id="apKeyM"><div class="apKc">
+<div class="apSecH"><span id="apKT">Edit key</span><button id="apKX" class="apDb apSm">Close</button></div>
+<label class="apLb">Provider</label><div class="apKm" id="apKP"></div>
+<label class="apLb" for="apKL">Label</label><input id="apKL" autocomplete="off">
+<label class="apLb" for="apKE">Account Email / Note (optional)</label><input id="apKE" autocomplete="off" placeholder="Which account owns this key">
+<label class="apLb" for="apKV">API Key</label><div class="apRow"><input id="apKV" type="password" autocomplete="off" spellcheck="false"><button id="apKS" class="apDb apSm">Show</button></div>
+<label class="apLb" for="apKMs">Model</label><div class="apRow"><select id="apKMs"></select><button id="apKLd" class="apDb apSm">Load Models</button></div>
+<button id="apKUm" class="apDb" style="display:none">Update Model</button>
+<button id="apKTs" class="apDb">Test Connection</button>
+<div class="apStat"><div>Connection: <b id="apKCn">Not tested</b></div><div class="apKm" id="apKRs"></div></div>
+<div class="apKb"><button id="apKSv" class="apDb apPri">Save changes</button><button id="apKUse" class="apDb">Use this key</button><button id="apKDl" class="apDb apRed">Remove key</button></div>
+<div class="apKm" id="apKMsg"></div>
+</div></div>`;
+let kEd = null, kProv = 'gemini', kSaved = '', kLast = null;
+const kq = x => $(x, root);
+function kConn(st, txt) { const c = kq('#apKCn'); c.textContent = txt || (st === 'ok' ? 'Connected' : st === 'bad' ? 'Disconnected / Invalid' : 'Not tested'); c.style.color = st === 'ok' ? '#34d399' : st === 'bad' ? '#f87171' : ''; }
+function kRes(t, bad) { const r = kq('#apKRs'); r.textContent = t || ''; r.style.color = bad ? '#f87171' : (t ? '#34d399' : ''); }
+function kMsg(t, bad) { const m = kq('#apKMsg'); m.textContent = t || ''; m.style.color = bad ? '#f87171' : '#34d399'; }
+function kFill(ids, cur) { const l = [...new Set([cur].concat(ids).filter(Boolean))]; kq('#apKMs').innerHTML = l.map(i => '<option value="' + esc(i) + '"' + (i === cur ? ' selected' : '') + '>' + esc(aiModelName(kProv, i)) + '</option>').join(''); }
+function kUseBtn() { const P = aiProfs(), b = kq('#apKUse'), on = kEd !== 'new' && P.active === kEd; b.textContent = on ? 'In use' : 'Use this key'; b.disabled = kEd === 'new' || on; }
+function kOpen(id) {
+  const P = aiProfs(), x = id === 'new' ? null : P.list.find(z => z.id === id); if (id !== 'new' && !x) return;
+  kEd = x ? x.id : 'new'; kProv = x ? x.provider : aiView; kLast = null; const PR = AIP[kProv];
+  kq('#apKT').textContent = x ? 'Edit ' + x.label : 'Add ' + PR.name + ' key'; kq('#apKP').textContent = PR.name;
+  kq('#apKL').value = x ? x.label : ''; kq('#apKL').placeholder = aiNextLabel(P, kProv);
+  kq('#apKE').value = (x && x.email) || ''; kq('#apKV').value = x ? x.key : ''; kq('#apKV').type = 'password'; kq('#apKS').textContent = 'Show';
+  kSaved = x ? x.model : ''; kFill(PR.models.map(m => m[0]), x ? x.model : PR.def); kq('#apKUm').style.display = 'none';
+  kq('#apKDl').style.display = x ? '' : 'none'; kMsg(''); kUseBtn();
+  if (x && x.st) { kConn(x.st.ok ? 'ok' : 'bad'); kRes(x.st.msg, !x.st.ok); } else { kConn('none'); kRes(''); }
+  kq('#apKeyM').classList.remove('hidden');
+}
+function kClose() { kq('#apKeyM').classList.add('hidden'); aiDraw(); }
+function kErr(e) {
+  const c = e && e.status, m = String((e && e.message) || '').slice(0, 140);
+  if (e && e.name === 'AbortError') return 'Error: The request timed out. Check the internet connection.';
+  if (c === 429) return 'Error: Quota exceeded or rate limit reached (HTTP 429).';
+  if (c === 401 || c === 403 || (c === 400 && /api key|invalid|permission|unauthor/i.test(m))) return 'Error: Invalid API key or no access (HTTP ' + c + ').';
+  if (c === 404 || (c === 400 && /model/i.test(m))) return 'Error: This model is not available for this key (HTTP ' + c + '). Load models and pick another.';
+  if (c) return 'Error: Request failed (HTTP ' + c + ')' + (m ? ': ' + m : '');
+  return 'Error: Network problem' + (m ? ' (' + m + ')' : '') + '.';
+}
+async function kFetch(url, opts) {
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), 25000);
+  try {
+    const r = await fetch(url, Object.assign({ signal: ac.signal }, opts));
+    if (!r.ok) { let m = ''; try { const j = await r.json(); m = ((Array.isArray(j) ? j[0] : j).error || {}).message || ''; } catch (e) { } throw Object.assign(new Error(m), { status: r.status }); }
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+function kResult(ok, msg, key) {
+  kConn(ok ? 'ok' : 'bad'); kRes(msg, !ok); kLast = { ok, msg, key };
+  const P = aiProfs(), x = kEd === 'new' ? null : P.list.find(z => z.id === kEd);
+  if (x && x.key === key) { x.st = { ok, msg, ts: Date.now() }; aiSave(P); aiDraw(); }
+}
+async function kTest() {
+  const key = kq('#apKV').value.trim(), model = kq('#apKMs').value; if (!key) return kRes('Enter the API key first', 1);
+  kConn('none', 'Testing...'); kRes('Sending a test message to ' + aiModelName(kProv, model) + '...'); kq('#apKTs').disabled = true;
+  try {
+    await kFetch(AIP[kProv].url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with the word OK' }] }) });
+    kResult(true, 'Model test successful: ' + aiModelName(kProv, model) + ' responded.', key);
+  } catch (e) { kResult(false, kErr(e), key); }
+  kq('#apKTs').disabled = false;
+}
+async function kLoad() {
+  const key = kq('#apKV').value.trim(); if (!key) return kRes('Enter the API key first', 1);
+  kConn('none', 'Loading...'); kRes('Loading available models...'); kq('#apKLd').disabled = true;
+  try {
+    const j = await kFetch(AIP[kProv].url.replace(/\/chat\/completions\/?$/, '') + '/models', { headers: { Authorization: 'Bearer ' + key } });
+    let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
+    ids = kProv === 'openai'
+      ? ids.filter(i => /^(gpt|chatgpt|o\d)/i.test(i) && !/embed|tts|whisper|audio|realtime|image|dall|moderation|transcribe|search|instruct|codex|davinci|babbage|sora/i.test(i))
+      : ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
+    ids = [...new Set(ids)].sort().reverse(); if (!ids.length) throw new Error('No usable models were returned for this key');
+    kFill(ids, kq('#apKMs').value); kq('#apKMs').onchange();
+    kResult(true, ids.length + ' models loaded. Choose one from the Model list.', key);
+  } catch (e) { kResult(false, kErr(e), key); }
+  kq('#apKLd').disabled = false;
+}
+function kUpdModel() {
+  const P = aiProfs(), x = P.list.find(z => z.id === kEd); if (!x) return;
+  x.model = kq('#apKMs').value; if (!aiSave(P)) return; kSaved = x.model; kq('#apKUm').style.display = 'none'; aiDraw(); kMsg('Model updated to ' + aiModelName(x.provider, x.model) + ' for ' + x.label);
+}
+function kSave() {
+  const key = kq('#apKV').value.trim(), P = aiProfs(); let self = kEd === 'new' ? null : P.list.find(z => z.id === kEd);
+  if (!key) return kMsg('The API key is empty', 1);
+  if (kProv === 'gemini' && /^sk-/.test(key)) return kMsg('This looks like a ChatGPT key. Use the ChatGPT tab.', 1);
+  if (kProv === 'openai' && /^(AIza|AQ\.)/.test(key)) return kMsg('This looks like a Gemini key. Use the Gemini tab.', 1);
+  const label = kq('#apKL').value.trim().slice(0, 30) || (self ? self.label : aiNextLabel(P, kProv));
+  if (P.list.some(z => z !== self && z.label.toLowerCase() === label.toLowerCase())) return kMsg('Another key already uses the label "' + label + '"', 1);
+  const model = kq('#apKMs').value || AIP[kProv].def, email = kq('#apKE').value.trim().slice(0, 120), fresh = !self;
+  if (self) { if (self.key !== key) self.st = null; Object.assign(self, { label, key, model, email }); }
+  else { self = { id: 'a' + Date.now().toString(36), provider: kProv, label, key, model, think: 'low', email }; P.list.push(self); }
+  if (kLast && kLast.key === key) self.st = { ok: kLast.ok, msg: kLast.msg, ts: Date.now() };
+  if (fresh) aiActivate(P, self.id); else if (!aiSave(P)) return;
+  kEd = self.id; kSaved = model; kq('#apKT').textContent = 'Edit ' + label; kq('#apKUm').style.display = 'none'; kq('#apKDl').style.display = ''; kUseBtn(); aiDraw();
+  kMsg(fresh ? label + ' saved and in use' : 'Changes saved');
+}
+function kUse() { const P = aiProfs(), x = P.list.find(z => z.id === kEd); if (!x) return; aiActivate(P, x.id); kUseBtn(); aiDraw(); kMsg('Now using ' + x.label); }
+function kDel() {
+  const P = aiProfs(), x = P.list.find(z => z.id === kEd); if (!x) return;
+  if (!confirm('Remove ' + x.label + '? Your other saved keys stay.')) return;
+  P.list = P.list.filter(z => z.id !== x.id);
+  if (P.active === x.id) { const nx = P.list.find(z => z.provider === x.provider); P.active = nx ? nx.id : ''; }
+  aiSave(P); kClose(); aiMsg(x.label + ' removed');
+}
+function kBind() {
+  kq('#apKX').onclick = kClose; kq('#apKeyM').onclick = e => { if (e.target.id === 'apKeyM') kClose(); };
+  kq('#apKS').onclick = () => { const v = kq('#apKV'), h = v.type === 'password'; v.type = h ? 'text' : 'password'; kq('#apKS').textContent = h ? 'Hide' : 'Show'; };
+  kq('#apKLd').onclick = kLoad; kq('#apKTs').onclick = kTest; kq('#apKUm').onclick = kUpdModel; kq('#apKSv').onclick = kSave; kq('#apKUse').onclick = kUse; kq('#apKDl').onclick = kDel;
+  kq('#apKMs').onchange = () => { kq('#apKUm').style.display = kEd !== 'new' && kq('#apKMs').value !== kSaved ? '' : 'none'; };
+  kq('#apKV').oninput = () => { const P = aiProfs(), x = kEd === 'new' ? null : P.list.find(z => z.id === kEd); if (!x || x.key !== kq('#apKV').value.trim()) { kConn('none'); kRes('Key changed. Run Test Connection to check it.'); kLast = null; } };
 }
 
 /* ---------- V1.0.84 helpers: chips, welcome, copy, regenerate, memory panel ---------- */
@@ -11038,17 +11162,15 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="openai">ChatGPT</button></div><label class="apLb" for="apKeySel">Active API key</label><div class="apRow"><select id="apKeySel"></select><button id="apKeyDel" class="apDb">Remove</button></div><div class="apKm" id="apKeyMask"></div><label class="apLb" for="apModSel">Model</label><select id="apModSel"></select><label class="apLb">Add API key</label><input id="apKeyName" class="apFi" placeholder="Label (e.g. Gemini 1)" autocomplete="off"><input id="apKeyVal" class="apFi" type="password" placeholder="Paste API key" autocomplete="off" spellcheck="false"><button id="apKeyAdd" class="apDb apPri">Save key and use</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a> · <a href="#" id="apClassic" style="color:var(--blue)">Classic mode (new entries, contractor updates)</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apF"><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div></section>';
-  root.insertAdjacentHTML('beforeend', MEMP); document.body.appendChild(root);
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="openai">ChatGPT</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a> · <a href="#" id="apClassic" style="color:var(--blue)">Classic mode (new entries, contractor updates)</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apF"><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div></section>';
+  root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root);
   $('#apX', root).onclick = close; $('#apMenu', root).onclick = () => $('.apSb', root).classList.toggle('open');
   $('#apBk', root).onclick = $('.apBd', root).onclick = () => $('.apSb', root).classList.remove('open');
   $('.apNew', root).onclick = () => { newChat(); $('.apSb', root).classList.remove('open'); };
   $('.apSrch', root).oninput = e => { q = e.target.value; side(); };
   $('#apTts', root).onclick = () => { tts = !tts; localStorage.apTts = tts ? '1' : '0'; if (!tts && TS) TS.cancel(); head(); };
   $('#apMic', root).onclick = () => mic(!micOn);
-  $('#apAi', root).onclick = aiClick;
-  $('#apKeySel', root).onchange = aiPick;
-  $('#apModSel', root).onchange = aiModel;
+  $('#apAi', root).onclick = aiClick; kBind();
   $('#apTheme', root).onclick = () => { close(); try { window.UTheme && window.UTheme.open(); } catch (e) { } };
   $('#apSettings', root).onclick = () => { close(); try { window.moreSub = 'settings'; go('settings'); } catch (e) { } };
   if (typeof isEmployeeMode !== 'undefined' && isEmployeeMode) $('#apSettings', root).style.display = 'none';
