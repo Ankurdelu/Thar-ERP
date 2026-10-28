@@ -1,4 +1,4 @@
-<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1721,7 +1721,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.90-live';
+const APP_VER = 'V1.0.95-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -7812,9 +7812,12 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
   const nid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   function badge() {
-    const n = rd().length, b = document.getElementById('draftBadge'); if (!b) return;
+    const n = rd().length + aiDrN(), b = document.getElementById('draftBadge'); if (!b) return;
     b.textContent = n; b.classList.toggle('zero', n === 0);
   }
+  /* drafts saved from the AI chat live in db.drafts (a separate store); count them here too */
+  function aiDrN() { try { const d = getActiveDB(); return (d && Array.isArray(d.drafts)) ? d.drafts.length : 0; } catch (e) { return 0; } }
+  window.draftBadge = badge;
 
   function capture(f) {
     const o = Object.fromEntries(new FormData(f));
@@ -7885,7 +7888,7 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
   window.draftClose = function () { document.getElementById('draftModal')?.remove(); };
   window.openDrafts = function () {
     flush(); draftClose();
-    document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="draftModal" onclick="if(event.target===this)draftClose()"><section class="card record-modal"><div class="section-title"><h3>📝 Draft Entries</h3><button class="btn smallbtn" onclick="draftClose()">✕ Close</button></div><p class="small muted" style="margin-top:-6px">Unsaved entries are kept here. Tap one to continue from where you stopped.</p><div id="draftList">${listHtml()}</div></section></div>`);
+    document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="draftModal" onclick="if(event.target===this)draftClose()"><section class="card record-modal"><div class="section-title"><h3>📝 Draft Entries</h3><button class="btn smallbtn" onclick="draftClose()">✕ Close</button></div><p class="small muted" style="margin-top:-6px">Unsaved entries are kept here. Tap one to continue from where you stopped.</p>${aiDrN() ? `<div class="draft-row" onclick="draftClose();try{THAR_AI_TX.openDrafts()}catch(e){}"><div style="min-width:0;flex:1"><div style="font-weight:800">🤖 AI drafts (${aiDrN()})</div><div class="small" style="color:#fbbf24;font-weight:700;margin-top:2px">Saved from the AI chat · tap to open</div></div></div>` : ''}<div id="draftList">${listHtml()}</div></section></div>`);
   };
   window.draftDel = function (id) {
     if (!confirm('Delete this draft?')) return;
@@ -9264,7 +9267,7 @@ function pump() {
 const chipHtml = (c, off) => '<button' + (off ? ' disabled' : '') + ' class="' + (c.c || '') + '" ' + (c.pick ? 'data-pick="' + esc(c.pick) + '"' : c.view ? 'data-view="' + esc(c.view) + '"' : c.go ? 'data-go="' + esc(c.go) + '"' : 'data-send="' + esc(c.send) + '"') + '>' + esc(c.l) + '</button>';
 function draw(typing) {
   if (typeof document === 'undefined') return; const el = document.getElementById('taeLog'); if (!el) return;
-  typing = typing || wait > 0; const keep = document.getElementById('aiTxnPanel');
+  typing = typing || wait > 0; const keep = (k => (k && k.parentNode === el) ? k : null)(document.getElementById('aiTxnPanel'));
   let lb = -1; log.forEach((m, i) => { if (m.who === 'b') lb = i; });
   const near = el.scrollHeight - el.scrollTop - el.clientHeight < 140; let added = false, firstNew = null;
   const dots = el.querySelector(':scope > .taeDots');
@@ -9577,8 +9580,8 @@ return 'SPEECH INPUT RULES: messages may come from Hindi (hi-IN) speech recognit
 
 const $=id=>document.getElementById(id);
 const STORES=['work','orders','repairs'];
-function store(n){try{const d=typeof A==='function'?A():window.db;return (d&&d[n])||[]}catch(e){return[]}}
-function setStore(n,arr){const d=typeof A==='function'?A():window.db;d[n]=arr}
+function store(n){try{const d=typeof getActiveDB==='function'?getActiveDB():window.db;return (d&&d[n])||[]}catch(e){return[]}}
+function setStore(n,arr){const d=typeof getActiveDB==='function'?getActiveDB():window.db;d[n]=arr}
 function work(){return store('work')}
 function nstore(a){const t=String((a&&a.store)||'work').toLowerCase();return STORES.includes(t)?t:null}
 function brief(r){const o={};Object.keys(r||{}).filter(k=>r[k]===null||typeof r[k]!=='object').slice(0,8).forEach(k=>o[k]=r[k]);return o}
@@ -9603,7 +9606,7 @@ function cleanFields(f){const o={},BAD={'__proto__':1,'constructor':1,'prototype
 Object.keys(f||{}).forEach(k=>{if(BAD[k])return;let v=f[k];if(typeof v==='string')v=v.trim();
 try{
 if(k==='size'&&v!==''){const z=normSize(String(v));if(z&&z.size)v=z.size.replace(/(\d)\.0+(?=×|$)/g,'$1');if(z&&z.unit)o.sizeUnit=z.unit}
-else if(k==='buyer'&&v!==''){v=normBuyer(v);const bk=z=>String(z).toLowerCase().replace(/[\s\-]/g,'');const b=((A()||{}).buyers||[]).find(x=>bk(x)===bk(v));if(b)v=b}
+else if(k==='buyer'&&v!==''){v=normBuyer(v);const bk=z=>String(z).toLowerCase().replace(/[\s\-]/g,'');const b=((getActiveDB()||{}).buyers||[]).find(x=>bk(x)===bk(v));if(b)v=b}
 else if(k==='woodSupplier'&&v!=='')v=supName(v);
 else if(k==='itemCode'&&v!=='')v=String(v).replace(/\s*\/\s*/g,'/').replace(/-\s+/g,'-').replace(/\s+-/g,'-').replace(/\s{2,}/g,' ').trim();
 else if((k==='qty'||k==='cbm')&&v!==''){const n=parseFloat(String(v).replace(/,/g,''));if(isFinite(n))v=k==='cbm'?Math.round(n*100)/100:n}
@@ -9789,7 +9792,7 @@ for(const tc of m.tool_calls){let args={};try{args=JSON.parse(tc.function.argume
 return 'I prepared the available tool results. Please clarify the next step.';
 }
 async function commit(){const d=TX.draft;if(!d)return;
-if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode){if(typeof say==='function')say('Only Admin can save changes to the database. Draft kept, nothing written.');return;}
+if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode&&!(entryOnly()&&d.changes.every(c=>c.op==='add'&&(c.store||'work')==='work'))){if(typeof say==='function')say(entryOnly()?'Entry users can only add new entries. Remove the edits from this draft. Nothing was saved.':'Only Admin can save changes to the database. Draft kept, nothing written.');return;}
 let skipped=0;try{const lists={};const get=st=>lists[st]||(lists[st]=JSON.parse(JSON.stringify(store(st))));
 for(const c of d.changes){const st=c.store||'work';if(!STORES.includes(st))throw Error('Invalid store '+st);
 if(c.op==='add'&&dupOf(c)){skipped++;continue}
@@ -9798,11 +9801,11 @@ const r=get(st)[c.index];if(!r||(c.id&&r.id&&String(r.id)!==String(c.id)))throw 
 if(c.op==='update')Object.keys(c.fields||{}).forEach(k=>{if(k!=='id'&&k!=='__proto__'&&k!=='constructor'&&k!=='prototype')r[k]=c.fields[k]});
 if(c.op==='split'){r.splits=r.splits||{};r.splits[c.stage]=c.splits.map(x=>({name:x.name,qty:Number(x.qty),done:0}));}}
 if(!Object.keys(lists).length){if(typeof say==='function')say('Nothing was saved. Every entry in the draft already exists. Remove them or change the sub-order.',{chips:[{l:'📥 Save to Draft',send:'save to draft'}]});return}
-Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw);try{if(typeof touch==='function')nw.forEach((r,i)=>{if(!old[i]||JSON.stringify(old[i])!==JSON.stringify(r))touch(st,r)})}catch(e){}});
+Object.keys(lists).forEach(st=>{const old=store(st),nw=lists[st];setStore(st,nw);try{if(typeof touch==='function')nw.forEach((r,i)=>{if(!old[i]||JSON.stringify(old[i])!==JSON.stringify(r)){touch(st,r);if(!old[i])entrySend(r)}})}catch(e){}});
 if(typeof save==='function')save();
 if(typeof doPushCloud==='function'){try{Promise.resolve(doPushCloud()).catch(function(){})}catch(e){}}
 try{if(typeof render==='function')render()}catch(e){}
-TX.draft=null;TX.focus=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say('Saved. The changes are in the app; cloud sync runs in the background.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
+TX.draft=null;TX.focus=null;if(TX.opened){const r=store(TX.opened.store)[TX.opened.index];if(r)TX.opened=shape(r,TX.opened.index,TX.opened.store)}showDraft();if(typeof say==='function')say((entryOnly()?'Sent to Admin for approval. ':'Saved. ')+'The changes are in the app; cloud sync runs in the background.'+(skipped?' Skipped '+skipped+' entr'+(skipped>1?'ies':'y')+' that already existed.':''));}
 catch(e){if(typeof say==='function')say('Could not save the draft: '+String(e.message||e)+'. Nothing was reported as saved.',{chips:[{l:'📥 Save to Draft',send:'save to draft'}]});}}
 const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|हां\s+)?(?:save|confirm|commit|सेव|कन्फर्म|सहेज)(?:\s*(?:kar\s*do|kar\s*dijiye|karo|kardo|kr\s*do|kro|kar|करो|कर\s*दो|कर\s*दीजिए|कीजिए|it|now|please|pls))?\s*[.!।]*$/i;
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
@@ -9935,8 +9938,10 @@ function drCount(){return drList().length}
 function drLbl(k){const f=FLD.find(x=>x[0]===k);return f?f[1]:k}
 function drKey(r){r=r||{};const s=String(r.subOrder||'').trim().toLowerCase();return s?(String(r.orderNo||'').trim().toLowerCase()+'|'+s+'|'+String(r.itemCode||'').trim().toLowerCase()):''}
 function drPersist(){try{save()}catch(e){console.error(e)}}
+function entryOnly(){return typeof isEmployeeMode!=='undefined'&&isEmployeeMode&&typeof ENTRY!=='undefined'&&!!ENTRY&&!ENTRY.view}
+function entrySend(r){try{if(entryOnly()&&typeof entrySubmit==='function')entrySubmit(r.id)}catch(e){console.error(e)}}
 function drGuard(){
-  if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode){toast('Only Admin can use Drafts.');return false}
+  if(typeof isEmployeeMode!=='undefined'&&isEmployeeMode&&!entryOnly()){toast('Only Admin can use Drafts.');if(typeof say==='function')say('Only Admin can use Drafts.');return false}
   if(typeof isViewMode!=='undefined'&&isViewMode){toast('Close the backup view first.');return false}
   return true}
 /* block = must be fixed before the entry can go into the Work list; warn = allowed, shown for your review */
@@ -10030,7 +10035,7 @@ function drCommit(rec){
   const T=window.TAE_ASSISTANT;if(!T||!T.mkWork)throw Error('Assistant is not ready yet');
   const o=T.mkWork(Object.assign({},rec));
   Object.keys(rec).forEach(k=>{if(!(k in o)&&k!=='id'&&rec[k]!==''&&rec[k]!=null&&typeof rec[k]!=='object')o[k]=rec[k]});
-  db.work.push(o);touch('work',o)}
+  db.work.push(o);touch('work',o);entrySend(o)}
 function drAfterSave(){try{if(typeof render==='function')render()}catch(e){}}
 function drSaveOne(){
   if(!drGuard())return;drCollect();
@@ -10063,7 +10068,7 @@ function drClick(e){
   if(a==='all')return drSaveAll();
   if(a==='del'){if(!confirm('Delete this draft?'))return;const L=drList(),i=L.findIndex(x=>x.id===DRV.id);if(i>=0){L.splice(i,1);drPersist()}const nx=L[Math.min(i,L.length-1)];if(nx)DRV.id=nx.id;else DRV.mode='list';DRV.err='';drBadge();return drRender()}
   if(a==='clear'){const n=drCount();if(!n||!confirm('Delete ALL '+n+' drafts? This cannot be undone.'))return;drList().length=0;drPersist();DRV.mode='list';drBadge();return drRender()}}
-function drBadge(){const n=$('aiDrN');if(n){const c=drCount();n.textContent=c?String(c):''}}
+function drBadge(){const n=$('aiDrN');if(n){const c=drCount();n.textContent=c?String(c):''}try{window.draftBadge&&window.draftBadge()}catch(e){}}
 function mountDrBtn(){
   const first=document.querySelector('#taeBox .taeH > button');if(!first||$('aiDrBtn'))return;
   const b=document.createElement('button');b.type='button';b.id='aiDrBtn';b.setAttribute('aria-label','Drafts');b.innerHTML='📂<small id="aiDrN"></small>';b.onclick=openDrafts;first.before(b);drBadge()}
@@ -10409,6 +10414,8 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.92-live: Drafts: entries sent with "Save to Draft" from the AI chat are now counted in the page Draft badge and listed in the Draft window (AI drafts row), so they no longer look missing.
+  V1.0.91-live: FIX AI entry draft: Confirm & save / Save to Draft work again (draft engine could not see the database), chat edits no longer crash on the draft card, Entry users can send add-only drafts to Admin.
   V1.0.90-live: Classic camera, attachment tray, message box (field chips), entry logic and tools (Help, Format, Brief, Undo, Redo, Drafts) work inside the chat; Classic entry workflow merged into the chat (order sheet -> entry card -> Confirm & save / Save to Draft / Keep editing / Discard); Classic mode link removed.
   V1.0.89-live: AI Pro input bar restored: Camera + PDF/Photo buttons, attachment chip above the input, file + text sent together to the AI.
   V1.0.88-live: drawer key list with a per-key editor (key, label, account email, model, load models, test connection).
