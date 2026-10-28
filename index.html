@@ -1477,25 +1477,67 @@ async function uClearOld() {
 }
 
 let cloudUnsub = null, cloudPendT = null, pushT = null, cloudErrShown = false;
-function startCloudListen() {
-  if (cloudUnsub || !window.cloudDb) return;
+let cloudUnsubs = [], cloudMetaOK = false, cloudSnap = { work: null, orders: null, repairs: null };
+let cloudPushP = null, cloudPushAgain = false;
+const cloudSig = { work: new Map(), orders: new Map(), repairs: new Map(), meta: '' };   // last-pushed fingerprints
+const CLOUD_COLS = ['work', 'orders', 'repairs'];
+const cloudColRef = col => window.cloudDb.collection('thar_factory').doc('store').collection(col);
+const cloudIdOk = s => s.length > 0 && s.length < 1000 && s !== '.' && s !== '..' && s.indexOf('/') < 0 && !/^__.*__$/.test(s);
+function cloudHash(s) {   // fast 53-bit fingerprint (cyrb53) + length
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)) + ':' + s.length;
+}
+/* Delete one record's cloud document. Safe to call anytime: no-op for employees / non-synced stores. */
+function cloudDeleteDoc(col, idv) {
   try {
-    cloudUnsub = window.cloudDb.collection("thar_factory").doc("live_state").onSnapshot(doc => {
+    if (isEmployeeMode || !window.cloudDb || idv == null || !(cloudSig[col] instanceof Map)) return;
+    const s = String(idv); if (!cloudIdOk(s)) return;
+    cloudColRef(col).doc(s).delete()
+      .then(() => { cloudSig[col].delete(s); })          // only forget it once the cloud confirms
+      .catch(e => console.error('Cloud delete failed (will retry on next push):', e));
+  } catch (e) { console.error(e); }
+}
+function cloudApplyCol(col) {
+  const snap = cloudSnap[col]; if (!snap) return;
+  db[col] = snap.docs.map(d => { const o = d.data(); if (o.id == null) o.id = d.id; return o; });
+}
+function startCloudListen() {
+  if (cloudUnsubs.length || !window.cloudDb) return;
+  try {
+    // 1) metadata
+    cloudUnsubs.push(window.cloudDb.collection('thar_factory').doc('meta_info').onSnapshot(doc => {
       if (!isEmployeeMode || !doc.exists) return;
       const d = doc.data(); if (!d) return;
-      if (Array.isArray(d.work)) db.work = d.work;
-      if (Array.isArray(d.orders)) db.orders = d.orders;
-      if (Array.isArray(d.repairs)) db.repairs = d.repairs;
+      const first = !cloudMetaOK; cloudMetaOK = true;     // collections are only applied once migration has written meta_info
       if (Array.isArray(d.buyers)) db.buyers = d.buyers;
       if (Array.isArray(d.peopleCodes)) db.peopleCodes = d.peopleCodes;
       if (d.attendance && typeof d.attendance === 'object') db.attendance = d.attendance;
       if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
+      if (first) CLOUD_COLS.forEach(cloudApplyCol);        // apply anything that arrived before meta_info
       if (typeof epRestore === 'function') epRestore();
       dataVer++; cloudRenderSoon(0);
-    }, err => console.error("Cloud sync err:", err));
+    }, err => console.error('Cloud sync err (meta):', err)));
+
+    // 2) work / orders / repairs sub-collections
+    CLOUD_COLS.forEach(col => {
+      cloudUnsubs.push(cloudColRef(col).onSnapshot(snap => {
+        cloudSnap[col] = snap;
+        if (!isEmployeeMode || !cloudMetaOK) return;
+        if (snap.metadata.fromCache && snap.empty) return;  // never blank local data from an empty offline cache
+        cloudApplyCol(col);
+        if (typeof epRestore === 'function') epRestore();
+        dataVer++; cloudRenderSoon(0);
+      }, err => console.error('Cloud sync err (' + col + '):', err)));
+    });
   } catch (e) { console.error(e); }
 }
-function stopCloudListen() { if (cloudUnsub) { try { cloudUnsub(); } catch (e) {} cloudUnsub = null; } }
+function stopCloudListen() {
+  cloudUnsubs.forEach(u => { try { u(); } catch (e) {} });
+  cloudUnsubs = []; cloudMetaOK = false; cloudSnap = { work: null, orders: null, repairs: null };
+}
 function cloudRenderSoon(n) {
   clearTimeout(cloudPendT);
   cloudPendT = setTimeout(() => {
@@ -1510,19 +1552,58 @@ function pushCloudLive() {
   clearTimeout(pushT); pushT = setTimeout(doPushCloud, 700);
 }
 async function doPushCloud() {
-  if (isEmployeeMode || !window.cloudDb) return;
-  try {
-    await window.cloudDb.collection("thar_factory").doc("live_state").set({
-      work: db.work, orders: db.orders, repairs: db.repairs,
-      buyers: db.buyers, peopleCodes: db.peopleCodes, attendance: db.attendance,
-      company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '',
-      lastUpdated: Date.now()
-    }, { merge: true });
-    cloudErrShown = false;
-  } catch (e) {
-    console.error("Cloud push failed:", e);
-    if (!cloudErrShown) { cloudErrShown = true; toast('⚠ Cloud sync failed: ' + ((e && e.message) || e).toString().slice(0, 90)); }
+  if (isEmployeeMode || !window.cloudDb || window.__loadFailed) return;
+  if (cloudPushP) { cloudPushAgain = true; return cloudPushP; }   // coalesce overlapping pushes
+  cloudPushP = (async () => {
+    try {
+      do { cloudPushAgain = false; await cloudPushOnce(); } while (cloudPushAgain);
+      cloudErrShown = false;
+    } catch (e) {
+      console.error('Cloud push failed:', e);
+      if (!cloudErrShown) { cloudErrShown = true; toast('⚠ Cloud sync failed: ' + ((e && e.message) || e).toString().slice(0, 90)); }
+    } finally { cloudPushP = null; }
+  })();
+  return cloudPushP;
+}
+async function cloudPushOnce() {
+  const ops = [];
+  for (const col of CLOUD_COLS) {
+    const arr = Array.isArray(db[col]) ? db[col] : [], prev = cloudSig[col], seen = new Set(), cref = cloudColRef(col);
+    for (const it of arr) {
+      if (!it || it.id == null) continue;
+      const idv = String(it.id); if (!cloudIdOk(idv)) continue;
+      seen.add(idv);
+      let json; try { json = JSON.stringify(it); } catch (_) { continue; }   // JSON round-trip also strips `undefined` (Firestore rejects it)
+      const sig = cloudHash(json);
+      if (prev.get(idv) === sig) continue;                                   // unchanged since last push
+      if (json.length > 300000 && new Blob([json]).size > 1000000) {         // single record too big for Firestore: skip quietly
+        console.warn('Cloud sync: record too large, skipped', col, idv); prev.set(idv, sig); continue;
+      }
+      ops.push({ t: 's', col, idv, sig, json, ref: cref.doc(idv) });
+    }
+    prev.forEach((_, idv) => { if (!seen.has(idv)) ops.push({ t: 'd', col, idv, ref: cref.doc(idv) }); });
   }
+
+  // metadata (attendance is dropped from the write only if it alone would blow the 1 MB limit)
+  const meta = {
+    company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '',
+    buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, schema: 2
+  };
+  let metaJson = JSON.stringify(meta);
+  if (metaJson.length > 300000 && new Blob([metaJson]).size > 950000) {
+    console.warn('Cloud sync: attendance too large for meta_info, not synced'); delete meta.attendance; metaJson = JSON.stringify(meta);
+  }
+  const metaSig = cloudHash(metaJson);
+  if (!ops.length && metaSig === cloudSig.meta) return;                      // nothing changed → zero writes
+
+  for (let i = 0; i < ops.length; i += 400) {
+    const chunk = ops.slice(i, i + 400), b = window.cloudDb.batch();
+    chunk.forEach(o => { if (o.t === 's') b.set(o.ref, JSON.parse(o.json)); else b.delete(o.ref); });
+    await b.commit();
+    chunk.forEach(o => { if (o.t === 's') cloudSig[o.col].set(o.idv, o.sig); else cloudSig[o.col].delete(o.idv); });
+  }
+  await window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: Date.now() }), { merge: true });
+  cloudSig.meta = metaSig;
 }
 
 const KEY = 'attendanceProFactory_v4';
@@ -1640,7 +1721,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.77-live';
+const APP_VER = 'V1.0.81-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2193,7 +2274,7 @@ async function deleteEntry(kind, idv) {
   const was = isViewMode; isViewMode = false;
   try {
     db.trash.push({ id: id(), sourceKey: key, record: rec, deletedAt: Date.now(), fromBackup: viewFileName });
-    const lv = db[key].find(a => a.id === idv); if (lv) { db[key] = db[key].filter(a => a.id !== idv); untouch(key, idv); }
+    const lv = db[key].find(a => a.id === idv); if (lv) { db[key] = db[key].filter(a => a.id !== idv); untouch(key, idv); cloudDeleteDoc(key, idv); }
     db.deleted[idv] = Date.now(); save();
   } finally { isViewMode = was; }
   window.__og = null; viewWorkId = null; viewOrderId = null;
@@ -2486,7 +2567,7 @@ function workCard(x, o = {}) {
     <div class="wc-top"><div class="wc-tae">${hl(x.orderNo || 'No TAE')}</div><div class="qchips">${x.buyer ? `<span class="pill blue">${hl(x.buyer)}</span>` : ''}${late}${s.repairOpen ? '<span class="pill amber">🛠 Repair</span>' : ''}${fixBadge(x)}${(typeof EP_IDS !== 'undefined' && EP_IDS.has(x.id)) ? '<span class="pill amber">⏳ Waiting for Admin confirmation</span>' : ''}<span class="pill ${s.complete ? '' : 'red'}">${s.complete ? 'COMPLETE' : 'PENDING'}</span></div></div>
     ${fixBox(x)}
     <div class="wc-g">${g('Sub Order', x.subOrder)}${g('Item Code', x.itemCode)}${g('Item Name', x.itemName)}${g('Size', sizeTxt(x))}${g('Sanding', who(x, 'sanding'))}${g('Polish', who(x, 'polish'))}${g('Carpenter', who(x, 'carpenter'))}${g('Wood Supplier', x.woodSupplier)}</div>
-    <div class="qchips"><span class="small muted">${s.complete ? 'QC' : 'Pending QC'}</span>${s.complete ? '<span class="pill">✓ All checks passed</span>' : [...s.qcMissing, ...(s.repairOpen ? ['Repair Return'] : []), ...(s.needsAll ? ['All Complete not ticked'] : [])].map(q => `<span class="pill red">${q}</span>`).join('')}</div>
+    <div class="qchips"><span class="small muted">${s.complete ? 'Status' : 'Pending'}</span>${s.complete ? '<span class="pill">✓ Complete</span>' : [...s.qcMissing, ...(s.repairOpen ? ['Repair Return'] : []), ...(s.needsAll ? ['All Complete not ticked'] : [])].map(q => `<span class="pill red">${q}</span>`).join('')}</div>
     <div class="qty3"><div><small>TOTAL</small><b>${s.total}</b></div><div><small>DONE</small><b>${s.fit}</b></div><div><small>PENDING</small><b style="color:${s.pend ? 'var(--amber)' : 'var(--green2)'}">${s.pend}</b></div></div>
     <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${p}%"></div></div>
     ${o.act ? `<div class="actions" onclick="event.stopPropagation()"><button class="btn smallbtn blue" onclick="viewWork('${x.id}')">👁 Details & PDF</button>${!isEmployeeMode ? `<button class="btn smallbtn" onclick="editWork('${x.id}')">✎ Edit</button><button class="btn smallbtn" onclick="copyWork('${x.id}')">⎘ Clone</button><button class="btn smallbtn danger" onclick="del('work','${x.id}')">🗑</button>` : ''}</div>` : ''}
@@ -2503,7 +2584,7 @@ function qcChanged(el) {
   if (f.elements.needsRepair?.checked && !f.elements.fitRepairReceiveDate?.value) miss.push('Repair Return');
   if (!f.elements.allComplete?.checked && !lhAllOn(f)) miss.push('All Complete');
   const box = document.getElementById('qcStatus');
-  if (box) box.innerHTML = miss.length ? `<span class="pill red">PENDING</span><span class="small muted">Still missing:</span>${miss.map(m => `<span class="pill red">${m}</span>`).join('')}` : `<span class="pill">COMPLETE</span><span class="small muted">All checks passed and All Complete is ticked. This entry will be marked complete.</span>`;
+  if (box) box.innerHTML = miss.length ? `<span class="pill red">PENDING</span><span class="small muted">Pending:</span>${miss.map(m => `<span class="pill red">${m}</span>`).join('')}` : `<span class="pill">COMPLETE</span><span class="small muted">This entry will be marked complete.</span>`;
 }
 
 function shareWork(idv) {
@@ -3477,7 +3558,6 @@ function completeIssues(wf) {
     if (pk.some(p => !p.date)) add('Packing Hall: date missing in a row', pkBox);
   }
   QC_ITEMS.forEach(([k, l]) => { if (!qcOkIn(wf, k)) add('Quality Check: ' + l + ' not ticked', wf.elements[k]?.closest('.checkrow')); });
-  formNameErrors(wf, false).forEach(n => add('Unregistered name: ' + n.m, n.el));
   return out;
 }
 function showCompleteIssues(iss) {
@@ -3519,7 +3599,9 @@ function validateWorkForm(wf, o) {
       subMsg = `Invalid Sub Order (${sub}). Please correct it: ${orderNo}/1 or ${orderNo}/12 (a 1 or 2 digit number is required at the end)`;
     }
   }
-  const nameErr = formNameErrors(wf);
+  const nameWarn = formNameErrors(wf, false);
+  if (nameWarn.length && typeof toast === 'function') { try { toast('Saved. Fix needed on Home: unregistered name(s) ' + nameWarn.map(n => n.m).join('; ')); } catch (e) {} }
+  const nameErr = [];
   const box = document.getElementById('workFormError');
   if (!bad.length && !nameErr.length) { if (box) { box.innerHTML = ''; box.classList.add('hidden'); } return true; }
   bad.forEach(k => wf.elements[k]?.classList.add('inv'));
@@ -3725,7 +3807,7 @@ function workPage() {
           <div id="wrapSanding">
           <p class="small muted" style="margin-top:-6px;">Allocate Qty and mark Completed (Done) when finished.</p>
           <div id="splits-sanding"></div>
-          <div id="summary-sanding" class="small muted" style="margin-bottom:16px;">Allocated: 0 | Completed: 0 | Pending: 0</div>
+          <div id="summary-sanding" class="small muted" style="margin-bottom:16px;">Completed: 0 | Pending: 0</div>
           
           <hr style="border-top:1px dashed var(--line); margin: 16px 0;"></div>
           
@@ -3738,7 +3820,7 @@ function workPage() {
           </div>
           <div id="wrapPolish">
           <div id="splits-polish"></div>
-          <div id="summary-polish" class="small muted">Allocated: 0 | Completed: 0 | Pending: 0</div></div>
+          <div id="summary-polish" class="small muted">Completed: 0 | Pending: 0</div></div>
         </div>
 
         <div class="stage-box" style="border-left: 4px solid var(--green)">
@@ -3747,7 +3829,7 @@ function workPage() {
              <span data-skip="noBalance" style="display:flex;gap:6px"><button type="button" class="btn smallbtn" onclick="addSplitRow('carpenter')">＋ Add Carpenter</button><button type="button" class="btn smallbtn primary" onclick="addSplitRow('carpenter','','','0','','','',true)">＋ Add Supplier</button></span>
           </div>
           <div id="balWrap"><div id="splits-carpenter"></div>
-          <div id="summary-carpenter" class="small muted" style="margin-bottom:16px;">Allocated: 0 | Completed: 0 | Pending: 0</div></div>
+          <div id="summary-carpenter" class="small muted" style="margin-bottom:16px;">Completed: 0 | Pending: 0</div></div>
           
           
           
@@ -3858,15 +3940,15 @@ function renderWorkDetailCard(x) {
   const row = (l, v) => `<div class="drow"><span>${l}</span><b>${v}</b></div>`;
   const node = ([k, l, ic]) => {
     const a = stg(x, k), sp = splitsOf(x, k), cls = noSt(x, k) || (a.alloc && s.total > 0 && a.done >= s.total) ? 'done' : a.done ? 'part' : '';
-    return `<div class="tl-n ${cls}"><div style="display:flex;justify-content:space-between;gap:8px"><b>${ic} ${l}</b><span class="small muted">${noSt(x, k) ? 'Not required' : a.done + ' / ' + s.total + ' done · allocated ' + prQ(a.alloc) + ' of ' + s.total}</span></div>
+    return `<div class="tl-n ${cls}"><div style="display:flex;justify-content:space-between;gap:8px"><b>${ic} ${l}</b><span class="small muted">${noSt(x, k) ? 'Not required' : a.done + ' / ' + s.total + ' done'}</span></div>
       <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${s.total ? Math.min(100, a.done / s.total * 100) : 0}%"></div></div>
-      ${sp.map(q => { const pd = rowPend(x, k, q); return `<div class="tl-r"><span><b>${hl(q.name)}</b>${q.link ? ` <small style="color:var(--amber)">from ${esc(q.link)}</small>` : ''}<br><small class="muted">${esc(q.date || '')}</small></span><span style="text-align:right">${esc(q.done)} / ${esc(q.qty)}<br><small style="color:${pd > 0 ? 'var(--amber)' : 'var(--green2)'}">${pd > 0 ? pd + ' pending' : 'done'}</small></span></div>`; }).join('') || `<small class="muted">${noSt(x, k) ? 'Not required for this item' : 'Not allocated yet'}</small>`}</div>`;
+      ${sp.map(q => { const pd = rowPend(x, k, q); return `<div class="tl-r"><span><b>${hl(q.name)}</b>${q.link ? ` <small style="color:var(--amber)">from ${esc(q.link)}</small>` : ''}${k === 'carpenter' ? `<br><small class="muted">${esc(q.date || '')}</small>` : ''}</span><span style="text-align:right">${esc(q.done)} done</span></div>`; }).join('') || `<small class="muted">${noSt(x, k) ? 'Not required for this item' : 'No entry yet'}</small>`}</div>`;
   };
   const hwOn = [...HW.filter(([k]) => x[k]).map(h => h[1]), ...(x.fitCustomHardwareEnabled && x.fitCustomHardware ? [x.fitCustomHardware] : [])];
   const hw = hwOn.length ? hwOn.map(l => `<span class="pill">${esc(l)}</span>`).join('') : '<span class="small muted">No hardware attached</span>';
   const qcMiss = [...s.qcMissing, ...(s.repairOpen ? ['Repair Return'] : []), ...(s.needsAll ? ['All Complete not ticked'] : [])];
   const qcHtml = s.complete
-    ? `<div class="qchips"><span class="pill">COMPLETE</span><span class="small muted">All checks passed</span>${x.qcMoisture ? '<span class="pill">Moisture OK</span>' : ''}</div>`
+    ? `<div class="qchips"><span class="pill">COMPLETE</span>${x.qcMoisture ? '<span class="pill">Moisture OK</span>' : ''}</div>`
     : `<div class="qchips"><span class="pill red">PENDING</span><span class="small muted">Missing:</span>${qcMiss.map(q => `<span class="pill red">${esc(q)}</span>`).join('')}</div>`;
   return `<section class="card" style="padding:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><button class="btn smallbtn" onclick="backFromWork()">← Back</button><span class="small muted">Production Record</span></div>
@@ -4982,7 +5064,7 @@ async function osxHtml(data, A) {
         if (!sp.length) return '<div class="oxb"><div class="oxh">' + l + '<span>Not started</span></div></div>';
         const lines = sp.map(p => {
           const d = N(p.done), al = N(p.qty);
-          return '<div class="oxl"><b>' + e(p.name || '-') + '</b> — <b>' + d + '</b> of ' + q + ' pcs done' + (al && al !== d ? ' <span class="oxm2">(assigned ' + al + ')</span>' : '') + ' · ' + (p.date ? e(osxDate(p.date)) : '<span class="oxm2">date not entered</span>') + '</div>';
+          return '<div class="oxl"><b>' + e(p.name || '-') + '</b> — <b>' + d + '</b> of ' + q + ' pcs done' + (k === 'carpenter' ? ' · ' + (p.date ? e(osxDate(p.date)) : '<span class="oxm2">date not entered</span>') : '') + '</div>';
         }).join('');
         return '<div class="oxb"><div class="oxh">' + l + '<span>Total ' + tot + ' of ' + q + ' pcs</span></div>' + lines + '</div>';
       };
@@ -5210,7 +5292,7 @@ async function del(k, i) {
   }
   delNow(k, i, false);
 }
-function delNow(k, i, skip) {  let x = (db[k] || []).find(o => o.id === i); if (!x || (!skip && !confirm('Move to Recycle Bin?'))) return; const tr = { id: id(), sourceKey: k, record: x, deletedAt: Date.now() }; if (k === 'work') { const lr = (db.repairs || []).filter(r => r.workId === i); if (lr.length) { tr.linkedRepairs = lr; db.repairs = db.repairs.filter(r => r.workId !== i); lr.forEach(r => untouch('repairs', r.id)); } } db.trash.push(tr); db[k] = db[k].filter(o => o.id !== i); untouch(k, i); if (db.deleted && dirty[k]) db.deleted[i] = Date.now(); if (tab === 'orderView') tab = 'orderList'; if (tab === 'work' && viewWorkId === i) { viewWorkId = null; tab = (prevTab && prevTab !== 'work') ? prevTab : 'home'; } save(); render(); toast('Deleted'); }
+function delNow(k, i, skip) {  let x = (db[k] || []).find(o => o.id === i); if (!x || (!skip && !confirm('Move to Recycle Bin?'))) return; const tr = { id: id(), sourceKey: k, record: x, deletedAt: Date.now() }; if (k === 'work') { const lr = (db.repairs || []).filter(r => r.workId === i); if (lr.length) { tr.linkedRepairs = lr; db.repairs = db.repairs.filter(r => r.workId !== i); lr.forEach(r => { untouch('repairs', r.id); cloudDeleteDoc('repairs', r.id); }); } } db.trash.push(tr); db[k] = db[k].filter(o => o.id !== i); untouch(k, i); cloudDeleteDoc(k, i); if (db.deleted && dirty[k]) db.deleted[i] = Date.now(); if (tab === 'orderView') tab = 'orderList'; if (tab === 'work' && viewWorkId === i) { viewWorkId = null; tab = (prevTab && prevTab !== 'work') ? prevTab : 'home'; } save(); render(); toast('Deleted'); }
 function removeBuyer(b) {  if (confirm('Delete buyer?')) { db.trash.push({ id: id(), sourceKey: 'buyers', record: b, deletedAt: Date.now(), isBuyer: true }); db.buyers = db.buyers.filter(x => x !== b); save(); render(); } }
 function filterList(idv, q) { document.getElementById(idv)?.querySelectorAll('.searchable').forEach(x => x.style.display = x.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none'); }
 
@@ -8122,7 +8204,7 @@ var ACTS=[
 {s:'Achoo! 🤧',e:'sleep',d:1800,hd:['rotate(0)','rotate(-14deg)','rotate(-14deg)','rotate(20deg) translateY(4px)','rotate(0)'],bd:['translateX(0)','translateX(0)','translateX(0)','translateX(-4px)','translateX(0)']},
 {s:'😵 dizzy',e:'dizzy',d:2800,hd:['rotate(-12deg)','rotate(12deg)','rotate(-12deg)','rotate(12deg)','rotate(0)'],bd:['rotate(-4deg)','rotate(4deg)','rotate(-4deg)','rotate(4deg)','rotate(0)']},
 {s:'Love ERP ❤️',e:'heart',d:2600,bd:['scale(1)','scale(1.1)','scale(1)','scale(1.1)','scale(1)'],R:[0,-40,0,-40,0],L:[0,-40,0,-40,0]},
-{s:'Yes boss! 🫡',e:'open',d:2400,R:[0,150,160,160,0],hd:['rotate(0)','rotate(-4deg)','rotate(-4deg)','rotate(0)']},
+{s:'Done! 🫡',e:'open',d:2400,R:[0,150,160,160,0],hd:['rotate(0)','rotate(-4deg)','rotate(-4deg)','rotate(0)']},
 {s:'👏👏',e:'happy',d:2200,L:[0,-60,-85,-60,-85,-60,-85,0],R:[0,-60,-85,-60,-85,-60,-85,0]},
 {s:'Strong! 💪',e:'wide',d:2600,L:[0,100,110,100,110,0],R:[0,100,110,100,110,0],bd:['scale(1)','scale(1.1)','scale(1.1)','scale(1.1)','scale(1)']},
 {s:'Left right!',e:'open',d:3000,lL:[0,25,0,-5,0,25,0,-5,0],lR:[0,-5,0,25,0,-5,0,25,0],L:[0,-30,0,30,0,-30,0,30,0],R:[0,30,0,-30,0,30,0,-30,0],bd:['translateY(0)','translateY(-3px)','translateY(0)','translateY(-3px)','translateY(0)']},
@@ -8131,7 +8213,7 @@ var ACTS=[
 {s:'No idea 🤷',e:'open',d:2400,L:[0,60,60,0],R:[0,60,60,0],hd:['rotate(0)','rotate(-10deg)','rotate(-10deg)','rotate(0)']},
 {s:'Entry reject? 😢',e:'sad',d:3200,hd:['rotate(0)','rotate(16deg) translateY(3px)','rotate(16deg) translateY(3px)','rotate(0)'],bd:['scale(1)','scale(1,.95)','scale(1,.95)','scale(1)']},
 {s:'Grr! 😠',e:'angry',d:2200,bd:['translateX(0)','translateX(-3px)','translateX(3px)','translateX(-3px)','translateX(3px)','translateX(0)'],L:[0,40,40,40,0],R:[0,40,40,40,0]},
-{s:'Arre! 😮',e:'wide',d:1600,bd:['translate(0,0)','translate(6px,-8px) scale(1.06)','translate(6px,-4px) scale(1.04)','translate(0,0)'],L:[0,90,90,0],R:[0,90,90,0]},
+{s:'Oops! 😮',e:'wide',d:1600,bd:['translate(0,0)','translate(6px,-8px) scale(1.06)','translate(6px,-4px) scale(1.04)','translate(0,0)'],L:[0,90,90,0],R:[0,90,90,0]},
 {s:'😉',e:'wink',d:2000,R:[0,100,100,0],hd:['rotate(0)','rotate(8deg)','rotate(8deg)','rotate(0)']},
 {s:'Peek-a-boo!',e:'open',d:2400,bd:['scale(1)','scale(1,.25) translateY(40px)','scale(1,.25) translateY(40px)','scale(1)']},
 {s:'Do not panic…',e:'half',d:3200,bd:['translateX(0)','translateX(24px)','translateX(24px)','translateX(0)']},
@@ -8347,19 +8429,19 @@ function checkDraft(d) {
   if (d.subNo && d.orderNo) { d.subOrder = d.orderNo + '/' + d.subNo; delete d.subNo; }
   if (!d.subOrder && d.orderNo) { d.subOrder = d.orderNo + '/' + nextSub(d.orderNo); d.subAuto = 1; }
   d.sizeUnit = d.sizeUnit || 'Cm'; d.date = d.date || todayStr();
-  const miss = REQ.filter(k => !String(d[k] || '').trim()), err = [], unreg = [];
-  if (d.woodSupplier) { delete d.supFrom; const r = regLookup('woodSupplier', d.woodSupplier) || autoReg('woodSupplier', d.woodSupplier), fz = r ? null : fuzzyReg('woodSupplier', d.woodSupplier); if (r) d.woodSupplier = r; else if (fz.name) { d.supFrom = d.woodSupplier; d.woodSupplier = fz.name; } else { const amb = fz.alts.length > 1, sg = amb ? '' : (fz.alts[0] || nameSuggest('woodSupplier', d.woodSupplier)); unreg.push({ type: 'woodSupplier', name: d.woodSupplier, sug: sg }); err.push('Supplier "' + d.woodSupplier + '"' + (amb ? ' matches more than one supplier: ' + fz.alts.slice(0, 3).join(' / ') + '. Send the full name or its code.' : ' is not registered / wrong' + (sg ? ' \u2014 did you mean: ' + sg + '?' : '') + '. Send the correct code or name again, or tap Add to register a new supplier.')); delete d.woodSupplier; if (!miss.includes('woodSupplier')) miss.push('woodSupplier'); } }
+  const miss = REQ.filter(k => !String(d[k] || '').trim()), err = [], unreg = [], warn = [];
+  if (d.woodSupplier) { delete d.supFrom; const r = regLookup('woodSupplier', d.woodSupplier) || autoReg('woodSupplier', d.woodSupplier), fz = r ? null : fuzzyReg('woodSupplier', d.woodSupplier); if (r) d.woodSupplier = r; else if (fz.name) { d.supFrom = d.woodSupplier; d.woodSupplier = fz.name; } else { const sg = fz.alts.length > 1 ? '' : (fz.alts[0] || nameSuggest('woodSupplier', d.woodSupplier)); warn.push('Supplier "' + d.woodSupplier + '" is not registered' + (sg ? ' (did you mean ' + sg + '?)' : '') + '. Saved as typed; it will show as Fix on the Home page.'); } }
   if (d.buyer) { d.buyer = normBuyer(d.buyer); const bk = z => norm(z).replace(/[\s\-]/g, ''); const b = (A().buyers || []).find(x => bk(x) === bk(d.buyer)); if (b) d.buyer = b; }
   if (d.orderNo && d.subOrder && d.itemCode && dupFind(d.orderNo, d.itemCode, d.subOrder)) err.push('This Sub Order (' + d.subOrder + ') already exists — duplicate.');
   if (d.orderNo && d.subOrder && !new RegExp('^' + d.orderNo.replace(/\//g, '\\/') + '\\/\\d{1,2}$', 'i').test(d.subOrder)) err.push('Sub Order format is invalid: ' + d.subOrder);
-  return { miss, err, unreg };
+  return { miss, err, unreg, warn };
 }
 function table(rows) { return '<table>' + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>'; }
 
 // ---------- NEW ENTRY ----------
 function doNew(text) {
   const P = parseNew(text), le = P._err || []; delete P._err;
-  S.draft = Object.assign(S.draft || {}, P); Object.keys(P).forEach(k => S.draft.fromLast && delete S.draft.fromLast[k]); const d = S.draft; fillLast(d); const { miss, err, unreg } = checkDraft(d); le.slice().reverse().forEach(e => err.unshift(e));
+  S.draft = Object.assign(S.draft || {}, P); Object.keys(P).forEach(k => S.draft.fromLast && delete S.draft.fromLast[k]); const d = S.draft; fillLast(d); const { miss, err, unreg, warn } = checkDraft(d); le.slice().reverse().forEach(e => err.unshift(e));
   if (err.length || miss.length) {
     if (err.some(e => /duplicate/i.test(e))) S.rl = 'dup'; else if (err.length && !unreg.length) S.rl = 'bad';
     const known = Object.keys(LBL).filter(k => d[k]).map(k => [LBL[k], esc(d[k])]);
@@ -8367,7 +8449,7 @@ function doNew(text) {
   }
   S.resume = null;
   S.pending = { type: 'new', d: Object.assign({}, d) };
-  const rows = Object.keys(LBL).filter(k => d[k]).map(k => [LBL[k], esc(d[k]) + ((k === 'subOrder' && d.subAuto) || (d.fromLast && d.fromLast[k]) ? ' <small>(auto)</small>' : '')]), wn = softWarn(d);
+  const rows = Object.keys(LBL).filter(k => d[k]).map(k => [LBL[k], esc(d[k]) + ((k === 'subOrder' && d.subAuto) || (d.fromLast && d.fromLast[k]) ? ' <small>(auto)</small>' : '')]), wn = softWarn(d).concat(warn || []);
   if (wn.length) rows.push(['⚠️ Check', wn.map(esc).join('<br>')]);
   return say('New work entry. Please check, then confirm:', { html: table(rows), chips: [{ l: '✔ Confirm', send: 'confirm', c: 'ok' }].concat(wn.some(w => /Entry date/.test(w)) ? [{ l: 'Use today', send: 'date today' }] : []).concat(d.buyer && !buyerKnown(d.buyer) ? [{ l: '➕ Save buyer ' + d.buyer, send: 'add buyer ' + d.buyer }] : []).concat([{ l: '✖ Cancel', send: 'cancel', c: 'no' }]) });
 }
@@ -8519,9 +8601,9 @@ function plan(items) {
   return preview(P);
 }
 function planRow(P, u, x) {
-  const Q0 = { u, x, err: [], warn: [] }, stage = u.stage, r = stage === 'fitting' ? u.name : (regLookup(stage, u.name) || autoReg(stage, u.name));
-  if (!r) { Q0.unreg = { type: stage, name: u.name }; Q0.err.push('"' + u.name + '" is not registered for ' + STL[stage]); Q0.sug = nameSuggest(stage, u.name) || fuzzy(stage, u.name, x); return Q0; }
-  const key = x.id + '|' + stage; if (!P.sim.has(key)) P.sim.set(key, { x, k: stage, rows: splitsOf(x, stage).map(p => Object.assign({}, p)) });
+  const Q0 = { u, x, err: [], warn: [] }, stage = u.stage; let r = stage === 'fitting' ? u.name : (regLookup(stage, u.name) || autoReg(stage, u.name));
+  if (!r) { r = u.name; Q0.warn.push('"' + u.name + '" is not registered for ' + STL[stage] + '. Saved as typed; it will show as Fix on the Home page.'); }
+    const key = x.id + '|' + stage; if (!P.sim.has(key)) P.sim.set(key, { x, k: stage, rows: splitsOf(x, stage).map(p => Object.assign({}, p)) });
   const rows = P.sim.get(key).rows, row = rows.find(p => prNorm(p.name) === prNorm(r)), tq = Number(x.qty || 0);
   const oq = row ? Number(row.qty || 0) : 0, od = row ? Number(row.done || 0) : 0;
   let nd = u.done != null ? (u.inc ? od + u.done : u.done) : od, nq = u.qty != null ? u.qty : Math.max(oq, nd);
@@ -8562,7 +8644,7 @@ function multiNew(units) {
     const d = parseNew(t), le = d._err || []; delete d._err; fillLast(d); const c = checkDraft(d);
     if (d.subAuto && d.orderNo) { const k = d.orderNo; bump[k] = bump[k] == null ? Number(nextSub(k)) : bump[k] + 1; d.subOrder = k + '/' + bump[k]; }
     const err = le.concat(c.err); if (d.subOrder) { const k = d.subOrder.toLowerCase(); if (seen.has(k)) err.push('Duplicate inside this batch'); seen.add(k); }
-    return { d, err, miss: c.miss, unreg: c.unreg, warn: softWarn(d) };
+    return { d, err, miss: c.miss, unreg: c.unreg, warn: softWarn(d).concat(c.warn || []) };
   });
   S.batch = { rows }; const ok = rows.filter(r => !r.err.length && !r.miss.length);
   S.pending = ok.length ? { type: 'multi', rows } : null; if (rows.some(r => r.err.some(e => /duplicate/i.test(e)))) S.rl = 'dup';
@@ -8761,7 +8843,9 @@ function dataDigest() {
       const line = [x.orderNo, x.subOrder, x.itemCode, x.itemName, kv('buyer', x.buyer), kv('size', sizeTxt(x)), kv('cbm', x.cbm), 'qty ' + x.qty, kv('wood supplier', x.woodSupplier), kv('entry date', x.date), kv('target date', x.targetDate), c ? 'COMPLETE' : 'RUNNING', stg, kv('packed', pk)].filter(Boolean).join(' | ');
       if (len + line.length > 150000) break; out.push(line); len += line.length + 1;
     }
-    return 'Total entries: ' + W.length + '. Today: ' + todayStr() + '. (each stage: Sanding / Polish / Carpenter / Fitting = contractor name done/allocated on completion date; ws = wood supplier of that carpenter row)\n' + out.join('\n');
+    const codes = (A().peopleCodes || []).filter(p => p && p.name && p.code).map(p => (p.type || '') + ': ' + p.name + ' = ' + p.code).join('; ');
+    let cur = ''; try { const lw = S.target && workOf(S.target); if (lw) cur = '\nCURRENT ENTRY IN THIS CHAT (apply follow-up corrections to this one): ' + lbl(lw); } catch (_) {}
+    return 'REGISTERED CODES (answer when the user asks for a supplier or carpenter code): ' + codes + cur + '\nTotal entries: ' + W.length + '. Today: ' + todayStr() + '. (each stage: Sanding / Polish / Carpenter / Fitting = contractor name done/allocated on completion date; ws = wood supplier of that carpenter row)\n' + out.join('\n');
   } catch (_) { return ''; }
 }
 function setDot(state, msg) {
@@ -9096,6 +9180,21 @@ function commitEdit(P) {
 // ---------- ROUTER ----------
 const HELP = 'I can do this:\n\n1) New entry: "new tae 2849 sub 1 code AB12 size 200x300x490 qty 30 cbm 1.2 supplier 0001 buyer F-2 name Sideboard". Give less and I ask only what is missing. Type "format" for the 9-line box. Paste several boxes separated by a blank line to save many at once.\n\n2) Contractor work: "2849 kamlesh sanding 15 of 30" (15 sent, 30 allocated). Many at once: "2849 kamlesh sanding 15, rajesh polish 10, fitting 5 done". "also 5" adds to the last one, "same for 2850" repeats it.\n\n3) Ask: "pending for kamlesh", "pending in polish", "delayed", "today production", "this week vs last week", "top 5 contractors", "total cbm for buyer F-2", "left to pack for TAE 2849", "brief me", "find 2849".\n\n4) Add names: "add supplier Nikita Handicrafts code NIHA1" (also carpenter / polish / sanding / buyer). If an entry has a name that is not registered, I show an Add button, you send the code, and the entry continues.\n\n5) Edit a wrong entry (I show Before and After, then you Confirm): \"edit tae 2867 2 30pc sanding bhikhu to om ram\" (change contractor), \"edit tae 2867 2 polish om ram done 20\", \"edit tae 2867 2 packing 30pc to 20pc\", \"edit tae 2867 2 cbm 12.5\", \"edit tae 2867 2 size 200 300 490\". Works for sanding, polish, balance, fitting, packing, and qty / cbm / size / code / name / buyer / supplier / date.\n\n6) undo / redo (last 30 steps). "roast off | mild | medium | savage" sets my attitude.\n\nNothing is saved without your Confirm.\n\nASK ANYTHING about work: "total work entry", "kamlesh sanding total pc", "kamlesh average", "sanding most cbm tae", "top 5 buyer cbm", "polish least pcs", "tae 2888 total", "sanding total this month", "packed last 7 days".';
 const FORMAT = 'New entry, one item per line (Enter for a new line):\n\n1) TAE + Sub Order  (2825 1 → TAE/2825, TAE/2825/1)\n2) Item Code  (ANY code works: DIAM-B05, MB-12, TEBLE-3, ANC-21 DB; Tae15201 a → TAE/15201-A)\n3) Buyer  (v3 → V-3)\n4) Item Name  (sideboard → Sideboard)\n5) Size  (60x45x75cm → 60×45×75 cm)\n6) Qty  (pcs)\n7) CBM\n8) Supplier code or name  (a partial or misspelled name is matched to the registered supplier; checked — wrong code: I ask again or offer ➕ Add)\n9) Target Dispatch Date  (29 10 26 → 29/10/2026)\n\nExample:\n2825 1\nDIAM-B05\nV3\nSideboard\n60x45x75cm\n22\n17.48\nTjag1\n29 10 26\n\nWrite "skip" on any line you want to leave out.\n\nMANY ENTRIES AT ONCE (different TAE or sub orders): paste one 9-line box after another with ONE BLANK LINE between boxes — I show all of them in a table and "Confirm all" saves them together.\n\n2926 1\nMB-1602\nC3\nLyon Sideboard\n175 45 80\n40\n0.75\nskip\n15 12 26\n\n2926 2\nTEBLE-1606\nC3\nLyon Dining Table\n200 100 76\n46\n0.54\nskip\n15 12 26';
+
+// ---------- CODE LOOKUP ----------
+const CODE_TYPES = { carpenter: /\b(carpenter|carpentry|contractor)s?\b/, sanding: /\bsanding\b/, polish: /\bpolish(?:ing)?\b/, woodSupplier: /\b(supplier|wood|vendor)s?\b/ };
+const CODE_LBL = { carpenter: 'Carpenter', sanding: 'Sanding', polish: 'Polish', woodSupplier: 'Wood Supplier' };
+function codeLookup(t) {
+  if (!/\b(codes?|list|show|who|which)\b/.test(t) || !/\b(codes?|suppliers?|carpenters?|contractors?|sanding|polish|vendors?)\b/.test(t)) return false;
+  if (/\b(add|register|new)\b/.test(t) || /\btae\b|\d{3,}/.test(t) && !/code/.test(t)) return false;
+  const all = (A().peopleCodes || []).filter(p => p && p.name && p.code); let types = Object.keys(CODE_TYPES).filter(k => CODE_TYPES[k].test(t));
+  const toks = t.replace(/\b(what|whats|is|the|of|for|my|me|give|tell|show|list|all|code|codes|supplier|suppliers|carpenter|carpenters|contractor|contractors|sanding|polish|polishing|wood|vendor|vendors|please|forgot|forget|remind|i|a|an|and|name|names|number)\b/g, ' ').split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+  const pool = types.length ? all.filter(p => types.includes(p.type)) : all;
+  const hit = toks.length ? pool.filter(p => { const n = norm(p.name), c = norm(p.code); return toks.some(w => c === w || n.split(/\s+/).some(v => v === w || (w.length >= 4 && v.length >= 4 && lev(v, w) <= 1))); }) : [];
+  const show = (hit.length ? hit : toks.length ? [] : pool).slice(0, 40);
+  if (!show.length) return say(toks.length ? 'I could not find a registered name or code matching "' + toks.join(' ') + '". Ask for "supplier codes" or "carpenter codes" to see the full list.' : 'No codes are registered yet.', { chips: [{ l: 'Supplier codes', send: 'supplier codes' }, { l: 'Carpenter codes', send: 'carpenter codes' }] }), true;
+  return say((hit.length ? 'Matching codes:' : (types.length ? types.map(k => CODE_LBL[k]).join(' / ') : 'All') + ' codes:'), { html: grid(['Type', 'Name', 'Code'], show.map(p => [CODE_LBL[p.type] || p.type, p.name, p.code])) }), true;
+}
 function handle(raw) {
   const text = String(raw || '').trim(), t = norm(text); if (!t) return;
   let m;
@@ -9109,6 +9208,7 @@ function handle(raw) {
   if (S.items && S.pending && S.pending.type === 'plan' && !findTae(t) && !/\d/.test(t) && !/^(haan|han|ha|yes|y|ok|okay|confirm|save|kar do|kardo|thik|theek|sahi|go|cancel|nahi|nahin|no|nope|rehne do|ruko|stop)\b/.test(t) && stageOf(t)) { const k = stageOf(t); S.items.forEach(u => { u.stage = k; u.assumed = 0; u.name = pickName(k, null, t + ' ' + (u.rest || '') + ' ' + (u.raw || '')) || ''; }); return plan(S.items); }
   if (/^(cancel|nahi|nahin|no|nope|rehne do|ruko|stop)\b/.test(t)) { S.pending = S.draft = S.upd = S.await = S.items = null; S.pd = S.resume = S.editAsk = null; return say('Cancelled ✔'); }
   if (S.await === 'person' && S.pd && personReply(text)) return;
+  if (codeLookup(t)) return;
   if (isAddPerson(text)) return doAddPerson(text);
   if (isEditCmd(t)) return doEdit(text);
   if (/^(haan|han|ha|yes|y|ok|okay|confirm|save|kar do|kardo|thik|theek|sahi|go)\b/.test(t)) {
@@ -9128,6 +9228,7 @@ function handle(raw) {
   if (S.await === 'name' && S.awaitItem) { const u = S.awaitItem, n = pickName(u.stage, S.awaitX, text) || (text.length < 30 ? text.replace(/\b(ne|ko|ka|ki)\b/ig, '').trim() : ''); if (n) { u.name = n; u.raw = ''; return plan(S.items); } }
   S.pending = null;
   if (S.draft && (m = t.match(/^(?:(?:change|make|set|update)\s+)?(?:the\s+)?(qty|quantity|cbm|size|buyer|supplier|date|target)\b\s*(?:to|=|:)?\s*(.+)$/))) return doNew(m[1] + ' ' + m[2].replace(/\s*(kar do|kardo)$/, ''));
+  if (!S.draft && S.target && workOf(S.target) && (m = t.match(/^(?:(?:please\s+)?(?:change|make|set|update|correct|fix)\s+)?(?:the\s+)?(qty|quantity|cbm|size|buyer|supplier|date|target)\b\s*(?:to|=|:)\s*(.+)$/))) return doEdit('change ' + m[1] + ' to ' + m[2], workOf(S.target));
   if (S.lastItems && (m = t.match(/^(?:aur|also|and|more|plus|\+)\s*(\d+(?:\.\d+)?)(?:\s*(?:pcs|pc|add|more|extra|kar do|kardo))*$/))) { const l = S.lastItems[S.lastItems.length - 1]; S.items = [Object.assign({}, l, { done: Number(m[1]), qty: null, inc: true, tae: null, sub: null, code: null })]; return plan(S.items); }
   if (S.lastItems && (m = t.match(/^same for\s+(?:tae\s*)?(\d{3,5})/))) { S.items = S.lastItems.map(u => Object.assign({}, u, { tae: { n: Number(m[1]), sub: '', rest: '' }, sub: null, code: null })); return plan(S.items); }
   if (ask(t) !== false) return;
@@ -9443,7 +9544,7 @@ const TX={draft:null, turns:[], busy:false, rec:null, voice:false, baseSend:null
 const LIVE={on:false,rec:null,speaking:false,pending:0,interim:'',seen:{},obs:null,safety:null,voices:[]};
 const YESW=/^(?:ok(?:ay)?\s*)?(?:haan|han|haa|ha|yes|yeah|yep|ji|ji haan|theek hai|thik hai|kar do|kardo|karo|हाँ|हां|हा|जी|जी हाँ|जी हां|ठीक है|कर दो|करो)\s*[.!।]*$/i;
 const NOW=/^(?:nahi|nahin|no|na|mat|ruko|नहीं|ना|मत|रुको|रुकिए)\s*[.!।]*$/i;
-const LIVE_RULES='LIVE VOICE MODE. You are talking out loud with the user like a friendly colleague on a phone call, so be natural and warm, and you may chat casually about anything, not only ERP. Reply in the SAME language the user just spoke: if they speak Hindi or Hinglish answer in simple spoken Hindi written in Devanagari script, if they speak English answer in English. Use 1 to 2 short spoken sentences, no lists, no markdown, no emojis, no symbols, and never read the whole draft aloud, only say what changed. When a PDF or new-entry draft is pending, its entries are NOT saved records: to open or read one call show_draft_entry, and to change its fields call edit_draft_entry (with the entry number, or without it for the entry already open); never use propose_update for draft entries. For entries already saved in the database call show_record (it opens the entry on screen). When the user asks to change, add or fix something, call propose_update or propose_add straight away, then say in one short sentence what you changed and ask if you should save it (for example: save karun?). Nothing is saved until the user says yes or save. Field values you stage stay in English letters and digits. ';
+const LIVE_RULES='LIVE VOICE MODE. You are talking out loud with the user like a friendly colleague on a phone call, so be natural and warm, and you may chat casually about anything, not only ERP. Always reply in plain English only, even if the user speaks Hindi or Hinglish; never use Hindi or Hinglish words in replies. If the user asks for a supplier code or carpenter code, look it up in the registered names list and tell them. Use 1 to 2 short spoken sentences, no lists, no markdown, no emojis, no symbols, and never read the whole draft aloud, only say what changed. When a PDF or new-entry draft is pending, its entries are NOT saved records: to open or read one call show_draft_entry, and to change its fields call edit_draft_entry (with the entry number, or without it for the entry already open); never use propose_update for draft entries. For entries already saved in the database call show_record (it opens the entry on screen). When the user asks to change, add or fix something, call propose_update or propose_add straight away, then say in one short sentence what you changed and ask if you should save it (for example: save karun?). Nothing is saved until the user says yes or save. Field values you stage stay in English letters and digits. ';
 /* the chat engine's say() lives in its own closure; reach it through its public handle */
 const say=(t,o)=>{const a=window.TAE_ASSISTANT;return a&&a.say?a.say(t,o):false};
 /* ---- Hindi speech clean-up: numbers exactly as spoken ---- */
@@ -9552,18 +9653,18 @@ function entryNo(c){const g=grp((c.record||{}).subOrder);return g.length?g[g.len
 function focusEntry(c){TX.focus=c;if(!TX.draft)return;TX.draft.changes.forEach(x=>{if(x.op==='add')x._open=(x===c)});showDraft();
 setTimeout(()=>{try{const ci=TX.draft?TX.draft.changes.indexOf(c):-1,el=document.querySelector('#aiTxnPanel [data-tg="'+ci+'"]');if(el&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:'smooth'})}catch(e){}},80)}
 function entrySay(c){const r=c.record||{},n=entryNo(c),parts=[r.itemName,r.itemCode,r.size,(r.qty!==undefined&&r.qty!==''?r.qty+' pcs':''),(r.woodSupplier?'supplier '+r.woodSupplier:'')].filter(Boolean).join(', ');
-return LIVE.on?('एंट्री '+n+': '+(parts||'खाली')+'। क्या बदलना है?'):'Entry '+n+': '+(parts||'empty')+'. What should I change?'}
+return 'Entry '+n+': '+(parts||'empty')+'. What should I change?'}
 function draftOpenCmd(raw){const adds=draftAdds();if(!adds.length)return null;
 const t=devaNorm(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();if(!t||t.length>100)return null;
 if(/(?:^|\s)(?:size|buyer|supplier|sup|qty|cbm|code|name|hatao|hata|remove|delete)(?=\s|$)/.test(t))return null;
 if(!/(?:^|\s)(?:open|show|dikhao|kholo|khol do|khol|next|previous|prev|pehli|pehla|first|last|aakhri|akhri|batao|read)(?=\s|$)/.test(t))return null;
 const cur=TX.focus?adds.findIndex(z=>z.c===TX.focus):-1;let idx=-1;
-if(/(?:^|\s)next(?=\s|$)/.test(t)){if(cur>=adds.length-1&&cur>=0)return LIVE.on?'यही आख़िरी एंट्री है।':'That is the last entry.';idx=cur<0?0:cur+1}
-else if(/(?:^|\s)(?:previous|prev)(?=\s|$)/.test(t)){if(cur<=0&&cur>=0)return LIVE.on?'यही पहली एंट्री है।':'That is the first entry.';idx=cur<0?0:cur-1}
+if(/(?:^|\s)next(?=\s|$)/.test(t)){if(cur>=adds.length-1&&cur>=0)return 'That is the last entry.';idx=cur<0?0:cur+1}
+else if(/(?:^|\s)(?:previous|prev)(?=\s|$)/.test(t)){if(cur<=0&&cur>=0)return 'That is the first entry.';idx=cur<0?0:cur-1}
 else if(/(?:^|\s)(?:pehli|pehla|first)(?=\s|$)/.test(t))idx=0;
 else if(/(?:^|\s)(?:last|aakhri|akhri)(?=\s|$)/.test(t))idx=adds.length-1;
 else{let tg=pickTargets(t,adds);if(!tg){const m=t.match(/(?:^|\s)(\d{1,2})(?:\s+(?:number|no|wali|wale|wala))?(?=\s|$)/);if(m)tg=pickTargets('entry '+m[1],adds)}
-if(!tg)return null;if(!tg.list.length)return LIVE.on?('ड्राफ़्ट में '+tg.ref+' नहीं मिली।'):'I could not find '+tg.ref+' in the draft.';idx=adds.indexOf(tg.list[0])}
+if(!tg)return null;if(!tg.list.length)return 'I could not find '+tg.ref+' in the draft.';idx=adds.indexOf(tg.list[0])}
 if(idx<0||idx>=adds.length)return null;focusEntry(adds[idx].c);return entrySay(adds[idx].c)}
 function devaNorm(s){return String(s||'').replace(/साइज़|साइज|आकार/g,' size ').replace(/बायर/g,' buyer ').replace(/सप्लायर|सप्लाईयर|सप्लाइयर/g,' supplier ').replace(/क्वांटिटी|क्वान्टिटी|मात्रा/g,' qty ').replace(/सीबीएम/g,' cbm ').replace(/कर\s*दो|करदो|कीजिए|कर\s*दीजिए/g,' kar do ').replace(/अगली|अगला|आगे/g,' next ').replace(/पिछली|पिछला/g,' previous ').replace(/पहली|पहला/g,' pehli ').replace(/आखिरी|आखरी|अंतिम/g,' last ').replace(/नंबर|नम्बर/g,' number ').replace(/बताओ|बताइए|पढ़ो/g,' batao ').replace(/डी\s*आई\s*ए\s*एम|डीआईएएम|डायम|डाइम|डियम/g,' diam ').replace(/एफ\s*एफ/g,' ff ').replace(/ए\s*एम|एएम/g,' am ').replace(/कोड/g,' code ').replace(/वाले|वाला|वाली/g,' wale ').replace(/रखो|रखें|रखिए|रखना/g,' rakho ').replace(/(^|\s)और(?=\s|$)/g,' aur ').replace(/(^|\s)ही(?=\s|$)/g,' hi ').replace(/सिर्फ़|सिर्फ|केवल/g,' sirf ').replace(/हटा\s*दो|हटाओ|हटाइए/g,' hatao ').replace(/खोल\s*दो/g,' kholo ').replace(/खोलो|खोलिए/g,' kholo ').replace(/(^|\s)खोल(?=\s|$)/g,' khol ').replace(/दिखाओ|दिखा\s*दो|दिखाइए/g,' dikhao ').replace(/ओपन/g,' open ').replace(/एंट्री|एन्ट्री/g,' entry ').replace(/टी\s*ए\s*ई/g,' tae ').replace(/\s+/g,' ')}
 function openUI(a){const m=findRecords({tae:a.tae,subOrder:a.subOrder,query:''});if(!m.length)return {error:'No matching record found.'};
@@ -9571,14 +9672,14 @@ const h=m[0],r=work()[h.index];if(r)TX.opened=shape(r,h.index,'work');
 if(typeof viewWork==='function'&&h.id){try{viewWork(h.id)}catch(e){}}
 const box=$('taeBox');if(box){document.body.classList.remove('tae-open');if(LIVE.on)box.classList.add('aiMini');else box.classList.add('hidden')}
 const n=m.length,lab=h.subOrder||('TAE '+h.tae);
-const msg=LIVE.on?(n>1&&!a.subOrder?('टी ए ई '+grp(h.tae).join('')+' की '+n+' एंट्रियाँ हैं, पहली खोल दी है। कौन सी चाहिए, नंबर बोलिए।'):(lab+' खोल दी है। '+(h.itemName||'')+'. बोलिए क्या बदलना है?')):(n>1&&!a.subOrder?'TAE '+grp(h.tae).join('')+' has '+n+' entries. I opened the first one ('+lab+'). Tell me the sub-order number to open another.':'Opened '+lab+(h.itemName?' · '+h.itemName:'')+'.');
+const msg=(n>1&&!a.subOrder?'TAE '+grp(h.tae).join('')+' has '+n+' entries. I opened the first one ('+lab+'). Tell me the sub-order number to open another.':'Opened '+lab+(h.itemName?' · '+h.itemName:'')+'.');
 return {opened:true,msg,matches:n,subOrder:h.subOrder,itemCode:h.itemCode,itemName:h.itemName,size:h.size,qty:h.qty,buyer:h.buyer,notice:'The entry is now open on screen. Tell the user in one short sentence and ask what to change.'}}
 function openCmd(raw){const t=devaNorm(String(raw||'')).toLowerCase().replace(/\s+/g,' ').trim();if(!t||t.length>120)return null;
 if(!/(?:^|\s)(?:open|show|dikhao|dikha do|kholo|khol do|khol|dhundo|find)(?=\s|$)/.test(t))return null;
 let m=t.match(/(?:tae\s*\/?\s*)?(\d{3,6})\s*\/\s*(\d{1,3})\b/),tae,sub='',slash=!!m;
 if(m){tae=m[1];sub=m[2]}else{m=t.match(/(\d{3,6})(?:\s+(?:ki|ka|ke|sub\s*order|sub|entry|no|number)\.?)*(?:\s+#?(\d{1,3}))?(?=\s|$)/);if(!m)return null;tae=m[1];sub=m[2]||''}
 if(!slash&&!/\btae\b/.test(t)&&TX.draft)return null;
-const r=openUI({tae,subOrder:sub});if(r.error)return LIVE.on?('TAE '+tae+(sub?' '+sub:'')+' नहीं मिली।'):'I could not find TAE '+tae+(sub?'/'+sub:'')+'.';return r.msg}
+const r=openUI({tae,subOrder:sub});if(r.error)return 'I could not find TAE '+tae+(sub?'/'+sub:'')+'.';return r.msg}
 function localCmd(raw){
 const adds=draftAdds();if(!adds.length)return null;
 const t=devaNorm(String(raw||'')).trim().replace(/\s+/g,' ');if(!t||t.length>200)return null;
@@ -9600,7 +9701,7 @@ const L=tg?tg.list:adds;let ch=0;const none=[];
 L.forEach(z=>{const r=z.c.record,parts=String(r.itemCode||'').split('/').map(x=>x.trim()).filter(Boolean),keep=parts.filter(p=>toks.some(x=>p.toLowerCase().startsWith(x)));
 if(!keep.length){none.push(sh(r));return}
 const nv=keep.join('/');if(nv!==r.itemCode){r.itemCode=nv;ch++}});
-const tkS=toks.map(x=>x.toUpperCase()).join(' / ');if(LIVE.on)return (ch===0&&!none.length?'कोड पहले से सिर्फ़ '+tkS+' वाले हैं, कुछ बदलना नहीं पड़ा।':'आइटम कोड में सिर्फ़ '+tkS+' रखे, '+ch+' एंट्री बदलीं। सेव करूँ?');return (ch===0&&!none.length?'Item codes already show only the '+tkS+' code on all '+L.length+' entries, so nothing needed changing.':'Item code: kept only the '+tkS+' code on '+ch+' of '+L.length+' entries.')+(none.length?' No matching code on: '+none.join(', ')+'.':'')+' Not saved yet.'}
+const tkS=toks.map(x=>x.toUpperCase()).join(' / ');return (ch===0&&!none.length?'Item codes already show only the '+tkS+' code on all '+L.length+' entries, so nothing needed changing.':'Item code: kept only the '+tkS+' code on '+ch+' of '+L.length+' entries.')+(none.length?' No matching code on: '+none.join(', ')+'.':'')+' Not saved yet.'}
 /* 3) set one field */
 let body=t.replace(/(?:tae\s*\/?\s*)?\d{3,6}\s*\/\s*\d{1,3}/i,' ').replace(/\b(?:entry|sub\s*order|sub|sr|sno|number)\.?\s*#?\s*\d{1,3}\b/i,' ').replace(/^\s*#?\d{1,3}\b(?=\s*(?:ka|ki|ke|me|mein|ko|:)|\s+(?:size|buyer|supplier|qty|code|item|cbm))/i,' ').replace(/\b(?:last|aakhri|akhri)\s*(?:wali|wala|wale|entry)?\b/i,' ');
 body=body.replace(/^[\s,:\-]*(?:(?:sab|sabhi|saare|sare|all|every|har)\s*(?:entry|entries|me|mein|ka|ki|ke|ko)?\s*)?(?:(?:ka|ki|ke|ko|me|mein|of|for|entry|entries)\s*)*/i,'').trim();
@@ -9615,7 +9716,7 @@ if(!L)return 'Which entry? Say for example "6 '+(key==='woodSupplier'?'supplier'
 const f=cleanFields({[key]:rest});L.forEach(z=>{z.c.record=Object.assign({},z.c.record,f)});
 let msg='Updated '+FLBL[key].toLowerCase()+' to "'+f[key]+'" on '+(L.length===1?sh(L[0].c.record):L.length+' entries')+'.';
 if(key==='woodSupplier'&&!supKnown(f[key]))msg+=' Note: this supplier is not in your supplier list.';
-if(LIVE.on){const HL={woodSupplier:'सप्लायर',itemName:'आइटम नेम',itemCode:'आइटम कोड',buyer:'बायर',size:'साइज़',qty:'क्वांटिटी',cbm:'सीबीएम'};return HL[key]+' '+f[key]+' कर दिया'+(L.length===1?' एंट्री '+entryNo(L[0].c):', '+L.length+' एंट्री में')+'। सेव करूँ?'}
+
 return msg+' Not saved yet.'}
 function tfetch(u,o){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),45000);return fetch(u,Object.assign({},o,{signal:ac.signal})).catch(e=>{throw Error(e&&e.name==='AbortError'?'The AI took too long (45 s). Try again.':String((e&&e.message)||e))}).finally(()=>clearTimeout(t))}
 function toolDefs(){return [
@@ -9697,7 +9798,7 @@ const SAVE=/^(?:ok(?:ay)?\s*[,.]?\s*)?(?:haan\s+|ha\s+|yes\s+|हाँ\s+|ह�
 const DISC=/^(?:discard|cancel|रद्द|कैंसल|रहने\s*दो|rehne\s*do)(?:\s*(?:kar\s*do|karo|kardo|kro|करो|कर\s*दो))?\s*[.!।]*$/i;
 async function sendDynamic(text){text=String(text||'').trim();if(!text)return;
 if(SAVE.test(text)){if(!TX.draft){if(typeof say==='function')say('There is nothing pending, so nothing was saved.');return;}await commit();return;}
-if(LIVE.on&&TX.draft&&TX.askSave){if(YESW.test(text)){TX.askSave=false;await commit();return}if(NOW.test(text)){TX.askSave=false;say('ठीक है, सेव नहीं किया। और क्या बदलना है?');return}}
+if(LIVE.on&&TX.draft&&TX.askSave){if(YESW.test(text)){TX.askSave=false;await commit();return}if(NOW.test(text)){TX.askSave=false;say('OK, not saved. What else should I change?');return}}
 if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='function')say('Draft discarded. Nothing was changed in the database.');}else if(typeof say==='function')say('There is no pending draft.');return;}{const oc=draftOpenCmd(text)||openCmd(text);if(oc){say(oc);return}}{const lc=localCmd(text);if(lc){say(lc);showDraft();return}}if(!cfg()){say('Free-text commands need an AI key (⚙ settings). You can still tap an entry in the draft to edit it, or use commands like "6 supplier SRSI", "code DIAM AM FF only" or "remove 6".');return}if(TX.busy&&Date.now()-(TX.busyAt||0)>60000)TX.busy=false;if(TX.busy){TX.q.push(text);return;}TX.busy=true;TX.busyAt=Date.now();let held=true;const rel=()=>{if(held){held=false;try{window.TAE_ASSISTANT.hold(-1)}catch(e){}}};try{window.TAE_ASSISTANT.hold(1);const answer=await ai(text);rel();say(answer);showDraft();}catch(e){if(typeof say==='function')say('AI request failed: '+String(e.message||e)+'. Check the API key and model in the AI settings (⚙).');}finally{rel();TX.busy=false;const nx=TX.q.shift();if(nx)sendDynamic(nx);}}
 /* Returns false when no API key is set so the app's own offline assistant handles the message (prevents infinite recursion). */
 window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft&&!LIVE.on)return false;sendDynamic(text);return true;};
@@ -9727,7 +9828,7 @@ const btn=document.createElement('button');btn.type='button';btn.id='aiLiveBtn';
 btn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10h2v4H4zm4-4h2v12H8zm4-3h2v18h-2zm4 3h2v12h-2zm4 4h2v4h-2z"/></svg>';
 form.insertBefore(btn,sendBtn||null);
 const bar=document.createElement('div');bar.id='aiLiveBar';bar.hidden=true;
-bar.innerHTML='<button type="button" class="lvOrb" aria-label="Interrupt"></button><div class="lvT"><b class="lvS">Sun raha hu…</b><small class="lvI"></small></div><button type="button" class="lvB" data-a="size" aria-label="Shrink or expand">⤓</button><button type="button" class="lvB lvEnd" data-a="end">End</button>';
+bar.innerHTML='<button type="button" class="lvOrb" aria-label="Interrupt"></button><div class="lvT"><b class="lvS">Listening…</b><small class="lvI"></small></div><button type="button" class="lvB" data-a="size" aria-label="Shrink or expand">⤓</button><button type="button" class="lvB lvEnd" data-a="end">End</button>';
 form.parentNode.insertBefore(bar,form);
 const box=document.getElementById('taeBox');
 function voices(){try{LIVE.voices=SS?SS.getVoices()||[]:[]}catch(e){}}voices();if(SS)SS.onvoiceschanged=voices;
@@ -9738,7 +9839,7 @@ function pauseRec(){const r=LIVE.rec;LIVE.rec=null;if(r){r.onend=null;r.onresult
 function resumeRec(){if(LIVE.on&&!LIVE.speaking&&!LIVE.rec)startRec()}
 function speechDone(){clearTimeout(LIVE.safety);LIVE.pending=0;LIVE.speaking=false;if(LIVE.on)setTimeout(resumeRec,350)}
 function speak(t){if(!LIVE.on||!SS)return;t=plain(t);if(!t)return;
-if(t.length>320){const cut=t.slice(0,320),i=Math.max(cut.lastIndexOf('.'),cut.lastIndexOf('।'));t=(i>80?cut.slice(0,i+1):cut)+(/[\u0900-\u097F]/.test(t)?' बाकी स्क्रीन पर देख लीजिए।':' The rest is on screen.')}
+if(t.length>320){const cut=t.slice(0,320),i=Math.max(cut.lastIndexOf('.'),cut.lastIndexOf('।'));t=(i>80?cut.slice(0,i+1):cut)+' The rest is on screen.'}
 TX.askSave=!!TX.draft&&/save|सेव/i.test(t);
 LIVE.speaking=true;pauseRec();const hi=/[\u0900-\u097F]/.test(t),v=pickVoice(hi);
 chunks(t).forEach(c=>{const u=new SpeechSynthesisUtterance(c);if(v){u.voice=v;u.lang=v.lang}else u.lang=hi?'hi-IN':'en-IN';u.rate=1.03;LIVE.pending++;const d=()=>{LIVE.pending=Math.max(0,LIVE.pending-1);if(!LIVE.pending)speechDone()};u.onend=d;u.onerror=d;SS.speak(u)});
@@ -9753,7 +9854,7 @@ function startRec(){if(!LIVE.on||LIVE.speaking||LIVE.rec||!SRC)return;
 const rec=new SRC();LIVE.rec=rec;rec.lang='hi-IN';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=3;
 rec.onresult=e=>{let fin='',interim='',alts=[];for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i],t=r[0].transcript;if(r.isFinal){fin+=' '+t;for(let k=1;k<r.length;k++)alts.push(r[k].transcript)}else interim+=t}
 LIVE.interim=interim;if(fin.trim()){LIVE.interim='';onUtter(fixSpeech(fin.trim()),alts)}};
-rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){liveOff();say('Microphone permission nahi mili. Browser settings me mic allow kijiye.')}};
+rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){liveOff();say('Microphone permission was not granted. Please allow the microphone in your browser settings.')}};
 rec.onend=()=>{if(LIVE.rec===rec)LIVE.rec=null;if(LIVE.on&&!LIVE.speaking)setTimeout(startRec,250)};
 try{rec.start()}catch(e){LIVE.rec=null;setTimeout(startRec,800)}}
 function botText(n){const c=n.cloneNode(true);c.querySelectorAll('.taeC').forEach(x=>x.remove());return (c.textContent||'').trim()}
@@ -9761,17 +9862,17 @@ function scan(){if(!LIVE.on)return;const log=document.getElementById('taeLog');i
 log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{const i=n.dataset.i;if(i==null)return;const t=botText(n),k=t;if(LIVE.seen[i]===k)return;LIVE.seen[i]=k;speak(t)})}
 function markSeen(){LIVE.seen={};const log=document.getElementById('taeLog');if(!log)return;log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{if(n.dataset.i!=null)LIVE.seen[n.dataset.i]=botText(n)})}
 function setMini(m){if(!box)return;box.classList.toggle('aiMini',!!m);document.body.classList.toggle('tae-open',!m);bar.querySelector('[data-a=size]').textContent=m?'⤢':'⤓'}
-function liveOn(){if(LIVE.on)return;if(!SRC||!SS){alert('Live voice ke liye Chrome (HTTPS) chahiye. Is browser me speech support nahi hai.');return}
+function liveOn(){if(LIVE.on)return;if(!SRC||!SS){alert('Live voice needs Chrome (HTTPS). This browser does not support speech recognition.');return}
 try{stopMic&&stopMic()}catch(e){}
 LIVE.on=true;markSeen();bar.hidden=false;btn.style.outline='2px solid #34d399';
 const log=document.getElementById('taeLog');if(log&&!LIVE.obs){LIVE.obs=new MutationObserver(scan);LIVE.obs.observe(log,{childList:true,subtree:true,characterData:true})}
-speak('जी बोलिए, मैं सुन रहा हूँ।')}
+speak('Go ahead, I am listening.')}
 function liveOff(){if(!LIVE.on)return;LIVE.on=false;try{SS&&SS.cancel()}catch(e){}clearTimeout(LIVE.safety);LIVE.speaking=false;LIVE.pending=0;pauseRec();bar.hidden=true;btn.style.outline='';TX.askSave=false;if(box){box.classList.remove('aiMini');document.body.classList.add('tae-open')}}
 btn.addEventListener('click',e=>{e.preventDefault();LIVE.on?liveOff():liveOn()});
 bar.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.classList.contains('lvOrb')){if(LIVE.speaking)interrupt();return}const a=b.dataset.a;if(a==='end')liveOff();else if(a==='size')setMini(!(box&&box.classList.contains('aiMini')))});
 if(box)box.addEventListener('click',e=>{if(e.target.closest('[data-x="close"]'))liveOff()});
 setInterval(()=>{if(!LIVE.on)return;const st=LIVE.speaking?'sp':(TX.busy?'th':'');bar.classList.toggle('sp',st==='sp');bar.classList.toggle('th',st==='th');
-bar.querySelector('.lvS').textContent=st==='sp'?'Bol raha hu… (tap = ruk jao)':(st==='th'?'Soch raha hu…':'Sun raha hu…');bar.querySelector('.lvI').textContent=LIVE.interim||'';
+bar.querySelector('.lvS').textContent=st==='sp'?'Speaking… (tap to interrupt)':(st==='th'?'Thinking…':'Listening…');bar.querySelector('.lvI').textContent=LIVE.interim||'';
 if(!LIVE.speaking&&!LIVE.rec)resumeRec()},300);
 }
 function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
