@@ -1747,7 +1747,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.104-live';
+const APP_VER = 'V1.0.106-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2733,6 +2733,7 @@ function render() {
   document.getElementById('app').innerHTML = fn();
   bindCommon();
   try { if (window.THAR104) THAR104.mount(tab); } catch (e) {}
+  try { if (window.THAR105) THAR105.mount(tab); } catch (e) {}
   try { trackScreen(); } catch (e) {}
 }
 
@@ -11315,19 +11316,25 @@ function md(s) {
   const B = [];
   s = String(s || '').replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, c) => '\u0001' + (B.push('<pre><code>' + esc(c.replace(/\n$/, '')) + '</code></pre>') - 1) + '\u0001');
   const il = x => x.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[\s(])\*(?!\s)([^*]+?)\*(?=[\s).,!?]|$)/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\bhttps?:\/\/[^\s<]+/g, u => '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
-  const L = esc(s).split('\n'), o = []; let list = '', tb = false; const SEP = /^\s*\|[\s:|-]+\|\s*$/;
+  const L = esc(s).split('\n'), o = []; let list = '', tb = false, lDL = false, lC = 0, kv = []; const SEP = /^\s*\|[\s:|-]+\|\s*$/;
+  const KV = /^\s*(?:\*\*)?([A-Za-z\u0900-\u097F][^:|<>*]{0,28}?)(?:\*\*)?:(?:\*\*)?\s+(\S.*)$/, LIR = /^\s*([-*•]|\d+[.)])\s+(.*)/;
+  const fk = () => { if (kv.length) { o.push('<div class="apKV">' + kv.map(m => '<div><span>' + il(m[1]) + '</span><b>' + il(m[2]) + '</b></div>').join('') + '</div>'); kv = []; } };
+  const dli = t => { const ps = t.split('|').map(x => x.trim()).filter(Boolean), lt = ps.some(p => /\b(late|delay)/i.test(p)); let bar = ''; ps.forEach(p => { const m = /bal\w*\D{0,3}(\d+)\s*\/\s*(\d+)/i.exec(p); if (m && +m[2] > 0) { const dn = Math.max(0, Math.min(100, Math.round((m[2] - m[1]) * 100 / m[2]))); bar = '<div class="apBar"><i style="width:' + dn + '%"></i></div><small>' + dn + '% done</small>'; } }); return '<li class="' + (lt ? 'late' : '') + '" style="--i:' + (lC++) + '"><div class="apT">' + il(ps[0] || '') + '</div>' + (ps.length > 1 ? '<div class="apP">' + ps.slice(1).map(p => '<span class="' + (/\b(late|delay)/i.test(p) ? 'late' : '') + '">' + il(p) + '</span>').join('') + '</div>' : '') + bar + '</li>'; };
   const cl = () => { if (list) { o.push('</' + list + '>'); list = ''; } }, ct = () => { if (tb) { o.push('</table></div>'); tb = false; } };
   L.forEach((l, n) => {
     const li = /^\s*([-*•]|\d+[.)])\s+(.*)/.exec(l), tr = /^\s*\|.*\|\s*$/.test(l), h = /^(#{1,4})\s+(.*)/.exec(l);
-    if (!li) cl(); if (!tr) ct();
-    if (li) { const k = /\d/.test(li[1]) ? 'ol' : 'ul'; if (list !== k) { cl(); o.push('<' + k + '>'); list = k; } o.push('<li>' + il(li[2]) + '</li>'); }
+    const kvm = (!li && !tr && !h) ? KV.exec(l) : null, kvq = !!(kvm && (kv.length || KV.test(L[n + 1] || '')));
+    if (!li) cl(); if (!tr) ct(); if (!kvq) fk();
+    if (kvq) { kv.push(kvm); return; }
+    if (li) { const k = /\d/.test(li[1]) ? 'ol' : 'ul'; if (list !== k) { cl(); let dl = false; if (k === 'ul') for (let j = n; j < L.length; j++) { const m = LIR.exec(L[j]); if (!m) break; if (m[2].indexOf('|') > -1) { dl = true; break; } } o.push('<' + k + (dl ? ' class="apDL"' : '') + '>'); list = k; lDL = dl; lC = 0; } o.push(lDL && k === 'ul' ? dli(li[2]) : '<li>' + il(li[2]) + '</li>'); }
     else if (tr) { if (SEP.test(l)) return; const head = !tb && SEP.test(L[n + 1] || ''); if (!tb) { o.push('<div class="apTw"><table>'); tb = true; } o.push('<tr>' + l.trim().slice(1, -1).split('|').map(c => (head ? '<th>' : '<td>') + il(c.trim()) + (head ? '</th>' : '</td>')).join('') + '</tr>'); }
     else if (h) o.push('<div class="apH h' + h[1].length + '">' + il(h[2]) + '</div>');
     else if (/^\s*(-{3,}|\*{3,})\s*$/.test(l)) o.push('<hr>');
     else o.push(l.trim() ? il(l) + '<br>' : '');
-  }); cl(); ct();
+  }); cl(); ct(); fk();
   return o.join('').replace(/\u0001(\d+)\u0001/g, (_, i) => B[+i]);
 }
+window.__apMd = md;
 function draw() { side(); head(); log(); sendBtn(); }
 function sendBtn() {   // while the AI works the button is still Send when there is text; it only becomes Stop when the box is empty
   const g = $('#apGo'); if (!g) return; const t = $('#apIn'), has = !!(t && t.value.trim()) || pendingAttachment.some(a => !a.busy && !a.err && a.imgs.length), stop = (busy || SCANS.size > 0) && !has, h = stop ? STOP : SEND;
@@ -11361,7 +11368,7 @@ function log() {
     const st = m.state === 'expired' ? 'no' : m.state;
     if (m.state === 'sup') return '<div class="apM"><div class="apCard no sup"><h4>' + esc(m.title) + ' — replaced by the updated card below ↓</h4></div></div>';
     return '<div class="apM"><div class="apCard ' + (st === 'done' ? 'done' : st === 'no' ? 'no' : m.upd ? 'upd' : '') + '"><h4>' + esc(m.title) + (st === 'done' ? ' — applied ✓' : m.state === 'expired' ? ' — expired' : st === 'no' ? ' — cancelled' : (m.upd ? ' — UPDATED PREVIEW' : ' — PREVIEW')) + '</h4><ul>' + m.lines.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' + (m.warn || []).map(x => '<div class="w">⚠ ' + esc(x) + '</div>').join('') + (m.state === 'pending' ? '<div class="r"><button class="ok" data-c="' + m.pid + '">Confirm</button><button class="x" data-n="' + m.pid + '">Cancel</button></div>' : m.state === 'done' && m.undo && m.undo.length ? '<div class="r"><button data-u="' + i + '">↩ Undo</button></div>' : '') + '</div></div>';
-  }).join('') + (last >= 0 && M[last].role === 'assistant' && !busy ? chipRow(splitChips(M[last].text).chips) + ccRow(M[last].cc) : '') + (busy || clsBusy || SCANS.size ? '<div class="apM"><span class="apChip">' + (SCANS.size && !busy && !clsBusy ? 'Reading the order sheet… you can keep chatting' : 'AI is thinking… you can keep chatting') + '</span></div>' : '');
+  }).join('') + (last >= 0 && M[last].role === 'assistant' && !busy ? chipRow(splitChips(M[last].text).chips) + ccRow(M[last].cc) : '') + (busy || clsBusy || SCANS.size ? '<div class="apM"><div class="apTh" role="status" aria-live="polite"><span class="apThD"><i></i><i></i><i></i></span><span class="apThT"><b class="apThS">' + (SCANS.size && !busy && !clsBusy ? 'Reading the order sheet' : 'AI is thinking') + '</b><em class="apThR">' + (SCANS.size && !busy && !clsBusy ? '<u>Scanning pages…</u><u>Matching items and quantities…</u><u>You can keep chatting</u>' : '<u>Reading your factory data…</u><u>Preparing the answer…</u><u>You can keep chatting</u>') + '</em></span><span class="apThB"></span></div></div>' : '');
   enMount(el, pn0, !!fk);
   if (fk) { try { const n = el.querySelector('#aiTxnPanel input.aiIn[data-ci="' + fk.ci + '"][data-k="' + fk.k + '"]'); if (n) { n.focus({ preventScroll: true }); if (fk.s != null) n.setSelectionRange(fk.s, fk.e); } } catch (e) { } }
   if (near || stick) { el.scrollTop = el.scrollHeight; stick = false; }
@@ -11950,21 +11957,37 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
   function line(r) { return 'TAE ' + r.tae + (r.sub ? '/' + r.sub : '') + ' ' + (r.code || r.item) + ' | ' + r.buyer + ' | balance ' + r.bal + '/' + r.qty + (r.late ? ' | ' + r.late + 'd late' : ''); }
   function show(text) {
     var box = document.getElementById('aiSummaryOutput'); if (!box) return;
-    box.textContent = text; (window.T104S = window.T104S || {}).out = text;
+    box.classList.remove('rich'); box.textContent = text; var S4 = (window.T104S = window.T104S || {}); S4.out = text; S4.outHtml = '';
+  }
+  function showHtml(html) {
+    var box = document.getElementById('aiSummaryOutput'); if (!box) return;
+    box.classList.add('rich'); box.innerHTML = html; var S4 = (window.T104S = window.T104S || {}); S4.outHtml = html; S4.out = box.textContent;
+  }
+  function h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function thinking(txt) { showHtml('<div class="t106-think" role="status"><span class="apThD"><i></i><i></i><i></i></span><span class="tt">' + h(txt || 'Thinking…') + '</span></div>'); }
+  // one detail card per TAE: header, item, 4 fact boxes, progress bar
+  function card(r, i) {
+    var done = r.qty > 0 ? Math.max(0, Math.min(100, Math.round((r.qty - r.bal) * 100 / r.qty))) : 0;
+    return '<div class="t106-c' + (r.late > 0 ? ' late' : '') + '" style="--i:' + Math.min(i, 12) + '"><div class="t106-h"><b>TAE ' + h(r.tae) + (r.sub ? ' / ' + h(r.sub) : '') + '</b><em class="' + (r.late > 0 ? 'red' : '') + '">' + (r.late > 0 ? r.late + ' d late' : 'On time') + '</em></div>' +
+      '<div class="t106-s">' + h([r.code, r.item].filter(Boolean).join(' · ') || '—') + '</div>' +
+      '<div class="t106-g"><div><span>Buyer</span><b>' + h(r.buyer || '—') + '</b></div><div><span>Due</span><b>' + h(r.due || '—') + '</b></div><div><span>Quantity</span><b>' + h(r.qty) + ' pcs</b></div><div><span>Balance</span><b>' + h(r.bal) + ' pcs</b></div></div>' +
+      '<div class="t106-bar"><i style="width:' + done + '%"></i></div><small>' + done + '% done</small></div>';
+  }
+  function cards(title, sub, rows, max) {
+    if (!rows.length) { showHtml('<div class="t106-empty">' + h(title) + '</div>'); return; }
+    showHtml('<div class="t106-sum"><b>' + h(title) + '</b><span>' + h(sub || '') + '</span></div><div class="t106-list">' + rows.slice(0, max).map(card).join('') + '</div>' + (rows.length > max ? '<div class="t106-more">+' + (rows.length - max) + ' more</div>' : ''));
   }
   function badge(text) { var b = document.getElementById('tokenSaverStatus'); if (b) b.textContent = text; }
 
   // --- Local analysis: zero tokens, no network ---
   window.analyzeActiveTAE = function () {
     var rows = activeRecords().filter(function (r) { return r.late > 0; });
-    show(rows.length
-      ? rows.length + ' delayed TAE (most late first):\n' + rows.slice(0, 25).map(line).join('\n') + (rows.length > 25 ? '\n+' + (rows.length - 25) + ' more' : '')
-      : 'No delayed items.');
+    cards(rows.length ? rows.length + ' delayed TAE' : 'No delayed items.', 'most late first', rows, 25);
     badge('Token Optimizer: 0 tokens used');
   };
   window.analyzeSingleLeftItems = function () {
     var rows = activeRecords().filter(function (r) { return r.bal === 1; });
-    show(rows.length ? rows.length + ' TAE with 1 piece left:\n' + rows.slice(0, 40).map(line).join('\n') : 'No TAE with exactly 1 piece left.');
+    cards(rows.length ? rows.length + ' TAE with 1 piece left' : 'No TAE with exactly 1 piece left.', 'almost finished', rows, 40);
     badge('Token Optimizer: 0 tokens used');
   };
 
@@ -11985,10 +12008,10 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
     if (!q) return;
     var c = cfg(), rows = relevantRows(q), ctx = buildContext(rows);
     if (!c || !c.key) {
-      show('No AI key saved. Local answer:\n' + rows.slice(0, 20).map(line).join('\n'));
+      cards('No AI key saved · local answer', rows.length + ' matching TAE', rows, 20);
       badge('Token Optimizer: local only'); return;
     }
-    show('Thinking…');
+    thinking('Thinking… reading your factory data');
     try {
       var url = c.url || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
       var r = await fetch(url, {
@@ -12004,10 +12027,11 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
       });
       if (!r.ok) throw new Error('API ' + r.status);
       var j = await r.json();
-      show(String(j.choices[0].message.content || '').trim());
+      var ans = String(j.choices[0].message.content || '').trim();
+      try { showHtml('<div class="t106-ans apB">' + (window.__apMd ? window.__apMd(ans) : h(ans).replace(/\n/g, '<br>')) + '</div>'); } catch (e2) { show(ans); }
       var u = j.usage; badge('Token Optimizer: ' + (u && u.total_tokens ? u.total_tokens + ' tokens' : '~' + Math.ceil((ctx.length + q.length) / 4) + ' tokens'));
     } catch (e) {
-      show('AI unavailable (' + (e && e.message || 'network') + '). Local answer:\n' + rows.slice(0, 20).map(line).join('\n'));
+      cards('AI unavailable (' + (e && e.message || 'network') + ') · local answer', rows.length + ' matching TAE', rows, 20);
       badge('Token Optimizer: local fallback');
     }
     if (inp) inp.value = '';
@@ -12121,7 +12145,7 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
         '<div class="t104-card"><span>CBM Finished</span><b id="statTotalCBM">0.00</b></div>' +
         '<div class="t104-card t104-chart"><div class="t104-box"><canvas id="compactProductionChart"></canvas></div></div>' +
       '</div>' +
-      '<details class="t104-ai"><summary>\uD83E\uDD16 Smart Assistant <em id="tokenSaverStatus">Token Optimizer: Active</em></summary>' +
+      '<details class="t104-ai"><summary>Smart Assistant <em id="tokenSaverStatus">Token Optimizer: Active</em></summary>' +
         '<div class="t104-row"><button type="button" class="t104-chip" onclick="analyzeActiveTAE()">Delayed items</button>' +
         '<button type="button" class="t104-chip" onclick="analyzeSingleLeftItems()">1 piece left</button>' +
         '<button type="button" class="t104-chip" onclick="openAnalyticsModal()">\uD83D\uDCCA Analyzer</button></div>' +
@@ -12144,7 +12168,7 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
       app.insertAdjacentHTML('afterbegin', html()); ensureModal();
       var S = window.T104S = window.T104S || {}, dt = document.querySelector('#thar104 details'), ob = document.getElementById('aiSummaryOutput');
       if (dt) { if (S.open) dt.open = true; dt.addEventListener('toggle', function () { S.open = dt.open; }); }
-      if (ob && S.out) ob.textContent = S.out;
+      if (ob && S.outHtml) { ob.classList.add('rich'); ob.innerHTML = S.outHtml; } else if (ob && S.out) ob.textContent = S.out;
       if (window.refreshDashboard) window.refreshDashboard();
     }
   };
@@ -12152,5 +12176,602 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
 
 setTimeout(function(){try{if(window.THAR104&&typeof tab!=='undefined')THAR104.mount(tab)}catch(e){}},0);
 </script>
+
+<style id="thar105css">
+/* V1.0.105: header logo - no green glow behind it (beats Graphics High / Animation High pulse rules) */
+html[data-gfx] body .top .logo.logo.ax-hlogo,html body.ut-a-high .top .logo.logo.ax-hlogo{box-shadow:none!important;animation:none!important;filter:none!important;background:none!important}
+html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!important}
+
+/* ===== V1.0.105: Features section (bottom of Home) ===== */
+#f105{margin:18px 0 6px}
+#f105 .f105-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 4px}
+#f105 .f105-h h3{margin:0;font-size:17px;font-weight:900}
+#f105 .f105-sub{margin:0 2px 10px;font-size:12px;color:var(--muted)}
+.f105-ver{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:var(--green2);border:1px solid rgba(16,185,129,.4);background:rgba(16,185,129,.12);border-radius:99px;padding:3px 10px;white-space:nowrap}
+.f105-ver i{width:7px;height:7px;border-radius:50%;background:var(--green2);animation:f105Pulse 1.6s ease-in-out infinite}
+.f105-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media(min-width:700px){.f105-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.f105-card{position:relative;overflow:hidden;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px 12px 8px;color:var(--text);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .18s ease,border-color .18s ease;animation:f105In .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*55ms);min-width:0}
+.f105-card::before{content:"";position:absolute;right:-26px;top:-26px;width:90px;height:90px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--fc) 22%,transparent),transparent 70%);pointer-events:none}
+.f105-card:active{transform:scale(.97)}
+.f105-card:hover{border-color:color-mix(in srgb,var(--fc) 60%,var(--line))}
+.f105-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.f105-ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:19px;background:linear-gradient(135deg,color-mix(in srgb,var(--fc) 34%,transparent),color-mix(in srgb,var(--fc) 10%,transparent));border:1px solid color-mix(in srgb,var(--fc) 45%,transparent);animation:f105Float 3.6s ease-in-out infinite;animation-delay:calc(var(--i,0)*120ms)}
+.f105-ar{font-size:20px;color:var(--muted);line-height:1;transition:transform .2s}
+.f105-card:hover .f105-ar{transform:translateX(3px)}
+.f105-t{margin-top:8px;font-size:12.5px;font-weight:800;color:var(--muted);letter-spacing:.2px}
+.f105-big{margin-top:1px;font-size:24px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--fc)}
+.f105-big small{font-size:12px;font-weight:800;color:var(--muted);margin-left:3px}
+.f105-lb{font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f105-sp{display:block;width:100%;height:26px;margin-top:6px}
+.f105-spl{stroke-dasharray:1;stroke-dashoffset:0;animation:f105Draw 1.1s ease-out both;animation-delay:calc(var(--i,0)*55ms + 250ms)}
+#f105.f105-still .f105-card,#f105.f105-still .f105-spl{animation:none}
+.f105-foot{margin-top:12px;text-align:center;font-size:11px;color:var(--muted)}
+
+/* ===== Detail sheet ===== */
+.f105-ov{position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.62);display:flex;align-items:flex-end;justify-content:center;animation:f105Fade .22s ease both}
+.f105-ov.out{animation:f105FadeOut .2s ease both}
+.f105-ov.out .f105-sh{animation:f105Down .2s ease both}
+.f105-sh{position:relative;width:min(640px,100%);max-height:92vh;overflow:auto;background:var(--bg2);color:var(--text);border:1px solid var(--line);border-bottom:0;border-radius:22px 22px 0 0;padding:0 14px calc(20px + env(safe-area-inset-bottom));animation:f105Up .42s cubic-bezier(.2,.9,.25,1.04) both;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.f105-grab{width:42px;height:4px;border-radius:4px;background:var(--line);margin:8px auto 0}
+.f105-sh-h{position:sticky;top:0;z-index:3;background:var(--bg2);display:flex;gap:10px;align-items:center;padding:10px 0 10px;border-bottom:1px solid var(--line)}
+.f105-sh-h .f105-ic{flex:none;animation:none}
+.f105-sh-h h3{margin:0;font-size:16px;font-weight:900;line-height:1.2}
+.f105-sh-h p{margin:1px 0 0;font-size:11.5px;color:var(--muted)}
+.f105-sh-h>div{min-width:0;flex:1}
+.f105-x{flex:none;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel3);color:var(--text);font-size:18px;cursor:pointer;line-height:1}
+.f105-sh-h::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,transparent,var(--fc),transparent);transform-origin:left;animation:f105Line .9s ease both}
+.f105-kg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.f105-k{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:9px 10px;min-width:0;animation:f105Pop .5s cubic-bezier(.34,1.56,.64,1) both;animation-delay:calc(var(--k,0)*60ms + 120ms)}
+.f105-k b{display:block;font-size:20px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.f105-k b small{font-size:11px;color:var(--muted);font-weight:800;margin-left:2px}
+.f105-k span{display:block;margin-top:2px;font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
+.f105-sec{margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;animation:f105In .5s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--s,0)*90ms + 200ms)}
+.f105-sec h4{margin:0 0 10px;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.f105-sec h4 small{font-size:10.5px;font-weight:700;color:var(--muted)}
+.f105-svg{display:block;width:100%;height:auto;overflow:visible}
+.f105-gl{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.f105-lt{fill:var(--muted);font-size:9px;font-weight:700;text-anchor:middle}
+.f105-ln{stroke-dasharray:1;stroke-dashoffset:0;animation:f105Draw 1.2s ease-out both;animation-delay:.3s}
+.f105-ar2{animation:f105Fade .9s ease both;animation-delay:.6s}
+.f105-pt{animation:f105Fade .4s ease both;animation-delay:1.2s}
+.f105-guide{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;visibility:hidden}
+.f105-ch{position:relative}
+.f105-tip{position:absolute;top:0;transform:translate(-50%,-4px);pointer-events:none;background:#000c;color:#fff;border-radius:9px;padding:5px 8px;font-size:11px;font-weight:700;white-space:nowrap;opacity:0;transition:opacity .15s;z-index:2;line-height:1.35}
+.f105-tip.on{opacity:1}
+.f105-leg{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px;font-size:11px;color:var(--muted);font-weight:700}
+.f105-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.f105-cols{display:flex;align-items:flex-end;gap:6px;height:130px}
+.f105-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.f105-col em{font-style:normal;font-size:10px;font-weight:800;margin-bottom:3px;color:var(--text)}
+.f105-cb{width:100%;flex:1;display:flex;align-items:flex-end;min-height:0}
+.f105-cb i{display:block;width:100%;border-radius:7px 7px 3px 3px;transform-origin:bottom;animation:f105Grow .7s cubic-bezier(.2,.9,.3,1.1) both;animation-delay:calc(var(--d,0)*1ms + 300ms)}
+.f105-col span{font-size:9.5px;color:var(--muted);margin-top:4px;font-weight:700;white-space:nowrap}
+.f105-hb{display:grid;gap:9px}
+.f105-hr.tap{cursor:pointer}
+.f105-hr.tap:active{opacity:.7}
+.f105-hl{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-bottom:3px}
+.f105-hl span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.f105-hl b{flex:none;font-variant-numeric:tabular-nums}
+.f105-ht{height:9px;border-radius:9px;background:var(--panel3);overflow:hidden}
+.f105-ht i{display:block;height:100%;border-radius:9px;transform-origin:left;animation:f105GrowX .8s cubic-bezier(.2,.9,.3,1) both;animation-delay:calc(var(--d,0)*1ms + 300ms)}
+.f105-dn{display:flex;align-items:center;gap:14px}
+.f105-dn svg{flex:none;width:132px;height:132px}
+.f105-seg{animation:f105Seg 1s cubic-bezier(.3,.8,.3,1) both;animation-delay:calc(var(--d,0)*1ms + 250ms)}
+.f105-dt{fill:var(--text);font-size:19px;font-weight:900;text-anchor:middle}
+.f105-ds{fill:var(--muted);font-size:8.5px;font-weight:800;text-anchor:middle;letter-spacing:.4px}
+.f105-dl{flex:1;min-width:0;display:grid;gap:6px;font-size:12px}
+.f105-dl div{display:flex;align-items:center;gap:7px;min-width:0}
+.f105-dl i{flex:none;width:10px;height:10px;border-radius:3px}
+.f105-dl span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.f105-dl b{flex:none;font-variant-numeric:tabular-nums}
+.f105-dl em{flex:none;font-style:normal;color:var(--muted);font-size:10.5px;width:34px;text-align:right}
+.f105-rings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;text-align:center}
+.f105-rings svg{width:100%;max-width:104px;height:auto}
+.f105-rings p{margin:2px 0 0;font-size:11.5px;font-weight:800}
+.f105-rings small{display:block;color:var(--muted);font-size:10.5px;font-weight:700}
+.f105-ti{margin-top:8px;font-size:12.5px;line-height:1.45;background:color-mix(in srgb,var(--fc) 11%,transparent);border:1px solid color-mix(in srgb,var(--fc) 32%,transparent);border-radius:12px;padding:8px 10px;animation:f105In .5s ease both;animation-delay:.5s}
+.f105-bs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.f105-b{flex:1;min-width:120px;border:1px solid var(--line);background:var(--panel3);color:var(--text);border-radius:12px;padding:11px 12px;font:800 13px inherit;font-family:inherit;cursor:pointer}
+.f105-b.pri{background:linear-gradient(135deg,#10b981,#059669);border-color:transparent;color:#fff}
+.f105-b:active{transform:scale(.97)}
+.f105-chips{display:flex;flex-wrap:wrap;gap:6px}
+.f105-chips span{border:1px solid var(--line);background:var(--panel3);border-radius:99px;padding:5px 10px;font-size:11.5px;font-weight:700;animation:f105Pop .45s cubic-bezier(.34,1.56,.64,1) both;animation-delay:calc(var(--k,0)*45ms + 250ms)}
+.f105-em{padding:14px 8px;text-align:center;color:var(--muted);font-size:12.5px}
+.f105-ls{display:grid;gap:6px}
+.f105-li{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid var(--line);background:var(--panel2);border-radius:11px;padding:8px 10px;font-size:12.5px}
+.f105-li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.f105-li b{flex:none;font-variant-numeric:tabular-nums}
+@keyframes f105In{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes f105Float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes f105Pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+@keyframes f105Draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes f105Fade{from{opacity:0}to{opacity:1}}
+@keyframes f105FadeOut{to{opacity:0}}
+@keyframes f105Up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes f105Down{to{transform:translateY(100%)}}
+@keyframes f105Line{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes f105Pop{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
+@keyframes f105Grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes f105GrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes f105Seg{from{stroke-dasharray:0 var(--c)}}
+@media(prefers-reduced-motion:reduce){.f105-card,.f105-sec,.f105-k,.f105-sh,.f105-ln,.f105-cb i,.f105-ht i,.f105-seg,.f105-ic,.f105-spl{animation:none!important}}
+@media print{#f105,.f105-ov{display:none!important}}
+</style>
+
+<script id="thar105js">
+/* THAR ERP v1.0.105 - features.js
+   "Features" section at the very bottom of Home. Every card is clickable and opens a detail sheet with
+   live numbers from the ERP, animated charts (pure SVG/CSS, no library) and shortcuts.
+   Animations switch off automatically when Graphics = Low. Read-only: never writes to the database. */
+(function () {
+  'use strict';
+  var VER = '1.0.106', UID = 0;
+  var S = window.T105S = window.T105S || { seen: false };
+  var COL = { green: '#34d399', blue: '#38bdf8', amber: '#fbbf24', red: '#f43f5e', indigo: '#818cf8', cyan: '#22d3ee', pink: '#f472b6', orange: '#fb923c', lime: '#a3e635', grey: '#94a3b8' };
+  var PAL = [COL.green, COL.blue, COL.amber, COL.indigo, COL.pink, COL.cyan, COL.orange, COL.lime];
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function low() { try { return document.documentElement.getAttribute('data-gfx') === 'low' || !!window.__gfxLow; } catch (e) { return false; } }
+  function N(v, d) { v = Number(v); if (!isFinite(v)) v = 0; try { return v.toLocaleString('en-IN', { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); } catch (e) { return v.toFixed(d || 0); } }
+  function num(v) { try { return prNum(v); } catch (e) { v = parseFloat(v); return isFinite(v) ? v : 0; } }
+  function sum(a) { return a.reduce(function (t, v) { return t + v; }, 0); }
+  function top(map, n, key) { return Object.keys(map).map(function (k) { return { l: k, v: key ? map[k][key] : map[k], o: map[k] }; }).sort(function (a, b) { return b.v - a.v; }).slice(0, n); }
+  function pct(a, b) { return b > 0 ? Math.round(a * 100 / b) : 0; }
+
+  /* ---------------- data ---------------- */
+  function calc() {
+    var A = getActiveDB(), today = todayStr(), W = A.work || [], O = A.orders || [], R = A.repairs || [];
+    var WK = (typeof db !== 'undefined' && db && db.workers) || [];
+    var D = { today: today, days: [], lab: [], sent: [], bal: [], ent: [], W: W, O: O, R: R, WK: WK };
+    for (var i = 6; i >= 0; i--) { var d = prAdd(today, -i); D.days.push(d); D.lab.push(d.slice(5)); D.sent.push(0); D.bal.push(0); D.ent.push(0); }
+    D.H = {}; try { D.H = homeStats(); } catch (e) { D.H = { actN: 0, delayed: [], late: [], qty: 0, pendPcs: 0, qcPend: 0, nToday: 0, balQty: 0, balN: 0 }; }
+    D.stage = { sanding: { t: 0, d: 0 }, polish: { t: 0, d: 0 }, carpenter: { t: 0, d: 0 } };
+    D.buyer = {}; D.wood = {}; D.done = 0; D.active = 0; D.cbmDone = 0; D.cbmAll = 0; D.pcsAll = 0; D.pcsPend = 0; D.delayed = [];
+    W.forEach(function (x) {
+      try {
+        var s = statusOf(x), q = Number(x.qty || 0);
+        D.days.forEach(function (dd, i) { D.sent[i] += packedOn(x, dd); D.bal[i] += balOn(x, dd); if (x.date === dd) D.ent[i]++; });
+        ['sanding', 'polish', 'carpenter'].forEach(function (k) { if (q <= 0 || noSt(x, k)) return; D.stage[k].t += q; D.stage[k].d += Math.min(q, stg(x, k).done); });
+        D.cbmAll += num(x.cbm); D.pcsAll += q;
+        var wn = String(x.woodSupplier || '').trim() || 'N/A', w = D.wood[wn] || (D.wood[wn] = { n: 0, qty: 0, pend: 0 });
+        w.n++; w.qty += q;
+        if (s.complete) { D.done++; D.cbmDone += num(x.cbm); }
+        else {
+          D.active++; D.pcsPend += s.pend; w.pend += s.pend;
+          var bn = String(x.buyer || '').trim() || 'N/A', b = D.buyer[bn] || (D.buyer[bn] = { n: 0, pend: 0 });
+          b.n++; b.pend += s.pend;
+          var late = 0;
+          if (x.targetDate && x.targetDate < today) late = prDiff(x.targetDate, today);
+          else if (!x.targetDate && prValid(x.date) && prDiff(x.date, today) > 7) late = prDiff(x.date, today) - 7;
+          if (late > 0) D.delayed.push({ x: x, late: late });
+        }
+      } catch (e) { }
+    });
+    D.delayed.sort(function (a, b) { return b.late - a.late; });
+    D.dBk = [0, 0, 0, 0]; D.delayed.forEach(function (r) { D.dBk[r.late <= 3 ? 0 : r.late <= 7 ? 1 : r.late <= 14 ? 2 : 3]++; });
+    // orders
+    D.o = { total: O.length, rec: 0, late: 0, wait: 0, dmg: 0, pcs: 0, sup: {}, lateList: [], bk: [0, 0, 0, 0] };
+    O.forEach(function (o) {
+      try {
+        var s = orderStatus(o); D.o.dmg += s.dmg; D.o.pcs += s.total;
+        if (s.rec) D.o.rec++; else if (s.late) { D.o.late++; D.o.lateList.push({ o: o, d: s.daysLate }); D.o.bk[s.daysLate <= 3 ? 0 : s.daysLate <= 7 ? 1 : s.daysLate <= 14 ? 2 : 3]++; } else D.o.wait++;
+            if (!s.rec) { var sn = String(o.supplier || '').trim() || 'N/A'; D.o.sup[sn] = (D.o.sup[sn] || 0) + s.total; }
+      } catch (e) { }
+    });
+    D.o.lateList.sort(function (a, b) { return b.d - a.d; });
+    // repairs
+    D.r = { open: 0, closed: 0, pcs: 0, part: {}, bk: [0, 0, 0, 0], back7: 0, oldest: [] };
+    R.forEach(function (r) {
+      try {
+        if (r.receiveDate) { D.r.closed++; if (prValid(r.receiveDate) && prDiff(r.receiveDate, today) <= 6) D.r.back7++; return; }
+        D.r.open++;
+        var parts = (r.parts && r.parts.length) ? r.parts : [{ part: r.issueType || 'Part', qty: r.qty || 0 }];
+        parts.forEach(function (p) { var q = Math.max(Number(p.qty || 0), 0); D.r.pcs += q; var k = String(p.part || 'Part').trim() || 'Part'; D.r.part[k] = (D.r.part[k] || 0) + q; });
+        var age = prValid(r.sentDate) ? prDiff(r.sentDate, today) : 0; D.r.bk[age <= 2 ? 0 : age <= 7 ? 1 : age <= 14 ? 2 : 3]++;
+        D.r.oldest.push({ r: r, age: age });
+      } catch (e) { }
+    });
+    D.r.oldest.sort(function (a, b) { return b.age - a.age; });
+    // attendance
+    D.a = { p: 0, half: 0, abs: 0, off: 0, un: 0, ot: 0, absList: [], week: [] };
+    WK.forEach(function (w) {
+      try {
+        var v = getAtt(w.id, today), nm = String(w.name || '').trim();
+        if (v === 'Half Day') { D.a.half++; if (nm) D.a.absList.push(nm + ' (½)'); } else if (ATT_OK.indexOf(v) >= 0) { D.a.p++; if (/OT/.test(v)) D.a.ot++; }
+        else if (v === 'Absent') { D.a.abs++; if (nm) D.a.absList.push(nm); } else if (v === 'Holiday' || v === 'Weekly Off') D.a.off++; else D.a.un++;
+      } catch (e) { }
+    });
+    D.days.forEach(function (dd) { var c = 0; WK.forEach(function (w) { try { if (ATT_OK.indexOf(getAtt(w.id, dd)) >= 0) c++; } catch (e) { } }); D.a.week.push(c); });
+    // carpenters
+    D.c = { list: [], cbm: 0 }; try { var tc = topCarp(A); D.c.list = tc.list; D.c.cbm = tc.cbm; } catch (e) { }
+    // backup
+    D.bk = { days: null }; try { if (db.lastBackup) D.bk.days = Math.max(0, Math.floor((Date.now() - new Date(db.lastBackup).getTime()) / 864e5)); } catch (e) { }
+    // AI optimizer
+    D.ai = 0; try { D.ai = window.TharAI ? TharAI.activeRecords().length : D.active; } catch (e) { D.ai = D.active; }
+    return D;
+  }
+
+  /* ---------------- chart helpers ---------------- */
+  function smooth(p) { var d = 'M' + p[0][0].toFixed(1) + ' ' + p[0][1].toFixed(1); for (var i = 1; i < p.length; i++) { var a = p[i - 1], b = p[i], cx = (a[0] + b[0]) / 2; d += ' C' + cx.toFixed(1) + ' ' + a[1].toFixed(1) + ' ' + cx.toFixed(1) + ' ' + b[1].toFixed(1) + ' ' + b[0].toFixed(1) + ' ' + b[1].toFixed(1); } return d; }
+  function spark(v, c) {
+    var W = 100, H = 26, mx = Math.max.apply(null, v.concat([1])), n = v.length;
+    var p = v.map(function (y, i) { return [n > 1 ? i * W / (n - 1) : 0, H - 3 - (H - 6) * y / mx]; });
+    return '<svg class="f105-sp" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none"><path class="f105-spl" pathLength="1" d="' + smooth(p) + '" fill="none" stroke="' + c + '" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>';
+  }
+  function lineChart(lab, series) {
+    var id = 'g105' + (++UID), W = 320, H = 150, L = 10, R = 10, T = 14, B = 22, n = lab.length, mx = 1, i;
+    series.forEach(function (s) { s.v.forEach(function (v) { if (v > mx) mx = v; }); });
+    var xs = function (i) { return n > 1 ? L + i * (W - L - R) / (n - 1) : W / 2; }, ys = function (v) { return T + (H - T - B) * (1 - v / mx); };
+    var h = '<div class="f105-ch"><svg class="f105-svg" viewBox="0 0 ' + W + ' ' + H + '"><defs>';
+    series.forEach(function (s, k) { h += '<linearGradient id="' + id + k + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + s.c + '" stop-opacity=".38"/><stop offset="1" stop-color="' + s.c + '" stop-opacity="0"/></linearGradient>'; });
+    h += '</defs>';
+    for (i = 0; i <= 3; i++) { var gy = T + (H - T - B) * i / 3; h += '<line class="f105-gl" x1="' + L + '" x2="' + (W - R) + '" y1="' + gy + '" y2="' + gy + '"/>'; }
+    series.forEach(function (s, k) {
+      var p = s.v.map(function (v, i) { return [xs(i), ys(v)]; }), d = smooth(p);
+      if (k === 0) h += '<path class="f105-ar2" d="' + d + ' L' + xs(n - 1) + ' ' + (H - B) + ' L' + xs(0) + ' ' + (H - B) + ' Z" fill="url(#' + id + k + ')"/>';
+      h += '<path class="f105-ln" pathLength="1" d="' + d + '" fill="none" stroke="' + s.c + '" stroke-width="2.4" stroke-linecap="round"' + '' + '/>';
+      p.forEach(function (q) { h += '<circle class="f105-pt" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="3" fill="' + s.c + '"/>'; });
+    });
+    lab.forEach(function (l, i) { if (n <= 8 || i % 2 === 0) h += '<text class="f105-lt" x="' + xs(i).toFixed(1) + '" y="' + (H - 6) + '">' + esc(l) + '</text>'; });
+    h += '<line class="f105-guide" y1="' + T + '" y2="' + (H - B) + '"/>';
+    var cw = n > 1 ? (W - L - R) / (n - 1) : W;
+    lab.forEach(function (l, i) {
+      var t = l + series.map(function (s) { return '|' + s.n + ': ' + N(s.v[i], s.d || 0); }).join('');
+      h += '<rect class="f105-hit" x="' + (xs(i) - cw / 2).toFixed(1) + '" y="0" width="' + cw.toFixed(1) + '" height="' + H + '" fill="transparent" data-x="' + xs(i).toFixed(1) + '" data-w="' + W + '" data-t="' + esc(t) + '"/>';
+    });
+    h += '</svg><div class="f105-tip"></div></div><div class="f105-leg">' + series.map(function (s) { return '<span><i style="background:' + s.c + '"></i>' + esc(s.n) + '</span>'; }).join('') + '</div>';
+    return h;
+  }
+  function cols(lab, vals, c) {
+    var mx = Math.max.apply(null, vals.concat([1]));
+    return '<div class="f105-cols">' + vals.map(function (v, i) {
+      var p = v > 0 ? Math.max(v / mx * 100, 4) : 0;
+      return '<div class="f105-col"><em>' + N(v) + '</em><div class="f105-cb"><i style="height:' + p + '%;--d:' + (i * 70) + ';background:linear-gradient(to top,' + (Array.isArray(c) ? c[i] : c) + ',color-mix(in srgb,' + (Array.isArray(c) ? c[i] : c) + ' 55%,#fff))"></i></div><span>' + esc(lab[i]) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  function hbar(items, o) {
+    o = o || {}; if (!items.length) return empty();
+    var mx = Math.max.apply(null, items.map(function (i) { return i.v; }).concat([1]));
+    return '<div class="f105-hb">' + items.map(function (it, i) {
+      var p = it.v > 0 ? Math.max(it.v / mx * 100, 3) : 0;
+      return '<div class="f105-hr' + (it.find ? ' tap' : '') + '"' + (it.find ? ' data-find="' + esc(it.find) + '"' : '') + '><div class="f105-hl"><span>' + esc(it.l) + '</span><b>' + N(it.v, o.d || 0) + (o.u || '') + '</b></div><div class="f105-ht"><i style="width:' + p + '%;--d:' + (i * 60) + ';background:' + (it.c || o.c || COL.green) + '"></i></div></div>';
+    }).join('') + '</div>';
+  }
+  function donut(items, big, small) {
+    items = items.filter(function (i) { return i.v > 0; });
+    var tot = sum(items.map(function (i) { return i.v; })), r = 46, C = 2 * Math.PI * r, acc = 0;
+    var h = '<div class="f105-dn"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--panel3)" stroke-width="13"/>';
+    items.forEach(function (it, i) {
+      var len = it.v / tot * C, gap = items.length > 1 ? 2.5 : 0;
+      h += '<circle class="f105-seg" cx="60" cy="60" r="46" fill="none" stroke="' + it.c + '" stroke-width="13" stroke-dasharray="' + Math.max(len - gap, .01).toFixed(2) + ' ' + C.toFixed(2) + '" stroke-dashoffset="' + (-acc).toFixed(2) + '" transform="rotate(-90 60 60)" style="--c:' + C.toFixed(2) + ';--d:' + (i * 130) + '"/>'; acc += len;
+    });
+    h += '<text class="f105-dt" x="60" y="62">' + esc(big) + '</text><text class="f105-ds" x="60" y="76">' + esc(small || '') + '</text></svg><div class="f105-dl">';
+    items.forEach(function (it) { h += '<div><i style="background:' + it.c + '"></i><span>' + esc(it.l) + '</span><b>' + N(it.v) + '</b><em>' + pct(it.v, tot) + '%</em></div>'; });
+    return h + '</div></div>' + (items.length ? '' : empty());
+  }
+  function ring(p, c, label, sub) {
+    p = Math.max(0, Math.min(100, p)); var r = 40, C = 2 * Math.PI * r;
+    return '<div><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--panel3)" stroke-width="10"/><circle class="f105-seg" cx="50" cy="50" r="40" fill="none" stroke="' + c + '" stroke-width="10" stroke-linecap="round" stroke-dasharray="' + (C * p / 100).toFixed(2) + ' ' + C.toFixed(2) + '" transform="rotate(-90 50 50)" style="--c:' + C.toFixed(2) + '"/><text class="f105-dt" x="50" y="56" style="font-size:18px">' + p + '%</text></svg><p>' + esc(label) + '</p><small>' + esc(sub || '') + '</small></div>';
+  }
+  function empty(t) { return '<div class="f105-em">' + esc(t || 'No data yet') + '</div>'; }
+  function kpi(label, val, o) { o = o || {}; kpi.n = (kpi.n || 0) + 1; return '<div class="f105-k" style="--k:' + (kpi.n % 12) + '"><b' + (o.c ? ' style="color:' + o.c + '"' : '') + ' data-cu="' + (Number(val) || 0) + '" data-d="' + (o.d || 0) + '">' + N(val, o.d || 0) + '</b>' + (o.u ? '<small>' + esc(o.u) + '</small>' : '') + '<span>' + esc(label) + '</span></div>'; }
+  function kpiT(label, text, c) { kpi.n = (kpi.n || 0) + 1; return '<div class="f105-k" style="--k:' + (kpi.n % 12) + '"><b' + (c ? ' style="color:' + c + '"' : '') + '>' + esc(text) + '</b><span>' + esc(label) + '</span></div>'; }
+  function kg(list) { kpi.n = 0; return '<div class="f105-kg">' + list.join('') + '</div>'; }
+  function sec(title, body, small, i) { return '<div class="f105-sec" style="--s:' + (i || 0) + '"><h4>' + title + (small ? '<small>' + esc(small) + '</small>' : '') + '</h4>' + body + '</div>'; }
+  function tip(t) { return '<div class="f105-ti">💡 ' + t + '</div>'; }
+  function btns(list) { return '<div class="f105-bs">' + list.map(function (b) { return '<button type="button" class="f105-b' + (b.p ? ' pri' : '') + '" ' + b.a + '>' + b.t + '</button>'; }).join('') + '</div>'; }
+  function lst(rows) { return rows.length ? '<div class="f105-ls">' + rows.map(function (r) { return '<div class="f105-li' + (r.find ? ' tap' : '') + '"' + (r.find ? ' data-find="' + esc(r.find) + '" style="cursor:pointer"' : '') + '><span>' + esc(r.l) + '</span><b' + (r.c ? ' style="color:' + r.c + '"' : '') + '>' + esc(r.v) + '</b></div>'; }).join('') + '</div>' : empty(); }
+  function taeOf(x) { return String(x.orderNo || x.subOrder || '-'); }
+
+  /* ---------------- feature definitions ---------------- */
+  var F = [
+    { id: 'prod', ic: '🏭', t: 'Production Pulse', c: COL.green,
+      card: function (D) { return { big: N(D.H.qty), u: 'pcs', lb: 'sent today · ' + D.H.nToday + ' entries', sp: D.sent }; },
+      sheet: function (D) {
+        var H = D.H, tot = sum(D.sent), best = 0; D.sent.forEach(function (v, i) { if (v > D.sent[best]) best = i; });
+        return { sub: 'Last 7 days · live from Work entries', html:
+          kg([kpi('Active TAE', H.actN, { c: COL.green }), kpi('Delayed', H.delayed.length, { c: COL.red }), kpi('Sent today', H.qty, { u: 'pcs' }), kpi('CBM finished', D.cbmDone, { d: 2, c: COL.blue }), kpi('Pending pcs', H.pendPcs, { c: COL.amber }), kpi('QC pending', H.qcPend, { c: COL.indigo })]) +
+          sec('📈 Sent vs Carpenter output', lineChart(D.lab, [{ n: 'Packed / sent', c: COL.green, v: D.sent }, { n: 'Carpenter done', c: COL.blue, v: D.bal }]), '7 days', 1) +
+          sec('🆕 New entries per day', cols(D.lab, D.ent, COL.indigo), '', 2) +
+          sec('🧮 Entries status', donut([{ l: 'Finished', v: D.done, c: COL.green }, { l: 'Active', v: D.active - D.delayed.length, c: COL.blue }, { l: 'Delayed', v: D.delayed.length, c: COL.red }], N(D.W.length), 'ENTRIES'), '', 3) +
+          (tot ? tip('7-day total <b>' + N(tot) + ' pcs</b>, average <b>' + N(tot / 7, 1) + '</b> per day. Best day: <b>' + esc(D.lab[best]) + '</b> (' + N(D.sent[best]) + ' pcs).') : tip('No packing recorded in the last 7 days.')) +
+          btns([{ t: '📋 Work List', a: 'data-go="workList"', p: 1 }, { t: '🏁 Production', a: 'data-go="production"' }]) };
+      } },
+    { id: 'stage', ic: '🪵', t: 'Stage Progress', c: COL.amber,
+      card: function (D) { var S2 = D.stage, t = S2.sanding.t + S2.polish.t + S2.carpenter.t, d = S2.sanding.d + S2.polish.d + S2.carpenter.d; return { big: pct(d, t), u: '%', lb: 'sanding · polish · carpenter', sp: [pct(S2.sanding.d, S2.sanding.t), pct(S2.polish.d, S2.polish.t), pct(S2.carpenter.d, S2.carpenter.t)] }; },
+      sheet: function (D) {
+        var S2 = D.stage, k = [['sanding', 'Sanding', COL.amber], ['polish', 'Polish', COL.pink], ['carpenter', 'Carpenter', COL.blue]];
+        var t = sum(k.map(function (a) { return S2[a[0]].t; })), d = sum(k.map(function (a) { return S2[a[0]].d; }));
+        var worst = k.slice().sort(function (a, b) { return pct(S2[a[0]].d, S2[a[0]].t) - pct(S2[b[0]].d, S2[b[0]].t); })[0];
+        return { sub: 'How much of every stage is complete', html:
+          kg([kpi('Overall done', pct(d, t), { u: '%', c: COL.green }), kpi('Pieces done', d), kpi('Pieces left', Math.max(t - d, 0), { c: COL.amber })]) +
+          sec('⭕ Completion by stage', '<div class="f105-rings">' + k.map(function (a) { return ring(pct(S2[a[0]].d, S2[a[0]].t), a[2], a[1], N(S2[a[0]].d) + ' / ' + N(S2[a[0]].t)); }).join('') + '</div>', '', 1) +
+          sec('📊 Pieces left per stage', hbar(k.map(function (a) { return { l: a[1], v: Math.max(S2[a[0]].t - S2[a[0]].d, 0), c: a[2] }; }), { u: ' pcs' }), '', 2) +
+          sec('🥧 Done vs left', donut([{ l: 'Done', v: d, c: COL.green }, { l: 'Left', v: Math.max(t - d, 0), c: COL.amber }], pct(d, t) + '%', 'DONE'), '', 3) +
+          (t ? tip('Slowest stage right now: <b>' + worst[1] + '</b> (' + pct(S2[worst[0]].d, S2[worst[0]].t) + '% done).') : '') +
+          btns([{ t: '📋 Work List', a: 'data-go="workList"', p: 1 }]) };
+      } },
+    { id: 'delay', ic: '⚠️', t: 'Delay Tracker', c: COL.red,
+      card: function (D) { return { big: N(D.delayed.length), u: 'late', lb: D.o.late + ' orders late', sp: D.dBk }; },
+      sheet: function (D) {
+        var mx = D.delayed.length ? D.delayed[0].late : 0, avg = D.delayed.length ? sum(D.delayed.map(function (r) { return r.late; })) / D.delayed.length : 0;
+        return { sub: 'Work past its target date + late orders', html:
+          kg([kpi('Delayed work', D.delayed.length, { c: COL.red }), kpi('Orders late', D.o.late, { c: COL.orange }), kpi('Max days late', mx, { u: 'd' }), kpi('Avg days late', avg, { d: 1, u: 'd' }), kpi('Late pcs', sum(D.delayed.map(function (r) { return statusOf(r.x).pend; }))), kpi('On time', Math.max(D.active - D.delayed.length, 0), { c: COL.green })]) +
+          sec('⏳ How late (work)', cols(['1-3 d', '4-7 d', '8-14 d', '15+ d'], D.dBk, [COL.amber, COL.orange, COL.red, '#be123c']), '', 1) +
+          sec('🔥 Most delayed TAE', hbar(D.delayed.slice(0, 8).map(function (r) { return { l: taeOf(r.x) + (r.x.buyer ? ' · ' + r.x.buyer : ''), v: r.late, c: r.late > 14 ? '#be123c' : r.late > 7 ? COL.red : COL.orange, find: taeOf(r.x) }; }), { u: ' d' }), 'tap to search', 2) +
+          sec('📦 Late orders', lst(D.o.lateList.slice(0, 6).map(function (r) { return { l: (r.o.orderNo || '-') + (r.o.supplier ? ' · ' + r.o.supplier : ''), v: r.d + ' d', c: COL.red, find: String(r.o.orderNo || '') }; })), '', 3) +
+          (D.delayed.length ? tip('<b>' + D.dBk[3] + '</b> entries are more than 15 days late. Clear these first.') : tip('Nothing is delayed. 🎉')) +
+          btns([{ t: '⚠️ Open Delayed Work', a: 'data-act="delayed"', p: 1 }, { t: '📦 Order List', a: 'data-go="orderList"' }]) };
+      } },
+    { id: 'carp', ic: '🪚', t: 'Top Carpenters', c: COL.blue,
+      card: function (D) { var q = sum(D.c.list.map(function (c) { return c.qty; })); return { big: N(q), u: 'pcs', lb: D.c.list.length ? 'top: ' + D.c.list[0].name : 'last 7 days', sp: D.bal }; },
+      sheet: function (D) {
+        var L = D.c.list, q = sum(L.map(function (c) { return c.qty; })), t5 = L.slice(0, 5), rest = q - sum(t5.map(function (c) { return c.qty; }));
+        var items = t5.map(function (c, i) { return { l: c.name, v: c.qty, c: PAL[i] }; }); if (rest > 0) items.push({ l: 'Others', v: rest, c: COL.grey });
+        return { sub: 'Carpenter output · last 7 days', html:
+          kg([kpi('Carpenters', L.length), kpi('Pieces', q, { c: COL.blue }), kpi('CBM', D.c.cbm, { d: 2, c: COL.green })]) +
+          sec('🏆 Ranking', hbar(L.slice(0, 8).map(function (c, i) { return { l: (i + 1) + '. ' + c.name, v: c.qty, c: PAL[i % PAL.length], find: c.name }; }), { u: ' pcs' }), 'tap to search', 1) +
+          sec('📈 Daily carpenter output', lineChart(D.lab, [{ n: 'Pieces done', c: COL.blue, v: D.bal }]), '', 2) +
+          sec('🥧 Share of output', donut(items, N(q), 'PCS'), '', 3) +
+          (L.length ? tip('<b>' + esc(L[0].name) + '</b> leads with <b>' + N(L[0].qty) + ' pcs</b> (' + pct(L[0].qty, q) + '% of all output).') : '') +
+          btns([{ t: '🏁 Full Production Ranking', a: 'data-go="production"', p: 1 }]) };
+      } },
+    { id: 'buyer', ic: '🧑‍💼', t: 'Buyer Pending', c: COL.indigo,
+      card: function (D) { return { big: N(Object.keys(D.buyer).length), u: 'buyers', lb: N(D.pcsPend) + ' pcs pending', sp: top(D.buyer, 7, 'pend').map(function (b) { return b.v; }).reverse() }; },
+      sheet: function (D) {
+        var T = top(D.buyer, 8, 'pend'), tot = D.pcsPend, items = T.slice(0, 5).map(function (b, i) { return { l: b.l, v: b.v, c: PAL[i] }; }), rest = tot - sum(items.map(function (i) { return i.v; })); if (rest > 0) items.push({ l: 'Others', v: rest, c: COL.grey });
+        return { sub: 'Pending pieces by buyer (active TAE only)', html:
+          kg([kpi('Buyers', Object.keys(D.buyer).length), kpi('Pending pcs', tot, { c: COL.amber }), kpi('Active TAE', D.active, { c: COL.green })]) +
+          sec('📊 Pending by buyer', hbar(T.map(function (b, i) { return { l: b.l, v: b.v, c: PAL[i % PAL.length], find: b.l === 'N/A' ? '' : b.l }; }), { u: ' pcs' }), 'tap to search', 1) +
+          sec('🥧 Share', donut(items, N(tot), 'PCS LEFT'), '', 2) +
+          (T.length ? tip('<b>' + esc(T[0].l) + '</b> holds <b>' + pct(T[0].v, tot) + '%</b> of all pending pieces.') : '') };
+      } },
+    { id: 'orders', ic: '📦', t: 'Orders & Suppliers', c: COL.amber,
+      card: function (D) { return { big: N(D.o.total), u: 'orders', lb: D.o.rec + ' received · ' + D.o.late + ' late', sp: [D.o.rec, D.o.wait, D.o.late] }; },
+      sheet: function (D) {
+        var O = D.o, T = top(O.sup, 7);
+        return { sub: 'Order Send status and supplier load', html:
+          kg([kpi('Orders', O.total), kpi('Received', O.rec, { c: COL.green }), kpi('Waiting', O.wait, { c: COL.blue }), kpi('Late', O.late, { c: COL.red }), kpi('Pieces', O.pcs), kpi('Damaged', O.dmg, { c: COL.orange })]) +
+          sec('🥧 Order status', donut([{ l: 'Received', v: O.rec, c: COL.green }, { l: 'Waiting', v: O.wait, c: COL.blue }, { l: 'Late', v: O.late, c: COL.red }], N(O.total), 'ORDERS'), '', 1) +
+          sec('🚚 Pieces still with suppliers', hbar(T.map(function (s, i) { return { l: s.l, v: s.v, c: PAL[i % PAL.length], find: s.l === 'N/A' ? '' : s.l }; }), { u: ' pcs' }), 'tap to search', 2) +
+          sec('⏳ Late orders ageing', cols(['1-3 d', '4-7 d', '8-14 d', '15+ d'], O.bk, [COL.amber, COL.orange, COL.red, '#be123c']), '', 3) +
+          (O.pcs ? tip('Damage rate: <b>' + N(O.dmg * 100 / O.pcs, 1) + '%</b> of ordered pieces.') : '') +
+          btns([{ t: '📦 Order List', a: 'data-go="orderList"', p: 1 }, { t: '＋ Order Send', a: 'data-act="orderSend"' }]) };
+      } },
+    { id: 'repair', ic: '🛠', t: 'Repairs Desk', c: COL.orange,
+      card: function (D) { return { big: N(D.r.open), u: 'open', lb: N(D.r.pcs) + ' pcs in repair', sp: D.r.bk }; },
+      sheet: function (D) {
+        var R = D.r, T = top(R.part, 7);
+        return { sub: 'Open repairs, parts and ageing', html:
+          kg([kpi('Open', R.open, { c: COL.orange }), kpi('Pieces', R.pcs), kpi('Returned (7d)', R.back7, { c: COL.green }), kpi('Closed total', R.closed), kpi('Oldest', R.oldest.length ? R.oldest[0].age : 0, { u: 'd', c: COL.red }), kpi('All repairs', D.R.length)]) +
+          sec('🔩 Parts in repair', hbar(T.map(function (p, i) { return { l: p.l, v: p.v, c: PAL[(i + 2) % PAL.length] }; }), { u: ' pcs' }), '', 1) +
+          sec('⏳ Time in repair', cols(['0-2 d', '3-7 d', '8-14 d', '15+ d'], R.bk, [COL.green, COL.amber, COL.orange, COL.red]), '', 2) +
+          sec('🥧 Open vs closed', donut([{ l: 'Open', v: R.open, c: COL.orange }, { l: 'Closed', v: R.closed, c: COL.green }], N(D.R.length), 'REPAIRS'), '', 3) +
+          sec('🕰 Waiting longest', lst(R.oldest.slice(0, 5).map(function (o) { return { l: (o.r.orderNo || '-') + (o.r.itemCode ? ' · ' + o.r.itemCode : ''), v: o.age + ' d', c: o.age > 7 ? COL.red : COL.amber, find: String(o.r.orderNo || '') }; })), '', 4) +
+          btns([{ t: '🛠 Open Repairs', a: 'data-go="repairs"', p: 1 }]) };
+      } },
+    { id: 'att', ic: '👷', t: 'Attendance', c: COL.cyan,
+      card: function (D) { return { big: D.a.p + D.a.half + '/' + D.WK.length, u: '', lb: D.a.abs + ' absent today', sp: D.a.week }; },
+      sheet: function (D) {
+        var a = D.a, tot = D.WK.length;
+        return { sub: 'Today · ' + D.today, html:
+          kg([kpi('Workers', tot), kpi('Present', a.p, { c: COL.green }), kpi('Half day', a.half, { c: COL.amber }), kpi('Absent', a.abs, { c: COL.red }), kpi('Overtime', a.ot, { c: COL.blue }), kpi('Unmarked', a.un, { c: COL.grey })]) +
+          sec('🥧 Today', donut([{ l: 'Present', v: a.p, c: COL.green }, { l: 'Half day', v: a.half, c: COL.amber }, { l: 'Absent', v: a.abs, c: COL.red }, { l: 'Off / holiday', v: a.off, c: COL.indigo }, { l: 'Unmarked', v: a.un, c: COL.grey }], pct(a.p + a.half, tot) + '%', 'PRESENT'), '', 1) +
+          sec('📅 Present, last 7 days', cols(D.lab, a.week, COL.cyan), '', 2) +
+          sec('🚫 Absent / half day today', a.absList.length ? '<div class="f105-chips">' + a.absList.slice(0, 20).map(function (n, i) { return '<span style="--k:' + i + '">' + esc(n) + '</span>'; }).join('') + '</div>' : empty('Everyone is present 👍'), '', 3) +
+          (a.un && tot ? tip('<b>' + a.un + '</b> worker' + (a.un === 1 ? ' is' : 's are') + ' not marked yet today.') : '') +
+          btns([{ t: '🕒 Open Attendance', a: 'data-go="attendance"', p: 1 }]) };
+      } },
+    { id: 'wood', ic: '🌲', t: 'Wood Suppliers', c: COL.lime,
+      card: function (D) { return { big: N(Object.keys(D.wood).length), u: 'suppliers', lb: N(D.pcsAll) + ' pcs total', sp: top(D.wood, 7, 'qty').map(function (b) { return b.v; }).reverse() }; },
+      sheet: function (D) {
+        var T = top(D.wood, 8, 'qty'), items = T.slice(0, 5).map(function (w, i) { return { l: w.l, v: w.v, c: PAL[i] }; }), rest = D.pcsAll - sum(items.map(function (i) { return i.v; })); if (rest > 0) items.push({ l: 'Others', v: rest, c: COL.grey });
+        return { sub: 'Wood supplied per supplier (all entries)', html:
+          kg([kpi('Suppliers', Object.keys(D.wood).length), kpi('Total pcs', D.pcsAll), kpi('Total CBM', D.cbmAll, { d: 2, c: COL.green })]) +
+          sec('📊 Pieces by supplier', hbar(T.map(function (w, i) { return { l: w.l, v: w.v, c: PAL[i % PAL.length], find: w.l === 'N/A' ? '' : w.l }; }), { u: ' pcs' }), 'tap to search', 1) +
+          sec('🥧 Share', donut(items, N(D.pcsAll), 'PCS'), '', 2) +
+          sec('⏳ Still pending per supplier', hbar(top(D.wood, 6, 'pend').map(function (w, i) { return { l: w.l, v: w.v, c: COL.amber }; }), { u: ' pcs' }), '', 3) };
+      } },
+    { id: 'backup', ic: '💾', t: 'Backup & Safety', c: COL.green, admin: 1,
+      card: function (D) { return { big: D.bk.days == null ? '—' : D.bk.days === 0 ? 'Today' : D.bk.days + 'd', u: '', lb: D.bk.days == null ? 'no backup yet' : 'since last backup', sp: [1, 1, 1, 1, 1, 1, 1] }; },
+      sheet: function (D) {
+        var d = D.bk.days, fresh = d == null ? 0 : Math.max(0, 100 - d * 20), col = d == null || d > 5 ? COL.red : d > 2 ? COL.amber : COL.green;
+        return { sub: 'Data health & backup status', html:
+          kg([kpi('Days since backup', d == null ? 0 : d, { c: col, u: 'd' }), kpi('Work entries', D.W.length), kpi('Orders', D.O.length), kpi('Repairs', D.R.length), kpi('Workers', D.WK.length), kpi('Status', fresh, { u: '%', c: col })]) +
+          sec('🛡 Backup freshness', '<div class="f105-rings" style="grid-template-columns:1fr">' + ring(fresh, col, d == null ? 'No backup yet' : d === 0 ? 'Backed up today' : d + ' day' + (d === 1 ? '' : 's') + ' ago', d != null && d > 5 ? 'Backup is due' : 'Looks good') + '</div>', '', 1) +
+          sec('🗂 What is stored', hbar([{ l: 'Work entries', v: D.W.length, c: COL.green }, { l: 'Orders', v: D.O.length, c: COL.amber }, { l: 'Repairs', v: D.R.length, c: COL.orange }, { l: 'Workers', v: D.WK.length, c: COL.cyan }]), '', 2) +
+          tip('Full backup + all Work/Order series + Google Drive in one tap with the <b>Backup</b> button at the top.') +
+          btns([{ t: '💾 Open Backup', a: 'data-act="backup"', p: 1 }, { t: '⬆ Top Backup button', a: 'data-act="top"' }]) };
+      } },
+    { id: 'ai', ic: '✨', t: 'Smart Assistant', c: COL.pink,
+      card: function (D) { return { big: pct(Math.max(D.W.length - D.ai, 0), D.W.length), u: '%', lb: 'tokens saved by optimizer', sp: [D.W.length, D.ai] }; },
+      sheet: function (D) {
+        var saved = pct(Math.max(D.W.length - D.ai, 0), D.W.length);
+        return { sub: 'Token Optimizer · only active TAE go to the AI', html:
+          kg([kpi('All entries', D.W.length), kpi('Sent to AI', D.ai, { c: COL.pink }), kpi('Saved', saved, { u: '%', c: COL.green })]) +
+          sec('⚡ Token saving', '<div class="f105-rings" style="grid-template-columns:1fr">' + ring(saved, COL.pink, 'Records kept out of prompts', N(D.W.length - D.ai) + ' of ' + N(D.W.length) + ' entries') + '</div>', '', 1) +
+          sec('🥧 Prompt content', donut([{ l: 'Active (sent)', v: D.ai, c: COL.pink }, { l: 'Finished (skipped)', v: Math.max(D.W.length - D.ai, 0), c: COL.grey }], N(D.ai), 'ACTIVE'), '', 2) +
+          sec('🧰 What it can do', '<div class="f105-chips">' + ['Delayed items', '1 piece left', 'Pending by buyer', 'PDF / photo scan', 'Voice typing', 'Word · PDF · CSV files', 'Entry drafts', 'Gemini + Grok keys', 'Hindi · Hinglish · English'].map(function (c, i) { return '<span style="--k:' + i + '">' + c + '</span>'; }).join('') + '</div>', '', 3) +
+          btns([{ t: '💬 Ask Smart Assistant', a: 'data-act="ai"', p: 1 }]) };
+      } },
+    { id: 'look', ic: '🎨', t: 'Theme & Graphics', c: COL.indigo, admin: 1,
+      card: function () { return { big: gfx().toUpperCase(), u: '', lb: 'graphics mode', sp: [1, 2, 3, 2, 3, 1, 2] }; },
+      sheet: function () {
+        var g = gfx(), lv = { low: 1, medium: 2, high: 3 }[g] || 2, light = document.body.classList.contains('light');
+        return { sub: 'Look & feel of the app', html:
+          kg([kpiT('Graphics', g.charAt(0).toUpperCase() + g.slice(1), COL.indigo), kpiT('Theme', light ? 'Light' : 'Dark', COL.cyan), kpiT('Effects', g === 'low' ? 'Off' : 'On', g === 'low' ? COL.grey : COL.green)])
+          +
+          sec('🎚 Graphics level', hbar([{ l: 'Low · no effects (fastest)' + (g === 'low' ? '  ● current' : ''), v: 1, c: g === 'low' ? COL.green : COL.grey }, { l: 'Medium · normal' + (g === 'medium' ? '  ● current' : ''), v: 2, c: g === 'medium' ? COL.green : COL.grey }, { l: 'High · all effects' + (g === 'high' ? '  ● current' : ''), v: 3, c: g === 'high' ? COL.green : COL.grey }]), '', 1) +
+          sec('🧩 Customise', '<div class="f105-chips">' + ['Light / Dark / Auto', 'Accent colour', 'Font & size', 'Corner roundness', 'Background style', 'Glow effect', 'Animation level', 'Bot Studio'].map(function (c, i) { return '<span style="--k:' + i + '">' + c + '</span>'; }).join('') + '</div>', '', 2) +
+          btns([{ t: '⚙ Open Settings', a: 'data-go="settings"', p: 1 }]) };
+      } }
+  ];
+  function gfx() { try { return document.documentElement.getAttribute('data-gfx') || 'medium'; } catch (e) { return 'medium'; } }
+  function list() { var adm = true; try { adm = !isEmployeeMode; } catch (e) { } return F.filter(function (f) { return adm || !f.admin; }); }
+
+  /* ---------------- home section ---------------- */
+  function cardHtml(f, D, i) {
+    var c = {}; try { c = f.card(D); } catch (e) { c = { big: '—', u: '', lb: '', sp: [0, 0] }; }
+    return '<button type="button" class="f105-card" data-f="' + f.id + '" style="--fc:' + f.c + ';--i:' + i + '"><div class="f105-top"><span class="f105-ic">' + f.ic + '</span><span class="f105-ar">›</span></div><div class="f105-t">' + esc(f.t) + '</div><div class="f105-big">' + esc(c.big) + (c.u ? '<small>' + esc(c.u) + '</small>' : '') + '</div><div class="f105-lb">' + esc(c.lb) + '</div>' + spark(c.sp || [0, 0], f.c) + '</button>';
+  }
+  function mount(tab) {
+    if (tab !== 'home') return;
+    var app = document.getElementById('app'); if (!app || document.getElementById('f105')) return;
+    var D; try { D = calc(); } catch (e) { console.error('f105 calc', e); return; }
+    var L = list();
+    app.insertAdjacentHTML('beforeend', '<section id="f105" class="' + (S.seen ? 'f105-still' : '') + '"><div class="f105-h"><h3>✨ Features</h3><span class="f105-ver"><i></i>v' + VER + ' · Live</span></div><p class="f105-sub">Tap any card for live details, charts and shortcuts.</p><div class="f105-grid">' + L.map(function (f, i) { return cardHtml(f, D, i); }).join('') + '</div><div class="f105-foot">' + L.length + ' features · THAR ERP V' + VER + '-live</div></section>');
+    S.seen = true;
+  }
+
+  /* ---------------- detail sheet ---------------- */
+  function countUp(root) {
+    if (low()) return;
+    [].forEach.call(root.querySelectorAll('[data-cu]'), function (el) {
+      var to = parseFloat(el.getAttribute('data-cu')) || 0, dd = +el.getAttribute('data-d') || 0, t0 = null, dur = 850;
+      if (!to) return; el.textContent = N(0, dd);
+      (function step(t) { if (!t0) t0 = t; var p = Math.min((t - t0) / dur, 1), e = 1 - Math.pow(1 - p, 3); el.textContent = N(to * e, dd); if (p < 1) requestAnimationFrame(step); else el.textContent = N(to, dd); })(performance.now());
+    });
+  }
+  function close() {
+    var o = document.getElementById('f105ov'); if (!o) return;
+    document.body.style.overflow = o.getAttribute('data-bo') || '';
+    if (low()) { o.remove(); return; }
+    o.classList.add('out'); setTimeout(function () { o.remove(); }, 190);
+  }
+  function open(id) {
+    var f = list().filter(function (x) { return x.id === id; })[0]; if (!f) return;
+    var D, r; try { D = calc(); r = f.sheet(D); } catch (e) { console.error('f105 sheet', e); r = { sub: '', html: empty('Could not load data') }; }
+    var old = document.getElementById('f105ov'); if (old) old.remove();
+    var o = document.createElement('div'); o.id = 'f105ov'; o.className = 'f105-ov'; o.style.setProperty('--fc', f.c);
+    o.setAttribute('data-bo', document.body.style.overflow || '');
+    o.innerHTML = '<div class="f105-sh" role="dialog" aria-label="' + esc(f.t) + '"><div class="f105-grab"></div><div class="f105-sh-h"><span class="f105-ic" style="--fc:' + f.c + '">' + f.ic + '</span><div><h3>' + esc(f.t) + '</h3><p>' + esc(r.sub || '') + '</p></div><button type="button" class="f105-x" data-x="1" aria-label="Close">✕</button></div>' + r.html + '</div>';
+    document.body.appendChild(o); document.body.style.overflow = 'hidden';
+    countUp(o);
+  }
+  function find(q) {
+    close(); if (!q) return;
+    try { msQ = q; msLim = 25; } catch (e) { }
+    try { render(); } catch (e) { }
+    window.scrollTo({ top: 0, behavior: low() ? 'auto' : 'smooth' });
+  }
+  function act(a) {
+    if (a === 'delayed') { close(); try { homeOpen = 'work'; render(); } catch (e) { } window.scrollTo(0, 0); return; }
+    if (a === 'orderSend') { close(); try { openOrderEntry(); } catch (e) { } return; }
+    if (a === 'backup') { close(); try { moreSub = 'backup'; go('settings'); } catch (e) { } return; }
+    if (a === 'top') { close(); window.scrollTo(0, 0); return; }
+    if (a === 'ai') {
+      close(); window.scrollTo({ top: 0, behavior: low() ? 'auto' : 'smooth' });
+      setTimeout(function () { var d = document.querySelector('#thar104 details'); if (d) { d.open = true; var i = document.getElementById('aiCustomQuery'); if (i) try { i.focus(); } catch (e) { } } }, 250);
+    }
+  }
+
+  /* ---------------- events (delegated) ---------------- */
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var c = t.closest('.f105-card'); if (c) { open(c.getAttribute('data-f')); return; }
+    var ov = t.closest('#f105ov');
+    if (!ov) return;
+    if (t === ov || t.closest('[data-x]')) { close(); return; }
+    var g = t.closest('[data-go]'); if (g) { var to = g.getAttribute('data-go'); close(); try { go(to); } catch (er) { } return; }
+    var a = t.closest('[data-act]'); if (a) { act(a.getAttribute('data-act')); return; }
+    var fd = t.closest('[data-find]'); if (fd) { find(fd.getAttribute('data-find')); }
+  });
+  function tipShow(e) {
+    var h = e.target && e.target.closest && e.target.closest('.f105-hit'); if (!h) return;
+    var ch = h.closest('.f105-ch'), tp = ch.querySelector('.f105-tip'), gd = ch.querySelector('.f105-guide'), x = parseFloat(h.getAttribute('data-x')), W = parseFloat(h.getAttribute('data-w'));
+    var p = h.getAttribute('data-t').split('|'); tp.innerHTML = '<b>' + esc(p[0]) + '</b><br>' + p.slice(1).map(esc).join('<br>');
+    tp.style.left = Math.min(Math.max(x / W * 100, 14), 86) + '%'; tp.classList.add('on'); gd.setAttribute('x1', x); gd.setAttribute('x2', x); gd.style.visibility = 'visible';
+  }
+  document.addEventListener('pointerdown', tipShow, true);
+  document.addEventListener('pointerover', tipShow, true);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+  window.THAR105 = { mount: mount, open: open, close: close, ver: VER };
+})();
+
+setTimeout(function () { try { if (window.THAR105 && typeof tab !== 'undefined') THAR105.mount(tab); } catch (e) { } }, 60);
+</script>
+
+
+<style id="thar106css">
+/* ===== V1.0.106: always-visible "thinking" animation (works even when Graphics = Low) ===== */
+.apTh{align-self:flex-start;display:flex;align-items:center;gap:11px;position:relative;overflow:hidden;max-width:92%;padding:10px 15px 12px 12px;border-radius:18px;background:var(--panel);border:1px solid var(--line)}
+.apThD{display:inline-flex;align-items:center;gap:4px;flex:none;height:22px}
+.apThD i{display:block;width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,#38bdf8,#a855f7 60%,#ec4899);animation:apDot 1.1s ease-in-out infinite}
+.apThD i:nth-child(2){animation-delay:.16s}.apThD i:nth-child(3){animation-delay:.32s}
+.apThT{display:flex;flex-direction:column;gap:2px;min-width:0}
+.apThS{font-size:13px;font-weight:800;background:linear-gradient(90deg,var(--muted) 0%,var(--text) 45%,var(--muted) 90%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:apShim 1.8s linear infinite}
+.apThR{position:relative;display:block;height:15px;font-style:normal;font-size:11.5px;color:var(--muted);min-width:170px}
+.apThR u{position:absolute;left:0;top:0;text-decoration:none;white-space:nowrap;opacity:0;animation:apRot 9s ease-in-out infinite}
+.apThR u:nth-child(1){opacity:1}.apThR u:nth-child(2){animation-delay:3s}.apThR u:nth-child(3){animation-delay:6s}
+.apThB{position:absolute;left:0;bottom:0;height:3px;width:38%;border-radius:3px;background:linear-gradient(90deg,transparent,#38bdf8,#a855f7,#ec4899,transparent);animation:apSweep 1.5s ease-in-out infinite}
+@keyframes apDot{0%,80%,100%{transform:translateY(0) scale(.7);opacity:.45}40%{transform:translateY(-6px) scale(1);opacity:1}}
+@keyframes apShim{from{background-position:200% 0}to{background-position:-20% 0}}
+@keyframes apRot{0%{opacity:0;transform:translateY(7px)}5%,28%{opacity:1;transform:none}33%,100%{opacity:0;transform:translateY(-7px)}}
+@keyframes apSweep{0%{transform:translateX(-100%)}100%{transform:translateX(280%)}}
+/* keep it moving even in Graphics = Low / reduced motion: this is progress feedback, not decoration */
+html[data-gfx="low"] .apThD i{animation:apDot 1.1s ease-in-out infinite!important}
+html[data-gfx="low"] .apThD i:nth-child(2){animation-delay:.16s!important}html[data-gfx="low"] .apThD i:nth-child(3){animation-delay:.32s!important}
+html[data-gfx="low"] .apThS{animation:apShim 1.8s linear infinite!important}
+html[data-gfx="low"] .apThR u{animation:apRot 9s ease-in-out infinite!important}
+html[data-gfx="low"] .apThR u:nth-child(2){animation-delay:3s!important}html[data-gfx="low"] .apThR u:nth-child(3){animation-delay:6s!important}
+html[data-gfx="low"] .apThB{animation:apSweep 1.5s ease-in-out infinite!important}
+html[data-gfx="low"] .aiThink.in{animation:rotateGlow 2.4s linear infinite!important;opacity:1!important}
+@media (prefers-reduced-motion:reduce){.apThD i{animation:apDot 1.1s ease-in-out infinite!important}.apThB{animation:apSweep 1.5s ease-in-out infinite!important}.apThR u{animation:apRot 9s ease-in-out infinite!important}}
+
+/* ===== V1.0.106: AI answers as boxes / cards (PDF-like) ===== */
+.apB ul.apDL{list-style:none;margin:8px 0;padding:0;display:grid;gap:9px}
+.apB ul.apDL>li{position:relative;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--green2);border-radius:13px;padding:9px 11px;animation:apLi .4s ease both;animation-delay:calc(var(--i,0)*45ms)}
+.apB ul.apDL>li.late{border-left-color:var(--red)}
+.apDL .apT{font-weight:900;font-size:13.5px;line-height:1.3;margin-bottom:6px}
+.apDL .apP{display:flex;flex-wrap:wrap;gap:5px}
+.apDL .apP span{font-size:11.5px;font-weight:700;background:var(--panel3);border:1px solid var(--line);border-radius:8px;padding:3px 8px}
+.apDL .apP span.late{color:var(--red);border-color:rgba(244,63,94,.45);background:rgba(244,63,94,.12)}
+.apDL .apBar{height:6px;border-radius:6px;background:var(--panel3);overflow:hidden;margin-top:8px}
+.apDL .apBar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#10b981,#34d399);transform-origin:left;animation:apBar .8s cubic-bezier(.2,.9,.3,1) both;animation-delay:.2s}
+.apDL small{display:block;margin-top:3px;font-size:10.5px;color:var(--muted);font-weight:700}
+.apKV{margin:8px 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel2)}
+.apKV>div{display:flex;justify-content:space-between;gap:12px;padding:7px 12px;font-size:13px;border-top:1px solid var(--line)}
+.apKV>div:first-child{border-top:0}.apKV>div:nth-child(even){background:var(--panel3)}
+.apKV span{color:var(--muted);font-weight:700;min-width:0}.apKV b{text-align:right;min-width:0;word-break:break-word}
+.apB .apTw{border:1px solid var(--line);border-radius:14px;overflow:auto;background:var(--panel2)}
+.apB .apTw table{width:100%;border-collapse:collapse;font-size:12.5px}
+.apB .apTw th{background:linear-gradient(135deg,rgba(16,185,129,.28),rgba(56,189,248,.2));font-size:11px;letter-spacing:.3px;text-transform:uppercase;border:0;border-bottom:1px solid var(--line);padding:8px 9px;white-space:nowrap}
+.apB .apTw td{border:0;border-top:1px solid var(--line);padding:7px 9px}
+.apB .apTw tr:nth-child(even) td{background:var(--panel3)}
+@keyframes apLi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes apBar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+/* ===== V1.0.106: Home "Smart Assistant" answers as detail cards ===== */
+#thar104 .t104-out.rich{white-space:normal;max-height:62vh;padding:8px}
+.t106-sum{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 8px}
+.t106-sum b{font-size:14px;font-weight:900}.t106-sum span{font-size:11px;color:var(--muted);font-weight:700}
+.t106-list{display:grid;gap:9px}
+.t106-c{position:relative;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--green2);border-radius:14px;padding:10px 11px;animation:apLi .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*50ms)}
+.t106-c.late{border-left-color:var(--red)}
+.t106-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.t106-h b{font-size:14px;font-weight:900;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t106-h em{flex:none;font-style:normal;font-size:10.5px;font-weight:900;border-radius:99px;padding:2px 9px;color:var(--green2);background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4)}
+.t106-h em.red{color:var(--red);background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.45)}
+.t106-s{margin-top:2px;font-size:12px;color:var(--muted);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t106-g{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}
+.t106-g div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:5px 8px;min-width:0}
+.t106-g span{display:block;font-size:9.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
+.t106-g b{display:block;font-size:13px;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t106-bar{height:6px;border-radius:6px;background:var(--panel3);overflow:hidden;margin-top:9px}
+.t106-bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#10b981,#34d399);transform-origin:left;animation:apBar .8s cubic-bezier(.2,.9,.3,1) both;animation-delay:calc(var(--i,0)*50ms + 150ms)}
+.t106-c.late .t106-bar i{background:linear-gradient(90deg,#f43f5e,#fb923c)}
+.t106-c small{display:block;margin-top:3px;font-size:10.5px;color:var(--muted);font-weight:700}
+.t106-more{margin-top:8px;text-align:center;font-size:12px;color:var(--muted);font-weight:700}
+.t106-empty{padding:14px 8px;text-align:center;color:var(--muted);font-size:13px}
+.t106-think{display:flex;align-items:center;gap:11px;padding:12px 6px}
+.t106-think .apThD{height:22px}
+.t106-think span.tt{font-size:13px;font-weight:800;color:var(--muted)}
+.t106-ans{padding:2px 4px;font-size:13.5px;line-height:1.5}
+html[data-gfx="low"] .t106-think .apThD i{animation:apDot 1.1s ease-in-out infinite!important}
+html[data-gfx="low"] .t106-think .apThD i:nth-child(2){animation-delay:.16s!important}html[data-gfx="low"] .t106-think .apThD i:nth-child(3){animation-delay:.32s!important}
+</style>
+
 </body>
 </html>
