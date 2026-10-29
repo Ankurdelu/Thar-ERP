@@ -1747,7 +1747,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.103-live';
+const APP_VER = 'V1.0.104-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2732,6 +2732,7 @@ function render() {
   let fn = { home: homePage, work: workPage, repairs: repairTab, lists: listsPage, workList: workListPage, orderList: orderListPage, production: productionPage, overall: overallPage, personDetail: personDetailPage, orders: ordersPage, orderView: orderViewPage, oldTaeList: oldTaeListPage, oldTaeDetail: oldTaeDetailPage, attendance: attendancePage, settings: settingsPage, users: usersPage }[tab] || homePage;
   document.getElementById('app').innerHTML = fn();
   bindCommon();
+  try { if (window.THAR104) THAR104.mount(tab); } catch (e) {}
   try { trackScreen(); } catch (e) {}
 }
 
@@ -9961,77 +9962,6 @@ if(DISC.test(text)){if(TX.draft){TX.draft=null;showDraft();if(typeof say==='func
 window.__tharDynamicSend=function(text){if(!cfg()&&!TX.draft&&!LIVE.on&&!DR_CMD.test(String(text||'').trim()))return false;sendDynamic(text);return true;};
 window.__tharDynamicSend.active=function(t){return !!cfg()||!!TX.draft||!!LIVE.on||(t!=null&&DR_CMD.test(String(t).trim()))};
 
-function setupLive(form,sendBtn,stopMic){
-const SRC=window.SpeechRecognition||window.webkitSpeechRecognition,SS=window.speechSynthesis;
-if(!document.getElementById('aiLiveCss')){const st=document.createElement('style');st.id='aiLiveCss';st.textContent=`
-#aiLiveBtn{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;background:linear-gradient(135deg,#7c3aed,#06b6d4);margin-right:6px;padding:0}
-#aiLiveBtn svg{width:20px;height:20px}
-#aiLiveBar{display:flex;align-items:center;gap:10px;padding:8px 12px;margin:0 8px 6px;border-radius:16px;background:linear-gradient(135deg,rgba(124,58,237,.25),rgba(6,182,212,.2));border:1px solid rgba(124,58,237,.45);color:var(--text,#fff)}
-#aiLiveBar[hidden]{display:none}
-#aiLiveBar .lvOrb{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:0;background:radial-gradient(circle at 35% 30%,#a78bfa,#06b6d4);box-shadow:0 0 0 0 rgba(6,182,212,.6);animation:lvPulse 1.4s ease-in-out infinite}
-#aiLiveBar.sp .lvOrb{background:radial-gradient(circle at 35% 30%,#34d399,#06b6d4);animation-duration:.6s}
-#aiLiveBar.th .lvOrb{background:radial-gradient(circle at 35% 30%,#fbbf24,#f472b6);animation-duration:.9s}
-@keyframes lvPulse{0%{box-shadow:0 0 0 0 rgba(6,182,212,.55)}70%{box-shadow:0 0 0 14px rgba(6,182,212,0)}100%{box-shadow:0 0 0 0 rgba(6,182,212,0)}}
-#aiLiveBar .lvT{flex:1;min-width:0;display:flex;flex-direction:column}
-#aiLiveBar .lvT b{font-size:14px}
-#aiLiveBar .lvT small{opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:14px}
-#aiLiveBar .lvB{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:inherit;border-radius:12px;padding:6px 10px;font-weight:700;cursor:pointer}
-#aiLiveBar .lvEnd{background:#dc2626;border-color:#dc2626;color:#fff}
-#taeBox.aiMini{top:auto!important;bottom:0!important;height:auto!important;max-height:44dvh;border-radius:20px 20px 0 0;box-shadow:0 -10px 34px rgba(0,0,0,.5)}
-#taeBox.aiMini .taeCaps{display:none!important}
-#taeBox.aiMini #taeLog{max-height:18dvh}
-`;document.head.appendChild(st);}
-const btn=document.createElement('button');btn.type='button';btn.id='aiLiveBtn';btn.title='Live voice chat';btn.setAttribute('aria-label','Live voice chat');
-btn.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 10h2v4H4zm4-4h2v12H8zm4-3h2v18h-2zm4 3h2v12h-2zm4 4h2v4h-2z"/></svg>';
-form.insertBefore(btn,sendBtn||null);
-const bar=document.createElement('div');bar.id='aiLiveBar';bar.hidden=true;
-bar.innerHTML='<button type="button" class="lvOrb" aria-label="Interrupt"></button><div class="lvT"><b class="lvS">Listening…</b><small class="lvI"></small></div><button type="button" class="lvB" data-a="size" aria-label="Shrink or expand">⤓</button><button type="button" class="lvB lvEnd" data-a="end">End</button>';
-form.parentNode.insertBefore(bar,form);
-const box=document.getElementById('taeBox');
-function voices(){try{LIVE.voices=SS?SS.getVoices()||[]:[]}catch(e){}}voices();if(SS)SS.onvoiceschanged=voices;
-function pickVoice(hi){const vs=LIVE.voices.length?LIVE.voices:(voices(),LIVE.voices),f=rx=>vs.find(v=>rx.test(String(v.lang||'').replace('_','-')));return hi?f(/^hi/i):(f(/^en-IN/i)||f(/^en/i))}
-function plain(s){return String(s||'').replace(/<[^>]+>/g,' ').replace(/https?:\/\/\S+/g,' ').replace(/[*_`#>|~▸▾🗑✏️🔀]/g,' ').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,' ').replace(/\s+/g,' ').trim()}
-function chunks(t){const parts=t.split(/(?<=[.!?।])\s+/).map(x=>x.trim()).filter(Boolean),out=[];let cur='';parts.forEach(p=>{if(cur&&(cur+' '+p).length>150){out.push(cur);cur=p}else cur=(cur+' '+p).trim()});if(cur)out.push(cur);return out}
-function pauseRec(){const r=LIVE.rec;LIVE.rec=null;if(r){r.onend=null;r.onresult=null;r.onerror=null;try{r.abort()}catch(e){}}}
-function resumeRec(){if(LIVE.on&&!LIVE.speaking&&!LIVE.rec)startRec()}
-function speechDone(){clearTimeout(LIVE.safety);LIVE.pending=0;LIVE.speaking=false;if(LIVE.on)setTimeout(resumeRec,350)}
-function speak(t){if(!LIVE.on||!SS)return;t=plain(t);if(!t)return;
-if(t.length>320){const cut=t.slice(0,320),i=Math.max(cut.lastIndexOf('.'),cut.lastIndexOf('।'));t=(i>80?cut.slice(0,i+1):cut)+' The rest is on screen.'}
-TX.askSave=!!TX.draft&&/save|सेव/i.test(t);
-LIVE.speaking=true;pauseRec();const hi=/[\u0900-\u097F]/.test(t)||langKind(t)==='hing',v=pickVoice(hi);
-chunks(t).forEach(c=>{const u=new SpeechSynthesisUtterance(c);if(v){u.voice=v;u.lang=v.lang}else u.lang=hi?'hi-IN':'en-IN';u.rate=1.03;LIVE.pending++;const d=()=>{LIVE.pending=Math.max(0,LIVE.pending-1);if(!LIVE.pending)speechDone()};u.onend=d;u.onerror=d;SS.speak(u)});
-clearTimeout(LIVE.safety);LIVE.safety=setTimeout(speechDone,Math.min(60000,4000+t.length*120))}
-function interrupt(){try{SS&&SS.cancel()}catch(e){}speechDone()}
-const BYE=/^(?:live\s*)?(?:band\s*karo|band\s*kar\s*do|stop|end\s*call|bye|bye\s*bye|बंद\s*करो|बंद\s*कर\s*दो|बाय|अलविदा)\s*[.!।]*$/i;
-function onUtter(text,alts){text=String(text||'').trim();if(!text)return;
-if(BYE.test(text)){liveOff();return}
-TX.alts=(alts||[]).map(fixSpeech).filter(a=>a&&a!==text);TX.altsFor=text;
-const a=window.TAE_ASSISTANT;if(a&&a.send)a.send(text)}
-function startRec(){if(!LIVE.on||LIVE.speaking||LIVE.rec||!SRC)return;
-const rec=new SRC();LIVE.rec=rec;rec.lang='hi-IN';rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=3;
-rec.onresult=e=>{let fin='',interim='',alts=[];for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i],t=r[0].transcript;if(r.isFinal){fin+=' '+t;for(let k=1;k<r.length;k++)alts.push(r[k].transcript)}else interim+=t}
-LIVE.interim=interim;if(fin.trim()){LIVE.interim='';onUtter(fixSpeech(fin.trim()),alts)}};
-rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){liveOff();say('Microphone permission was not granted. Please allow the microphone in your browser settings.')}};
-rec.onend=()=>{if(LIVE.rec===rec)LIVE.rec=null;if(LIVE.on&&!LIVE.speaking)setTimeout(startRec,250)};
-try{rec.start()}catch(e){LIVE.rec=null;setTimeout(startRec,800)}}
-function botText(n){const c=n.cloneNode(true);c.querySelectorAll('.taeC').forEach(x=>x.remove());return (c.textContent||'').trim()}
-function scan(){if(!LIVE.on)return;const log=document.getElementById('taeLog');if(!log)return;
-log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{const i=n.dataset.i;if(i==null)return;const t=botText(n),k=t;if(LIVE.seen[i]===k)return;LIVE.seen[i]=k;speak(t)})}
-function markSeen(){LIVE.seen={};const log=document.getElementById('taeLog');if(!log)return;log.querySelectorAll(':scope > .taeM.b:not(.taeDots)').forEach(n=>{if(n.dataset.i!=null)LIVE.seen[n.dataset.i]=botText(n)})}
-function setMini(m){if(!box)return;box.classList.toggle('aiMini',!!m);document.body.classList.toggle('tae-open',!m);bar.querySelector('[data-a=size]').textContent=m?'⤢':'⤓'}
-function liveOn(){if(LIVE.on)return;if(!SRC||!SS){alert('Live voice needs Chrome (HTTPS). This browser does not support speech recognition.');return}
-try{stopMic&&stopMic()}catch(e){}
-LIVE.on=true;markSeen();bar.hidden=false;btn.style.outline='2px solid #34d399';
-const log=document.getElementById('taeLog');if(log&&!LIVE.obs){LIVE.obs=new MutationObserver(scan);LIVE.obs.observe(log,{childList:true,subtree:true,characterData:true})}
-speak('Go ahead, I am listening.')}
-function liveOff(){if(!LIVE.on)return;LIVE.on=false;try{SS&&SS.cancel()}catch(e){}clearTimeout(LIVE.safety);LIVE.speaking=false;LIVE.pending=0;pauseRec();bar.hidden=true;btn.style.outline='';TX.askSave=false;if(box){box.classList.remove('aiMini');document.body.classList.add('tae-open')}}
-btn.addEventListener('click',e=>{e.preventDefault();LIVE.on?liveOff():liveOn()});
-bar.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.classList.contains('lvOrb')){if(LIVE.speaking)interrupt();return}const a=b.dataset.a;if(a==='end')liveOff();else if(a==='size')setMini(!(box&&box.classList.contains('aiMini')))});
-if(box)box.addEventListener('click',e=>{if(e.target.closest('[data-x="close"]'))liveOff()});
-setInterval(()=>{if(!LIVE.on)return;const st=LIVE.speaking?'sp':(TX.busy?'th':'');bar.classList.toggle('sp',st==='sp');bar.classList.toggle('th',st==='th');
-bar.querySelector('.lvS').textContent=st==='sp'?'Speaking… (tap to interrupt)':(st==='th'?'Thinking…':'Listening…');bar.querySelector('.lvI').textContent=LIVE.interim||'';
-if(!LIVE.speaking&&!LIVE.rec)resumeRec()},300);
-}
 function setupControls(){const form=$('taeForm'),input=$('taeIn');if(!form||!input||form.dataset.dynamicAi)return;form.dataset.dynamicAi='1';
 const sendBtn=form.querySelector('button[aria-label="Send"]');
 const waves=document.createElement('span');waves.id='aiVoiceWaves';for(let i=0;i<9;i++)waves.appendChild(document.createElement('i'));form.insertBefore(waves,sendBtn);
@@ -10066,7 +9996,6 @@ e.preventDefault();e.stopImmediatePropagation();if(TX.voice)stopVoice();else sta
 sendBtn.addEventListener('contextmenu',e=>e.preventDefault());}
 /* typing by hand: stop the mic and show the Send button */
 input.addEventListener('input',e=>{if(e.isTrusted&&TX.voice)stopVoice();sync();});setInterval(sync,300);sync();
-try{setupLive(form,sendBtn,stopVoice)}catch(e){console.error('live voice',e)}
 }
 const timer=setInterval(()=>{if($('taeForm')&&$('taeIn')){clearInterval(timer);setupControls();}},300);
 /* ===================== DRAFTS: park entries (even with problems), review one by one, save later. Max 500. ===================== */
@@ -11161,7 +11090,7 @@ async function smartTitle() { const s = S; if (!s || !s.titleAuto || s.smart || 
    WAVE button = LIVE CHAT: full-screen hands-free talk (auto-send, spoken answers), like Gemini Live. */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition, TS = window.speechSynthesis;
 let rec = null, micOn = false, vDict = false, live = false, vMuted = false, vBuf = '', vSess = '', silT = 0, vRest = 0, errN = 0, vFast = 0, vT0 = 0;
-let spk = 0, spkOn = false, vSpkWd = 0, vHear = 0, tts = localStorage.apTts === '1', lvSt = 'listen', lvT = 0, lvEl = null, lvTick = 0;
+let spk = 0, spkOn = false, vSpkWd = 0, vHear = 0, tts = false, lvSt = 'listen', lvT = 0, lvEl = null, lvTick = 0;
 const vnz = x => String(x || '').replace(/\s+/g, ' ').trim();
 /* Android Chrome repeats words and re-sends cumulative text ("hello" -> "hello hello" -> "hello hello kya ..."): merge, never blindly append */
 function vmerge(b, f) {
@@ -11405,7 +11334,7 @@ function sendBtn() {   // while the AI works the button is still Send when there
   if (g.__h !== h) { g.innerHTML = h; g.__h = h; } g.setAttribute('aria-label', stop ? 'Stop' : 'Send');
 }
 function head() {
-  if (!root) return; $('.ti', root).textContent = S && S.messages.length ? S.title : 'ERP Assistant'; $('#apTts', root).classList.toggle('on', tts);
+  if (!root) return; $('.ti', root).textContent = S && S.messages.length ? S.title : 'ERP Assistant'; 
   const mb = $('#apMic', root); if (mb) { mb.classList.toggle('on', vDict && micOn); mb.setAttribute('aria-pressed', vDict ? 'true' : 'false'); } lvHead();
   const ls = $('#apLs', root);
   if (ls) {
@@ -11852,7 +11781,7 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apBot">🎨 Bot Studio (size, outfit, look)</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: bolo, text box mein likha jayega">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apBot">🎨 Bot Studio (size, outfit, look)</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: bolo, text box mein likha jayega">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
   root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root); try { lvBuild(); } catch (e) { console.error('live voice ui', e); }
   try { const A = window.TAE_ASSISTANT; if (A && !A.__apSay) { const o = A.say; A.say = function (t) { eSay(t); return true; }; A.__apSay = 1; }
     if (A && A.log && !A.log.__ap) { const op = A.log.push; A.log.push = function (m) { const r = op.apply(this, arguments); try { if (m && m.who === 'b') eSay(m.text || '', { html: m.html, cc: m.chips }); } catch (e) { } return r; }; A.log.__ap = 1; } } catch (e) { }
@@ -11860,9 +11789,9 @@ function build() {
   $('#apBk', root).onclick = $('.apBd', root).onclick = () => $('.apSb', root).classList.remove('open');
   $('.apNew', root).onclick = () => { newChat(); $('.apSb', root).classList.remove('open'); };
   $('.apSrch', root).oninput = e => { q = e.target.value; side(); };
-  $('#apTts', root).onclick = () => { tts = !tts; localStorage.apTts = tts ? '1' : '0'; if (!tts && TS) TS.cancel(); head(); };
+  
   $('#apMic', root).onclick = () => { if (live) liveOff(); if (vDict) dictStop(); else dictStart(); };
-  $('#apLive', root).onclick = () => { if (!live) liveOn(); else liveOff(); };   // tap while it speaks = barge-in; tap again = end
+  { const lb = $('#apLive', root); if (lb) lb.remove(); }   // V1.0.104: Live voice chat removed
   $('#apAi', root).onclick = aiClick; kBind();
   $('.apCls', root).onclick = e => { const b = e.target.closest('button[data-cls]'); if (!b) return; $('.apSb', root).classList.remove('open'); const k = b.dataset.cls; if (k === 'drafts') { try { window.THAR_AI_TX.openDrafts(); } catch (x) { } return; } if (!S) newChat(); S.messages.push({ role: 'user', text: ({ format: 'format', help: 'help', brief: 'brief me', undo: 'undo', redo: 'redo' })[k], ts: Date.now() }); save(); draw(); clsSend(({ format: 'format', help: 'help', brief: 'brief me', undo: 'undo', redo: 'redo' })[k]); };
   $('#apClr', root).onclick = () => { const t = $('#apIn'); t.value = ''; pendingAttachment = []; attDraw(); fit(); apCaps(true); t.focus(); };
@@ -11911,5 +11840,317 @@ if (document.body) init(); else document.addEventListener('DOMContentLoaded', in
 })();
 </script>
 
+<style id="thar104css">
+
+/* V1.0.104: header logo - rounded glow (was a square box because border-radius was 0) */
+.top .logo.ax-hlogo{border-radius:22.5%!important;background:none!important;border:0!important;overflow:visible}
+/* ===== V1.0.104: compact dashboard (scoped, uses app theme tokens) ===== */
+#thar104{margin-bottom:12px}
+#thar104 .t104-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+#thar104 .t104-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 10px;min-width:0}
+#thar104 .t104-card span{display:block;font-size:10px;font-weight:800;letter-spacing:.4px;color:var(--muted);text-transform:uppercase}
+#thar104 .t104-card b{display:block;margin-top:2px;font-size:20px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums}
+#thar104 .t104-red{color:var(--red)}
+#thar104 .t104-chart{grid-column:1/-1;padding:6px 8px}
+#thar104 .t104-box{position:relative;height:84px}
+#thar104 .t104-box canvas{width:100%!important;height:100%!important}
+#thar104 .t104-ai{margin-top:8px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 10px}
+#thar104 .t104-ai summary{cursor:pointer;font-weight:800;font-size:13px;display:flex;justify-content:space-between;gap:8px;align-items:center;list-style:none}
+#thar104 .t104-ai summary::-webkit-details-marker{display:none}
+#thar104 .t104-ai summary em{font-style:normal;font-size:10px;font-weight:800;color:var(--green2);background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);border-radius:99px;padding:2px 8px}
+#thar104 .t104-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+#thar104 .t104-chip{border:1px solid var(--line);background:var(--panel3);color:var(--text);border-radius:99px;padding:6px 12px;font:700 12px inherit;font-family:inherit;cursor:pointer}
+#thar104 .t104-go{background:linear-gradient(135deg,#10b981,#059669);border-color:transparent;color:#fff}
+#thar104 .t104-row input{flex:1;min-width:0;padding:8px 12px;border-radius:99px;font:inherit;border:1px solid var(--line);background:var(--panel2);color:var(--text)}
+#thar104 .t104-out{margin-top:8px;max-height:220px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;font-size:13px}
+@media(min-width:700px){#thar104 .t104-grid{grid-template-columns:repeat(4,minmax(0,1fr))}#thar104 .t104-chart{grid-column:auto}}
+.t104-modal{position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:12px}
+.t104-mc{position:relative;width:min(560px,100%);max-height:85vh;overflow:auto;background:var(--bg2);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:14px}
+.t104-mc h3{margin:0 0 8px;font-size:15px}
+.t104-x{position:absolute;top:6px;right:12px;font-size:24px;cursor:pointer;color:var(--muted)}
+.t104-mb{position:relative;height:240px}
+@media print{#thar104,.t104-modal{display:none!important}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script id="thar104js">
+/* THAR ERP v1.0.104 - ai_optimizer.js
+   Token-saving AI layer. No voice / speech code. Only ACTIVE TAE records
+   (delayed OR balance > 0) are ever put in a prompt; finished work is dropped.
+   Reads real ERP data via curDB()/statusOf() from index.html when present. */
+(function () {
+  'use strict';
+  var MAX_ROWS = 60;           // hard cap on rows sent to the model
+  var MAX_CHARS = 6000;        // hard cap on context size (~1.5k tokens)
+
+  function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function num(v) { v = parseFloat(v); return isFinite(v) ? v : 0; }
+
+  function allWork() {
+    try {
+      if (typeof window.curDB === 'function') { var d = window.curDB(); if (d && Array.isArray(d.work)) return d.work; }
+      if (window.db && Array.isArray(window.db.work)) return window.db.work;
+    } catch (e) {}
+    return [];
+  }
+
+  // Balance = pieces still pending. Uses the ERP's own status logic when available.
+  function balanceOf(w) {
+    try { if (typeof window.statusOf === 'function') return num(window.statusOf(w).pend); } catch (e) {}
+    if (w.balance != null) return num(w.balance);
+    return Math.max(num(w.qty) - num(w.dispatched || w.done), 0);
+  }
+  function isComplete(w) {
+    try { if (typeof window.statusOf === 'function') return !!window.statusOf(w).complete; } catch (e) {}
+    return balanceOf(w) <= 0;
+  }
+  function lateDays(w) {
+    if (!w.targetDate) return 0;
+    var t = new Date(w.targetDate + 'T00:00:00'), n = new Date(today() + 'T00:00:00');
+    var d = Math.round((n - t) / 864e5);
+    return d > 0 ? d : 0;
+  }
+
+  // Core filter: delayed items OR balance > 0. Everything else is discarded.
+  function activeRecords() {
+    return allWork().filter(function (w) {
+      if (!w) return false;
+      var bal = balanceOf(w);
+      return !isComplete(w) && (bal > 0 || lateDays(w) > 0);
+    }).map(function (w) {
+      return {
+        tae: String(w.orderNo || ''), sub: String(w.subOrder || ''), code: String(w.itemCode || ''),
+        item: String(w.itemName || '').slice(0, 28), buyer: String(w.buyer || ''),
+        qty: num(w.qty), bal: balanceOf(w), due: String(w.targetDate || ''), late: lateDays(w)
+      };
+    }).sort(function (a, b) { return b.late - a.late || b.bal - a.bal; });
+  }
+
+  // Compact pipe-separated rows, no JSON keys, no pretty-printing = fewest tokens.
+  function buildContext(rows, opts) {
+    rows = (rows || activeRecords()).slice(0, (opts && opts.max) || MAX_ROWS);
+    var head = 'TAE|sub|code|item|buyer|qty|bal|due|lateDays';
+    var out = ['today=' + today(), 'active=' + rows.length, head];
+    rows.forEach(function (r) { out.push([r.tae, r.sub, r.code, r.item, r.buyer, r.qty, r.bal, r.due, r.late].join('|')); });
+    var s = out.join('\n');
+    return s.length > MAX_CHARS ? s.slice(0, MAX_CHARS) : s;
+  }
+
+  // Only send rows relevant to the question when it names a TAE / buyer / item.
+  function relevantRows(q) {
+    var rows = activeRecords(), t = String(q || '').toLowerCase().trim();
+    if (!t) return rows;
+    var words = t.split(/[^a-z0-9\u0900-\u097f-]+/).filter(function (x) { return x.length >= 2; });
+    var hit = rows.filter(function (r) {
+      var hay = (r.tae + ' ' + r.sub + ' ' + r.code + ' ' + r.item + ' ' + r.buyer).toLowerCase();
+      return words.some(function (w) { return hay.indexOf(w) > -1; });
+    });
+    return hit.length ? hit : rows;
+  }
+
+  function line(r) { return 'TAE ' + r.tae + (r.sub ? '/' + r.sub : '') + ' ' + (r.code || r.item) + ' | ' + r.buyer + ' | balance ' + r.bal + '/' + r.qty + (r.late ? ' | ' + r.late + 'd late' : ''); }
+  function show(text) {
+    var box = document.getElementById('aiSummaryOutput'); if (!box) return;
+    box.textContent = text; (window.T104S = window.T104S || {}).out = text;
+  }
+  function badge(text) { var b = document.getElementById('tokenSaverStatus'); if (b) b.textContent = text; }
+
+  // --- Local analysis: zero tokens, no network ---
+  window.analyzeActiveTAE = function () {
+    var rows = activeRecords().filter(function (r) { return r.late > 0; });
+    show(rows.length
+      ? rows.length + ' delayed TAE (most late first):\n' + rows.slice(0, 25).map(line).join('\n') + (rows.length > 25 ? '\n+' + (rows.length - 25) + ' more' : '')
+      : 'No delayed items.');
+    badge('Token Optimizer: 0 tokens used');
+  };
+  window.analyzeSingleLeftItems = function () {
+    var rows = activeRecords().filter(function (r) { return r.bal === 1; });
+    show(rows.length ? rows.length + ' TAE with 1 piece left:\n' + rows.slice(0, 40).map(line).join('\n') : 'No TAE with exactly 1 piece left.');
+    badge('Token Optimizer: 0 tokens used');
+  };
+
+  // --- Model call: tiny system prompt + filtered context only ---
+  function cfg() {
+    try {
+      var c = JSON.parse(localStorage.getItem('taeLlm') || 'null');
+      if (!(c && c.key)) return null;
+      var g = c.provider === 'gemini' || (c.provider !== 'grok' && /^(AIza|AQ\.)/.test(c.key));
+      c.url = g ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions' : 'https://api.groq.com/openai/v1/chat/completions';
+      if (!c.model) c.model = g ? 'gemini-3.5-flash-lite' : 'llama-3.3-70b-versatile';
+      return c;
+    } catch (e) { return null; }
+  }
+
+  window.sendOptimizedAIPrompt = async function () {
+    var inp = document.getElementById('aiCustomQuery'), q = inp ? inp.value.trim() : '';
+    if (!q) return;
+    var c = cfg(), rows = relevantRows(q), ctx = buildContext(rows);
+    if (!c || !c.key) {
+      show('No AI key saved. Local answer:\n' + rows.slice(0, 20).map(line).join('\n'));
+      badge('Token Optimizer: local only'); return;
+    }
+    show('Thinking…');
+    try {
+      var url = c.url || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+      var r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key },
+        body: JSON.stringify({
+          model: c.model || 'gemini-3.5-flash-lite', temperature: 0.3, max_tokens: 400,
+          messages: [
+            { role: 'system', content: 'Furniture factory ERP assistant. Answer briefly in plain English using only the data given. bal=pieces pending, lateDays>0 means delayed.' },
+            { role: 'user', content: ctx + '\n\nQ: ' + q.slice(0, 300) }
+          ]
+        })
+      });
+      if (!r.ok) throw new Error('API ' + r.status);
+      var j = await r.json();
+      show(String(j.choices[0].message.content || '').trim());
+      var u = j.usage; badge('Token Optimizer: ' + (u && u.total_tokens ? u.total_tokens + ' tokens' : '~' + Math.ceil((ctx.length + q.length) / 4) + ' tokens'));
+    } catch (e) {
+      show('AI unavailable (' + (e && e.message || 'network') + '). Local answer:\n' + rows.slice(0, 20).map(line).join('\n'));
+      badge('Token Optimizer: local fallback');
+    }
+    if (inp) inp.value = '';
+  };
+
+  window.TharAI = { activeRecords: activeRecords, buildContext: buildContext, allWork: allWork, balanceOf: balanceOf, isComplete: isComplete, today: today };
+})();
+
+/* THAR ERP v1.0.104 - dashboard_charts.js
+   Compact Chart.js trends (needs chart.js loaded first). Sparkline-style: no legend,
+   no gridlines, tiny height. Colours follow the app theme (dark/light). */
+(function () {
+  'use strict';
+  var charts = {};
+  function css(v, f) { var s = getComputedStyle(document.body).getPropertyValue(v).trim(); return s || f; }
+  function num(v) { v = parseFloat(v); return isFinite(v) ? v : 0; }
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function work() { return (window.TharAI && TharAI.allWork()) || []; }
+
+  function lastDays(n) {
+    var out = [], d = new Date();
+    for (var i = n - 1; i >= 0; i--) { var x = new Date(d); x.setDate(d.getDate() - i); out.push(ymd(x)); }
+    return out;
+  }
+  function trend(n) {
+    var days = lastDays(n), entered = {}, pend = {};
+    days.forEach(function (d) { entered[d] = 0; pend[d] = 0; });
+    work().forEach(function (w) {
+      var d = String(w.date || '').slice(0, 10);
+      if (!(d in entered)) return;
+      entered[d] += num(w.qty);
+      pend[d] += TharAI.balanceOf(w);
+    });
+    return { days: days, entered: days.map(function (d) { return entered[d]; }), pend: days.map(function (d) { return pend[d]; }) };
+  }
+
+  function updateStats() {
+    var rows = TharAI.activeRecords(), cbm = 0;
+    work().forEach(function (w) { if (TharAI.isComplete(w)) cbm += num(w.cbm); });
+    var set = function (id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+    set('statTotalTAE', rows.length);
+    set('statPendingItems', rows.filter(function (r) { return r.late > 0; }).length);
+    set('statTotalCBM', cbm.toFixed(2));
+  }
+
+  function make(id, cfg) {
+    var el = document.getElementById(id);
+    if (!el || typeof Chart === 'undefined') return;
+    if (charts[id]) charts[id].destroy();
+    charts[id] = new Chart(el.getContext('2d'), cfg);
+  }
+
+  function compactChart() {
+    var t = trend(7), green = css('--green2', '#34d399'), red = css('--red', '#f43f5e'), muted = css('--muted', '#94a3b8');
+    make('compactProductionChart', {
+      type: 'line',
+      data: {
+        labels: t.days.map(function (d) { return d.slice(5); }),
+        datasets: [
+          { label: 'Entered', data: t.entered, borderColor: green, backgroundColor: green + '33', fill: true, tension: .35, pointRadius: 0, borderWidth: 2 },
+          { label: 'Pending', data: t.pend, borderColor: red, tension: .35, pointRadius: 0, borderWidth: 1.5, borderDash: [4, 3] }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: muted, font: { size: 9 }, maxTicksLimit: 4 }, border: { display: false } },
+          y: { display: false, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  function detailedChart() {
+    var by = {}, muted = css('--muted', '#94a3b8'), blue = css('--blue', '#38bdf8');
+    TharAI.activeRecords().forEach(function (r) { var k = r.buyer || 'N/A'; by[k] = (by[k] || 0) + r.bal; });
+    var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 8);
+    make('detailedAnalyticsChart', {
+      type: 'bar',
+      data: { labels: top, datasets: [{ label: 'Pending pcs', data: top.map(function (k) { return by[k]; }), backgroundColor: blue + 'bb', borderRadius: 4 }] },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { ticks: { color: muted, font: { size: 10 } }, grid: { color: 'rgba(148,163,184,.15)' } }, y: { ticks: { color: muted, font: { size: 10 } }, grid: { display: false } } }
+      }
+    });
+  }
+
+  window.refreshDashboard = function () {
+    try { if (window.TharAI) { updateStats(); compactChart(); } } catch (e) { console.error('dashboard', e); }
+  };
+  window.openAnalyticsModal = function () {
+    var m = document.getElementById('analyticsModal'); if (!m) return;
+    m.style.display = 'flex'; detailedChart();
+  };
+  window.closeAnalyticsModal = function () { var m = document.getElementById('analyticsModal'); if (m) m.style.display = 'none'; };
+
+  document.addEventListener('click', function (e) { if (e.target && e.target.id === 'analyticsModal') window.closeAnalyticsModal(); });
+})();
+
+
+/* ---- Home-tab mount: called after every render() ---- */
+(function () {
+  'use strict';
+  function html() {
+    return '<div id="thar104">' +
+      '<div class="t104-grid">' +
+        '<div class="t104-card"><span>Active TAE</span><b id="statTotalTAE">0</b></div>' +
+        '<div class="t104-card"><span>Delayed</span><b id="statPendingItems" class="t104-red">0</b></div>' +
+        '<div class="t104-card"><span>CBM Finished</span><b id="statTotalCBM">0.00</b></div>' +
+        '<div class="t104-card t104-chart"><div class="t104-box"><canvas id="compactProductionChart"></canvas></div></div>' +
+      '</div>' +
+      '<details class="t104-ai"><summary>\uD83E\uDD16 Smart Assistant <em id="tokenSaverStatus">Token Optimizer: Active</em></summary>' +
+        '<div class="t104-row"><button type="button" class="t104-chip" onclick="analyzeActiveTAE()">Delayed items</button>' +
+        '<button type="button" class="t104-chip" onclick="analyzeSingleLeftItems()">1 piece left</button>' +
+        '<button type="button" class="t104-chip" onclick="openAnalyticsModal()">\uD83D\uDCCA Analyzer</button></div>' +
+        '<div id="aiSummaryOutput" class="t104-out">Tap a button or ask about a TAE / buyer.</div>' +
+        '<div class="t104-row"><input id="aiCustomQuery" placeholder="Ask about a TAE, buyer or pending item..." onkeydown="if(event.key===\'Enter\')sendOptimizedAIPrompt()">' +
+        '<button type="button" class="t104-chip t104-go" onclick="sendOptimizedAIPrompt()">Send</button></div>' +
+      '</details></div>';
+  }
+  function ensureModal() {
+    if (document.getElementById('analyticsModal')) return;
+    var m = document.createElement('div');
+    m.id = 'analyticsModal'; m.className = 't104-modal';
+    m.innerHTML = '<div class="t104-mc"><span class="t104-x" onclick="closeAnalyticsModal()">&times;</span><h3>Pending by Buyer</h3><div class="t104-mb"><canvas id="detailedAnalyticsChart"></canvas></div></div>';
+    document.body.appendChild(m);
+  }
+  window.THAR104 = {
+    mount: function (tab) {
+      if (tab !== 'home') return;
+      var app = document.getElementById('app'); if (!app || document.getElementById('thar104')) return;
+      app.insertAdjacentHTML('afterbegin', html()); ensureModal();
+      var S = window.T104S = window.T104S || {}, dt = document.querySelector('#thar104 details'), ob = document.getElementById('aiSummaryOutput');
+      if (dt) { if (S.open) dt.open = true; dt.addEventListener('toggle', function () { S.open = dt.open; }); }
+      if (ob && S.out) ob.textContent = S.out;
+      if (window.refreshDashboard) window.refreshDashboard();
+    }
+  };
+})();
+
+setTimeout(function(){try{if(window.THAR104&&typeof tab!=='undefined')THAR104.mount(tab)}catch(e){}},0);
+</script>
 </body>
 </html>
