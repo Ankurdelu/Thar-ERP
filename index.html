@@ -1747,7 +1747,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.99-live';
+const APP_VER = 'V1.0.100-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -8969,16 +8969,16 @@ function mdHtml(text){
   return out.join('');
 }
 const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', GEM_MODEL = 'gemini-3.5-flash-lite';
-const OAI_URL = 'https://api.openai.com/v1/chat/completions';
+const XAI_URL = 'https://api.x.ai/v1/chat/completions';
 const PROV = {
   gemini: { name: 'Gemini', url: GEM_URL, def: 'gemini-3.5-flash-lite', ph: 'AIza... / AQ....', fb: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-pro', 'gemini-4-argon'], note: 'Use a Google AI Studio API key. Press Load models to see exactly what your key can use.' },
-  openai: { name: 'ChatGPT', url: OAI_URL, def: 'gpt-6-luna', ph: 'sk-...', fb: ['gpt-6-luna', 'gpt-5.4-mini', 'gpt-6-sol', 'gpt-6-astra'], note: 'ChatGPT Free has no API access, so use an OpenAI API key with billing credit. GPT-6 Luna is the model free ChatGPT runs on; Sol and Astra are the paid-plan models and may need a higher API tier. Press Load models to see exactly what your key can use.' }
+  grok: { name: 'Grok', url: XAI_URL, def: 'grok-4.5', ph: 'xai-...', fb: ['grok-4.5', 'grok-4.20', 'grok-4.1-fast', 'grok-4', 'grok-3', 'grok-3-mini'], note: 'Use an xAI API key from console.x.ai (keys start with xai-). The xAI API needs credits or a billing plan on your xAI account. Press Load models to see exactly what your key can use.' }
 };
-const MODEL_INFO = [[/3\.5.*flash-lite/i, '3.5 Flash-Lite', 'Fastest answers'], [/3\.8.*flash/i, '3.8 Flash', 'All-around help'], [/3\.1.*pro/i, '3.1 Pro', 'Advanced reasoning'], [/argon/i, '4 Argon', 'Complex tasks'], [/gpt-6.*luna/i, 'GPT-6 Luna', 'Free ChatGPT model'], [/gpt-5\.4.*mini/i, 'GPT-5.4 mini', 'Cheap all-rounder'], [/gpt-6.*sol/i, 'GPT-6 Sol', 'Paid plans model'], [/gpt-6.*astra/i, 'GPT-6 Astra', 'Most capable']];
+const MODEL_INFO = [[/3\.5.*flash-lite/i, '3.5 Flash-Lite', 'Fastest answers'], [/3\.8.*flash/i, '3.8 Flash', 'All-around help'], [/3\.1.*pro/i, '3.1 Pro', 'Advanced reasoning'], [/argon/i, '4 Argon', 'Complex tasks'], [/grok-4\.5/i, 'Grok 4.5', 'Latest Grok'], [/grok-4\.20/i, 'Grok 4.20', 'Advanced reasoning'], [/grok-4\.1.*fast/i, 'Grok 4.1 Fast', 'Fast and cheap'], [/grok-4(?!\.)/i, 'Grok 4', 'Strong all-rounder'], [/grok-3/i, 'Grok 3', 'Reliable classic']];
 const THINK = [['low', 'Low', 'Quick and efficient'], ['medium', 'Medium', 'Balanced depth'], ['high', 'High', 'Extra thorough']];
 const modelRank = id => { const i = MODEL_INFO.findIndex(x => x[0].test(id)); return i < 0 ? 99 : i; };
 const modelLabel = id => { const m = MODEL_INFO.find(x => x[0].test(id)); return m ? m[1] + ' \u2014 ' + m[2] : String(id).replace(/^gemini-/, ''); };
-function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (c.provider !== 'gemini' && c.provider !== 'openai') c.provider = /^(AIza|AQ\.)/.test(c.key) ? 'gemini' : 'openai'; c.url = PROV[c.provider].url; if (c.provider === 'gemini') { if (!c.model || /^gpt/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } else if (!c.model || /^gemini/i.test(c.model)) c.model = PROV.openai.def; if (!['low', 'medium', 'high'].includes(c.think)) c.think = 'low'; return c; } catch (_) { return null; } }
+function llmCfg() { try { const c = JSON.parse(localStorage.getItem('taeLlm') || 'null'); if (!(c && c.key)) return null; if (c.provider !== 'gemini' && c.provider !== 'grok') { if (c.provider === 'openai' || /^sk-/.test(c.key)) return null; c.provider = /^(AIza|AQ\.)/.test(c.key) ? 'gemini' : 'grok'; } c.url = PROV[c.provider].url; if (c.provider === 'gemini') { if (!c.model || /^(gpt|grok)/i.test(c.model) || /^gemini-(2\.0|2\.5)-flash/.test(c.model)) c.model = GEM_MODEL; } else if (!c.model || !/^grok/i.test(c.model)) c.model = PROV.grok.def; if (!['low', 'medium', 'high'].includes(c.think)) c.think = 'low'; return c; } catch (_) { return null; } }
 window.__llmCfg = llmCfg; const LLM_HIST = [];
 function dataDigest() {
   try {
@@ -9007,7 +9007,7 @@ async function listModels(c) {
   const r = await fetch(llmBase(c) + '/models', { headers: { Authorization: 'Bearer ' + c.key } });
   if (!r.ok) throw new Error('API ' + r.status);
   const j = await r.json(); let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-  if (c.provider === 'openai') ids = ids.filter(i => /^(gpt|chatgpt|o\d)/i.test(i) && !/embed|tts|whisper|audio|realtime|image|dall|moderation|transcribe|search|instruct|codex|davinci|babbage|sora/i.test(i));
+  if (c.provider === 'grok') ids = ids.filter(i => /^grok/i.test(i) && !/embed|image|imagine|video|vision-|tts|whisper|audio|realtime|moderation|transcribe|aurora/i.test(i));
   else ids = ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
   return [...new Set(ids)].sort().reverse();
 }
@@ -9018,14 +9018,14 @@ async function checkLlm() {
 }
 async function llm(c, text, ctx) {
   const names = []; STORD.forEach(k => candNames(k, null).forEach(v => names.push(v.name)));
-  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or ChatGPT style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown for casual chat, emojis only rarely. ' + window.TAE_FMT + 'Inside the JSON "reply" string write line breaks as \\n; when you output the Markdown dashboard, separate every heading, table row and the --- line with \\n so each sits on its own line and the JSON stays valid. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
+  const sys = 'You are the assistant inside a furniture factory ERP and also a general-purpose AI that chats like a modern AI assistant (Gemini or Grok style): warm, natural and human, like a smart friend chatting. The user writes English, Hindi or Hinglish (Roman letters) and may ask ANYTHING (factory data, personal, general, advice, chit-chat). The user may write Hindi or Hinglish, understand it, but ALWAYS write the "reply" in plain English only, never in Hindi or Hinglish. STYLE of "reply": short natural sentences, friendly tone, answer directly, and when it fits end with a light follow-up question (for a plain "Hi" say something like "Hi! How are you? What would you like to do today?"). Never sound like a bot or a menu: no "As an AI", no list of commands unless asked, no markdown for casual chat, emojis only rarely. ' + window.TAE_FMT + 'Inside the JSON "reply" string write line breaks as \\n; when you output the Markdown dashboard, separate every heading, table row and the --- line with \\n so each sits on its own line and the JSON stays valid. Reply ONLY with strict JSON {"cmd":"","reply":""}. '
     + 'SPEECH INPUT: text may come from Hindi speech recognition and contain errors. Keep every number digit-for-digit as spoken (Hindi number words become digits, e.g. do sau pachaas = 250). Contractor, buyer and craft names are proper nouns: keep them exactly as spoken, match them phonetically to the lists below, never swap in a different name, and ask if two names are equally close or none matches. '
     + 'RULE 1: If the user wants to UPDATE progress, ENTER a new entry, or SEARCH/FIND something, translate it into ONE English command in "cmd" and leave "reply" empty. Command forms: "<TAE no> <contractor> <sanding|polish|carpenter|fitting> <done> of <allocated>" (comma separated for several); "pending for <name>"; "delayed"; "today production"; "brief"; "find <text>"; new entry = "new tae <no> sub order <no> item code <code> item name <name> buyer <buyer> size <LxWxH> qty <n> cbm <n> supplier <name> date <date>" (only fields the user gave). Never invent numbers or names; the app asks the user to Confirm before saving. '
     + 'RULE 2: If the user asks a QUESTION about the factory data (who has what, how many pending, status, totals), answer in "reply" using ONLY the DATA below; be precise, list TAE/sub order, item and numbers; if the data does not contain it, say so. '
     + 'RULE 3: Anything else (personal or general question) - answer helpfully in "reply". If the user asks for help or what you can do, explain in your own words (update contractor progress, add new entries, find entries, pending, delayed, today production, brief, questions about the data); never paste a fixed template. '
     + 'STAGE RULE: never guess the stage, and the word "entry" is NOT a stage. If the user names a contractor but no stage, use the stage whose list below contains that contractor; if the name is in several lists or in none, leave "cmd" empty and ask in "reply" which stage (sanding, polish, carpenter or fitting) is meant. Contractors by stage: ' + STORD.map(k => STL[k] + ': ' + candNames(k, null).map(v => v.name).join(', ')).join(' | ') + '. Buyers: ' + (A().buyers || []).slice(0, 40).join(', ') + '.\nDATA (live entries):\n' + dataDigest();
   const msgs = [{ role: 'system', content: sys + (ctx ? '\nPENDING DRAFT awaiting the user\'s confirmation: ' + ctx + '. If the user message corrects or changes it (stage, contractor, pcs), output the FULL corrected command in "cmd", keeping every unchanged detail of the draft. If it is only a question, answer in "reply".' : '') }].concat(LLM_HIST.slice(-8), [{ role: 'user', content: text.slice(0, 4000) }]);
-  const isG = c.provider !== 'openai';
+  const isG = c.provider === 'gemini';
   const post = (extra, plain) => fetch(c.url || GEM_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.key }, body: JSON.stringify(Object.assign({ model: c.model || GEM_MODEL, messages: msgs }, (isG && !plain) ? { temperature: 0.6 } : {}, extra)) });
   let r = await post({ reasoning_effort: c.think || 'low' }); if (r.status === 400) r = await post({}, true);
   if (!r.ok) { let m = ''; try { m = (await r.json()); m = (m[0] || m).error.message; } catch (_) {} throw new Error('API ' + r.status + (m ? ': ' + String(m).slice(0, 160) : '')); }
@@ -9036,7 +9036,7 @@ async function llm(c, text, ctx) {
   LLM_HIST.push({ role: 'user', content: text.slice(0, 1000) }, { role: 'assistant', content: (cmd || reply).slice(0, 1500) }); if (LLM_HIST.length > 16) LLM_HIST.splice(0, 2);
   return { cmd, reply };
 }
-// ---------- SAVED AIs (several Gemini / ChatGPT keys, none is ever overwritten) ----------
+// ---------- SAVED AIs (several Gemini / Grok keys, none is ever overwritten) ----------
 function saveProfs(P) {
   try {
     localStorage.setItem('taeLlmProfiles', JSON.stringify(P));
@@ -9046,11 +9046,11 @@ function saveProfs(P) {
   } catch (_) {}
 }
 function profs() {
-  try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) return p; } catch (_) {}
+  try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) { const n = p.list.length; p.list = p.list.filter(x => x && PROV[x.provider]); if (p.list.length !== n) { if (!p.list.some(x => x.id === p.active)) p.active = ''; saveProfs(p); } return p; } } catch (_) {}
   const p = { list: [], active: '' };
   try {
     const all = JSON.parse(localStorage.getItem('taeLlmAll') || '{}') || {}, a = llmCfg();
-    ['gemini', 'openai'].forEach(pr => { const x = a && a.provider === pr ? a : all[pr]; if (x && x.key) p.list.push({ id: 'a' + pr[0], provider: pr, label: PROV[pr].name + ' 1', key: x.key, model: x.model || PROV[pr].def, think: x.think || 'low' }); });
+    ['gemini', 'grok'].forEach(pr => { const x = a && a.provider === pr ? a : all[pr]; if (x && x.key) p.list.push({ id: 'a' + pr[0], provider: pr, label: PROV[pr].name + ' 1', key: x.key, model: x.model || PROV[pr].def, think: x.think || 'low' }); });
     const hit = a && p.list.find(x => x.key === a.key); p.active = hit ? hit.id : '';
     if (p.list.length) saveProfs(p);
   } catch (_) {}
@@ -9074,7 +9074,7 @@ function cfg() {
   const box = document.getElementById('taeBox'); if (!box) return; const old = document.getElementById('taeSet'); if (old) old.remove();
   const ov = document.createElement('div'); ov.id = 'taeSet';
   let P = profs(), cur = P.active && P.list.some(x => x.id === P.active) ? P.active : (P.list[0] ? P.list[0].id : 'new'), prov = 'gemini';
-  ov.innerHTML = '<div class="tsC"><h3>AI settings</h3><div class="tsSt" id="tsSt"></div><label>Saved AIs</label><select id="tsAcc"></select><label>Name (optional)</label><input id="tsName" autocomplete="off" placeholder="Auto, e.g. Gemini 2"><label>AI provider</label><select id="tsProv"><option value="gemini">Gemini (Google)</option><option value="openai">ChatGPT (OpenAI)</option></select><div class="tsNote" id="tsNote"></div><label>API key</label><input id="tsKey" type="password" autocomplete="off"><label>Model</label><select id="tsMod"></select><label>Thinking level</label><select id="tsThink"></select><div class="tsR"><button id="tsLoad">Load models</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save &amp; use</button><button id="tsOff">Remove this one</button><button id="tsX">Close</button></div></div>';
+  ov.innerHTML = '<div class="tsC"><h3>AI settings</h3><div class="tsSt" id="tsSt"></div><label>Saved AIs</label><select id="tsAcc"></select><label>Name (optional)</label><input id="tsName" autocomplete="off" placeholder="Auto, e.g. Gemini 2"><label>AI provider</label><select id="tsProv"><option value="gemini">Gemini (Google)</option><option value="grok">Grok (xAI)</option></select><div class="tsNote" id="tsNote"></div><label>API key</label><input id="tsKey" type="password" autocomplete="off"><label>Model</label><select id="tsMod"></select><label>Thinking level</label><select id="tsThink"></select><div class="tsR"><button id="tsLoad">Load models</button><button id="tsTest">Test connection</button></div><div class="tsR"><button id="tsSave" class="tsP">Save &amp; use</button><button id="tsOff">Remove this one</button><button id="tsX">Close</button></div></div>';
   box.appendChild(ov); ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) ov.remove(); });
   const $ = i => ov.querySelector('#' + i), st = $('tsSt'), sel = $('tsMod'), tk = $('tsThink'), pv = $('tsProv'), acc = $('tsAcc'), nm = $('tsName');
   const fill = (ids, cur2) => { const l = [...new Set([cur2].concat(ids).filter(Boolean))].sort((a, b) => modelRank(a) - modelRank(b)); sel.innerHTML = l.map(i => '<option value="' + i + '"' + (i === cur2 ? ' selected' : '') + '>' + modelLabel(i) + '</option>').join(''); };
@@ -9927,7 +9927,7 @@ function langRule(text){const k=langKind(text);return 'REPLY LANGUAGE: reply in 
 async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. '+(LIVE.on?LIVE_RULES:langRule(text)+'Keep replies short. ')+'Formatting rules for every field you stage: buyer uses a hyphen instead of a space (M 2 = M-2); size uses the × sign between numbers (140×45×75); supplier is the registered supplier name (a supplier code means that registered name); item code has no spaces around - or /. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
-const res=await tfetch(c.url||'https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
+const res=await tfetch(c.url||'https://api.x.ai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},body:JSON.stringify({model:c.model,messages,tools,tool_choice:'auto'})});
 if(!res.ok){let eb='';try{eb=(await res.text()).slice(0,200)}catch(e){}throw Error('AI API error '+res.status+(eb?': '+eb:''))}const j=await res.json(),m=j.choices?.[0]?.message;if(!m)throw Error('AI returned an empty response');messages.push(m);
 if(!m.tool_calls?.length){TX.turns.push({role:'user',content:text},{role:'assistant',content:m.content||'I could not complete that request.'});TX.turns=TX.turns.slice(-16);return m.content||'I could not complete that request.';}
 for(const tc of m.tool_calls){let args={};try{args=JSON.parse(tc.function.arguments||'{}')}catch(e){}let result;try{result=provisional(tc.function.name,args)}catch(e){result={error:String(e.message||e)}}messages.push({role:'tool',tool_call_id:tc.id,content:JSON.stringify(result)});}
@@ -10434,9 +10434,9 @@ async function pdfFile(f){
 function getCfg(){
   try{if(typeof window.__llmCfg==='function'){var c=window.__llmCfg();if(c)return c}}catch(e){}
   try{var s=JSON.parse(localStorage.getItem('taeLlm')||'null');if(!(s&&s.key))return null;
-    var g=s.provider==='gemini'||(s.provider!=='openai'&&/^(AIza|AQ\.)/.test(s.key));
-    s.url=g?'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions':'https://api.openai.com/v1/chat/completions';
-    if(g){if(!s.model||/^gpt/i.test(s.model))s.model='gemini-3.5-flash-lite'}else if(!s.model||/^gemini/i.test(s.model))s.model='gpt-6-luna';
+    var g=s.provider==='gemini'||(s.provider!=='grok'&&/^(AIza|AQ\.)/.test(s.key));
+    s.url=g?'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions':'https://api.x.ai/v1/chat/completions';
+    if(g){if(!s.model||/^(gpt|grok)/i.test(s.model))s.model='gemini-3.5-flash-lite'}else if(!s.model||!/^grok/i.test(s.model))s.model='grok-4.5';
     return s}catch(e){return null}}
 function fetchT(u,o){var ac=new AbortController(),t=setTimeout(function(){ac.abort()},90000);return fetch(u,Object.assign({},o,{signal:ac.signal})).catch(function(e){throw Error(e&&e.name==='AbortError'?'The AI took too long (90 s)':String((e&&e.message)||e))}).finally(function(){clearTimeout(t)})}
 async function askAI(imgs,txt,note){
@@ -10502,7 +10502,7 @@ async function run(parts,label,note){
     if(!imgs.length)throw Error('No page found');
     var d=await askAI(imgs.slice(0,8),txt,note);report(stage(d));
   }catch(e){
-    if(e.message==='NOAI')say('An AI key is needed to read a photo or PDF. Open the assistant menu, add a Gemini or ChatGPT API key under Model, then send it again.');
+    if(e.message==='NOAI')say('An AI key is needed to read a photo or PDF. Open the assistant menu, add a Gemini or Grok API key under Model, then send it again.');
     else say('Could not read the sheet: '+(e.message||e)+'. Retake the photo flat and clear and try again.');
   }finally{a.hold(-1)}
 }
@@ -10557,6 +10557,7 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.100-live: ChatGPT/OpenAI replaced by Grok (xAI, grok-4.5 default) in Assistant, AI Pro, Dynamic AI and order-sheet scan; old OpenAI keys are dropped automatically.
   V1.0.99-live: Desktop-site mode fix: no empty left column, bottom nav no longer squashed; master admin long-press works in desktop mode.
   V1.0.98-live: New Graphics setting (Settings > Graphics): Low (no effects, no animation, default on new install), Medium (normal), High (all effects).
   V1.0.97-live: Bot Studio (size/outfit/look) button is back in the chat history menu; Work List, Order List, Search, Stat and Production lists now load in chunks while scrolling (no freeze).
@@ -10566,7 +10567,7 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
   V1.0.90-live: Classic camera, attachment tray, message box (field chips), entry logic and tools (Help, Format, Brief, Undo, Redo, Drafts) work inside the chat; Classic entry workflow merged into the chat (order sheet -> entry card -> Confirm & save / Save to Draft / Keep editing / Discard); Classic mode link removed.
   V1.0.89-live: AI Pro input bar restored: Camera + PDF/Photo buttons, attachment chip above the input, file + text sent together to the AI.
   V1.0.88-live: drawer key list with a per-key editor (key, label, account email, model, load models, test connection).
-  V1.0.87-live: plain-English quick options, automatic reply language, drawer with Gemini/ChatGPT key manager, Theme/Settings, top bar cleanup.
+  V1.0.87-live: plain-English quick options, automatic reply language, drawer with Gemini/Grok key manager, Theme/Settings, top bar cleanup.
   V1.0.84-live: Attendance read/write, CBM + totals tools, rename-contractor edits, edit branches (1/2 > ),
   assistant memory, copy/regenerate, quick chips, richer Markdown, voice language switch, sliding panel)
   Self-contained module: CSS + JS in one block, injected before </body>.
@@ -11092,7 +11093,7 @@ async function send(text, voice) {
     const d = ATTD.get(um.ts); save(); busy = true; AC = new AbortController(); draw();
     let done = false;
     try { done = await enScan(d, text); }
-    catch (e) { done = true; eSay(e.name === 'AbortError' ? 'Stopped.' : e.message === 'NOKEY' ? 'No AI key is active. Open the menu, choose Gemini or ChatGPT under Model, and add or select an API key.' : 'Could not read the sheet: ' + (e.message || e) + '. Retake the photo flat and clear and try again.'); }
+    catch (e) { done = true; eSay(e.name === 'AbortError' ? 'Stopped.' : e.message === 'NOKEY' ? 'No AI key is active. Open the menu, choose Gemini or Grok under Model, and add or select an API key.' : 'Could not read the sheet: ' + (e.message || e) + '. Retake the photo flat and clear and try again.'); }
     busy = false;
     if (done) { save(); draw(); enShow(); smartTitle(); return; }
   }
@@ -11102,7 +11103,7 @@ async function go(voice) {
   busy = true; AC = new AbortController(); draw();
   let out;
   try { out = await agent(); }
-  catch (e) { out = e.name === 'AbortError' ? 'Stopped ⏹' : e.message === 'NOKEY' ? '⚠ No AI key is active. Open the menu, choose Gemini or ChatGPT under Model, and add or select an API key.' : '⚠ AI error: ' + e.message; }
+  catch (e) { out = e.name === 'AbortError' ? 'Stopped ⏹' : e.message === 'NOKEY' ? '⚠ No AI key is active. Open the menu, choose Gemini or Grok under Model, and add or select an API key.' : '⚠ AI error: ' + e.message; }
   busy = false; if (out) S.messages.push({ role: 'assistant', text: out, ts: Date.now() });
   save(); draw(); if (out) say(out); smartTitle();
 }
@@ -11384,17 +11385,17 @@ function fit() { const t = $('#apIn'); t.style.height = 'auto'; t.style.height =
    'taeLlm' = the ACTIVE key used for API calls). Same format as the ERP Assistant settings. */
 const AIP = {
   gemini: { name: 'Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', def: 'gemini-3.5-flash-lite', models: [['gemini-3.5-flash-lite', '3.5 Flash-Lite'], ['gemini-3.8-flash', '3.8 Flash'], ['gemini-3.1-pro', '3.1 Pro'], ['gemini-4-argon', '4 Argon']] },
-  openai: { name: 'ChatGPT', url: 'https://api.openai.com/v1/chat/completions', def: 'gpt-6-luna', models: [['gpt-6-luna', 'GPT-6 Luna'], ['gpt-5.4-mini', 'GPT-5.4 mini'], ['gpt-6-sol', 'GPT-6 Sol'], ['gpt-6-astra', 'GPT-6 Astra']] }
+  grok: { name: 'Grok', url: 'https://api.x.ai/v1/chat/completions', def: 'grok-4.5', models: [['grok-4.5', 'Grok 4.5'], ['grok-4.20', 'Grok 4.20'], ['grok-4.1-fast', 'Grok 4.1 Fast'], ['grok-4', 'Grok 4'], ['grok-3', 'Grok 3']] }
 };
 let aiView = 'gemini', aiInit = false;
 const aiMask = k => { k = String(k || ''); return k.length > 10 ? k.slice(0, 4) + '\u2022\u2022\u2022\u2022' + k.slice(-4) : '\u2022\u2022\u2022\u2022'; };
 const aiModelName = (pr, id) => { const m = AIP[pr].models.find(x => x[0] === id); return m ? m[1] : id; };
 function aiProfs() {
-  try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) return p; } catch (e) { }
+  try { const p = JSON.parse(localStorage.getItem('taeLlmProfiles') || 'null'); if (p && Array.isArray(p.list)) { const n = p.list.length; p.list = p.list.filter(x => x && AIP[x.provider]); if (p.list.length !== n) { if (!p.list.some(x => x.id === p.active)) p.active = ''; aiSave(p); } return p; } } catch (e) { }
   const p = { list: [], active: '' };
   try {   // migrate a single key saved by an older version
     const c = JSON.parse(localStorage.getItem('taeLlm') || 'null');
-    if (c && c.key) { const pr = c.provider === 'openai' || c.provider === 'gemini' ? c.provider : (/^(AIza|AQ\.)/.test(c.key) ? 'gemini' : 'openai'); p.list.push({ id: 'a' + pr[0], provider: pr, label: AIP[pr].name + ' 1', key: c.key, model: c.model || AIP[pr].def, think: c.think || 'low' }); p.active = p.list[0].id; }
+    if (c && c.key) { const pr = c.provider === 'grok' || c.provider === 'gemini' ? c.provider : (/^(AIza|AQ\.)/.test(c.key) ? 'gemini' : (/^sk-/.test(c.key) ? '' : 'grok')); if (pr) p.list.push({ id: 'a' + pr[0], provider: pr, label: AIP[pr].name + ' 1', key: c.key, model: c.model || AIP[pr].def, think: c.think || 'low' }); if (p.list.length) p.active = p.list[0].id; }
   } catch (e) { }
   return p;
 }
@@ -11504,8 +11505,8 @@ async function kLoad() {
   try {
     const j = await kFetch(AIP[kProv].url.replace(/\/chat\/completions\/?$/, '') + '/models', { headers: { Authorization: 'Bearer ' + key } });
     let ids = (j.data || j.models || []).map(m => String(m.id || m.name || '').replace(/^models\//, '')).filter(Boolean);
-    ids = kProv === 'openai'
-      ? ids.filter(i => /^(gpt|chatgpt|o\d)/i.test(i) && !/embed|tts|whisper|audio|realtime|image|dall|moderation|transcribe|search|instruct|codex|davinci|babbage|sora/i.test(i))
+    ids = kProv === 'grok'
+      ? ids.filter(i => /^grok/i.test(i) && !/embed|image|imagine|video|vision-|tts|whisper|audio|realtime|moderation|transcribe|aurora/i.test(i))
       : ids.filter(i => /^gemini/.test(i) && !/embed|tts|image|aqa|live|audio|robotics|computer|vision/i.test(i));
     ids = [...new Set(ids)].sort().reverse(); if (!ids.length) throw new Error('No usable models were returned for this key');
     kFill(ids, kq('#apKMs').value); kq('#apKMs').onchange();
@@ -11520,8 +11521,9 @@ function kUpdModel() {
 function kSave() {
   const key = kq('#apKV').value.trim(), P = aiProfs(); let self = kEd === 'new' ? null : P.list.find(z => z.id === kEd);
   if (!key) return kMsg('The API key is empty', 1);
-  if (kProv === 'gemini' && /^sk-/.test(key)) return kMsg('This looks like a ChatGPT key. Use the ChatGPT tab.', 1);
-  if (kProv === 'openai' && /^(AIza|AQ\.)/.test(key)) return kMsg('This looks like a Gemini key. Use the Gemini tab.', 1);
+  if (kProv === 'gemini' && /^xai-/.test(key)) return kMsg('This looks like a Grok key. Use the Grok tab.', 1);
+  if (/^sk-/.test(key)) return kMsg('This looks like an OpenAI (ChatGPT) key, which is no longer supported. Use a Gemini or Grok key.', 1);
+  if (kProv === 'grok' && /^(AIza|AQ\.)/.test(key)) return kMsg('This looks like a Gemini key. Use the Gemini tab.', 1);
   const label = kq('#apKL').value.trim().slice(0, 30) || (self ? self.label : aiNextLabel(P, kProv));
   if (P.list.some(z => z !== self && z.label.toLowerCase() === label.toLowerCase())) return kMsg('Another key already uses the label "' + label + '"', 1);
   const model = kq('#apKMs').value || AIP[kProv].def, email = kq('#apKE').value.trim().slice(0, 120), fresh = !self;
@@ -11597,7 +11599,7 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="openai">ChatGPT</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apBot">🎨 Bot Studio (size, outfit, look)</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Grok</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apBot">🎨 Bot Studio (size, outfit, look)</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
   root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root);
   try { const A = window.TAE_ASSISTANT; if (A && !A.__apSay) { const o = A.say; A.say = function (t) { eSay(t); return true; }; A.__apSay = 1; }
     if (A && A.log && !A.log.__ap) { const op = A.log.push; A.log.push = function (m) { const r = op.apply(this, arguments); try { if (m && m.who === 'b') eSay(m.text || '', { html: m.html, cc: m.chips }); } catch (e) { } return r; }; A.log.__ap = 1; } } catch (e) { }
