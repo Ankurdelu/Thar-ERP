@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
+<script>(function(){var L='low',K='thar_gfx_v1';try{var v=localStorage.getItem(K);if(v==='low'||v==='medium'||v==='high')L=v;else{if(localStorage.getItem('attendanceProFactory_v4'))L='medium';localStorage.setItem(K,L);}}catch(e){}window.__gfx=L;window.__gfxLow=(L==='low');document.documentElement.setAttribute('data-gfx',L);})();</script>
 <meta name="format-detection" content="telephone=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -422,6 +423,16 @@ body.light .card{background:rgba(255,255,255,.96)}
 .stat{transition:transform .3s cubic-bezier(.22,1,.36,1),border-color .3s,box-shadow .3s}
 .day{transition:transform .2s,background .2s,border-color .2s}
 .item.wc{content-visibility:auto;contain-intrinsic-size:auto 230px}
+#wlList .item,#wlList .wc,#olList .item,#olList .wc,#msResults .item,#msResults .wc,#statList .item,#statList .wc,#prfList .item,#prfList .wc{content-visibility:auto;contain-intrinsic-size:auto 130px}
+.ck-sent{height:1px;width:100%;pointer-events:none}
+/* ===== V1.0.98 Graphics: Low = no effects, no animation | Medium = normal | High = everything ===== */
+html[data-gfx="low"] *,html[data-gfx="low"] *::before,html[data-gfx="low"] *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;text-shadow:none!important;filter:none!important;will-change:auto!important}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .logo{animation:logoPulse 3.2s ease-in-out infinite!important}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) #clkTime{animation:clkGlow 2.4s ease-in-out infinite alternate!important}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .progress-bar-fill::after{animation:shimmer 2.2s ease-in-out infinite!important}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .btn:hover,html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .chip:hover{transform:translateY(-2px) scale(1.03)}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .card:hover{transform:translateY(-3px);border-color:var(--blue)}
+html[data-gfx="high"] body:not(.ut-a-off):not(.ut-a-low) .nav button:active strong{transform:translateY(-6px) scale(1.2)}
 
 
 .logo{animation:none;box-shadow:var(--glow-primary)}
@@ -497,6 +508,8 @@ body.light .card{box-shadow:0 4px 14px rgba(15,23,42,.08)}
 body.auth header.top, body.auth nav.nav, body.auth main.wrap{display:none!important}
 .top .actions{margin-left:auto;flex-wrap:nowrap;align-items:center;align-self:flex-start}
 .role-btn{font-size:11.5px!important;min-height:30px!important;padding:5px 12px!important;border-radius:999px!important;font-weight:800;white-space:nowrap;background:rgba(245,158,11,.16);border:1px solid rgba(245,158,11,.55);color:var(--amber)}
+body.emp #bkAllBtn,body.auth #bkAllBtn{display:none!important}
+.bk-all-btn{background:rgba(16,185,129,.16)!important;border-color:rgba(16,185,129,.55)!important;color:var(--green2,#10b981)!important}
 body:not(.emp) .role-btn{background:rgba(var(--blue-rgb),.14);border-color:rgba(var(--blue-rgb),.5);color:var(--blue)}
 body.emp #settingsBtn,body.emp:not(.sub) .nav button[data-tab="attendance"],body.emp .emp-hide,
 body.emp [onclick*="openWorkEntry("],body.emp:not(.sub) [onclick*="openOrderEntry("],body.emp [onclick*="openOldChooser("],body.emp [onclick*="pickOld("],
@@ -635,9 +648,21 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Rob
 
 
 @media (min-width:900px) and (pointer:coarse){
+  body{font-size:16px}
+  .btn{min-height:50px}
+}
+@media (min-width:1024px) and (pointer:coarse){
   body{font-size:17px}
   .nav{width:110px}body{padding-left:110px}
   .btn{min-height:54px}
+}
+/* Desktop-site mode on a phone (about 900-1023px wide): bottom nav stays a clean centered bar, no empty left column */
+@media (min-width:768px) and (max-width:1023px){
+  body{padding-left:0!important}
+  .nav{left:0!important;right:0!important;margin:0 auto!important;width:min(560px,calc(100% - 24px))!important;max-width:560px!important;flex-direction:row!important}
+  .nav button{flex:1 1 0!important;min-width:0!important;width:auto!important}
+  .nav button{white-space:normal;text-align:center;line-height:1.15;overflow-wrap:anywhere}
+  .wrap{margin-left:auto!important;margin-right:auto!important}
 }
 
 
@@ -825,6 +850,7 @@ body.ut-dragging *, body.ut-dragging *::before, body.ut-dragging *::after { tran
       <h1 id="brandTitle">THAR ERP</h1>
       <small id="profileLine"></small>
     </div>
+    <button id="bkAllBtn" class="btn smallbtn role-btn bk-all-btn" onclick="event.stopPropagation();backupAll()">Backup</button>
   </div>
   <div class="actions">
     <button id="usersBtn" class="btn smallbtn users-btn hidden" onclick="openUsers()">👥 Users <span id="usersBadge" class="ubadge zero">0</span></button>
@@ -1721,7 +1747,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.95-live';
+const APP_VER = 'V1.0.99-live';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2107,9 +2133,16 @@ async function driveList(q) {
   if (!r.ok) throw new Error('Drive list failed (' + r.status + ')'); return (await r.json()).files || [];
 }
 async function driveStream(idv) { const t = await driveAuth(), r = await fetch('https://www.googleapis.com/drive/v3/files/' + idv + '?alt=media', { headers: { Authorization: 'Bearer ' + t } }); if (!r.ok) throw new Error('Drive download failed (' + r.status + ')'); return r.body; }
+async function driveFindBackup(name) {
+  const t = await driveAuth(), esq = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const find = async q => { const r = await fetch('https://www.googleapis.com/drive/v3/files?pageSize=10&orderBy=' + encodeURIComponent('modifiedTime desc') + '&fields=' + encodeURIComponent('files(id,name)') + '&q=' + encodeURIComponent(q), { headers: { Authorization: 'Bearer ' + t } }); if (!r.ok) throw new Error('Drive search failed (' + r.status + ')'); return (await r.json()).files || []; };
+  let L = await find("trashed=false and name='" + esq(name) + "'");
+  if (!L.length) L = await find("trashed=false and name contains '" + esq(name.replace(/\.json$/i, '')) + "-'");
+  return L.length ? L[0].id : null;
+}
 async function driveUpload(file, name, existingId) {
   const t = await driveAuth(), base = 'https://www.googleapis.com/upload/drive/v3/files';
-  const init = await fetch(existingId ? base + '/' + existingId + '?uploadType=resumable' : base + '?uploadType=resumable', { method: existingId ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json; charset=UTF-8' }, body: JSON.stringify(existingId ? {} : { name }) });
+  const init = await fetch(existingId ? base + '/' + existingId + '?uploadType=resumable' : base + '?uploadType=resumable', { method: existingId ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json; charset=UTF-8' }, body: JSON.stringify(existingId ? (name ? { name } : {}) : { name }) });
   if (!init.ok) throw new Error('Drive upload start failed (' + init.status + ')');
   const url = init.headers.get('Location'); if (!url) throw new Error('Drive did not return an upload address');
   const CH = 8 * 1024 * 1024, size = file.size; let off = 0;
@@ -2167,10 +2200,55 @@ async function driveMerge(i) {
   try { const rd = await readBackup(await driveStream(f.id), { size: Number(f.size || 0), onProg: (b, l) => prog.set(fmtB(b) + ' · ' + l.toLocaleString() + ' records', null) }); prog.close(); if ((rd.ver.state === 'bad' || rd.ver.state === 'nofooter') && !confirm('⚠ ' + rd.ver.msg + '\nMerge anyway?')) return; const n = mergeRD(rd); render(); toast('Merged ' + n + ' new records!'); }
   catch (e) { prog.close(); alert(e.message); }
 }
-async function driveBackupUp() {
+const DRIVE_BK_NAME = 'Thar-Full-Backup.json';
+async function driveBackupUp(quiet) {
   const prog = progressUI('Uploading full backup to Drive');
-  try { const o = await produceFile('full', w => dumpDB(w, { kind: 'full', meta: metaOf(db), stores: { work: db.work, orders: db.orders, repairs: db.repairs } })); await driveUpload(o.file, 'Thar-Full-Backup-' + todayStr() + '.json', null); setTimeout(() => o.drop(), 60000); toast('☁ Uploaded to Drive'); }
-  catch (e) { alert('Upload failed: ' + e.message); } finally { prog.close(); }
+  try {
+    const exId = await driveFindBackup(DRIVE_BK_NAME);   // same file is overwritten, no new copy every time
+    const o = await produceFile('full', w => dumpDB(w, { kind: 'full', meta: metaOf(db), stores: { work: db.work, orders: db.orders, repairs: db.repairs } }));
+    await driveUpload(o.file, DRIVE_BK_NAME, exId); setTimeout(() => o.drop(), 60000); toast(exId ? '☁ Drive backup updated (overwritten)' : '☁ Uploaded to Drive'); return true;
+  }
+  catch (e) { driveBackupUp.err = e.message; if (!quiet) alert('Upload failed: ' + e.message); return false; } finally { prog.close(); }
+}
+
+/* ===== V1.0.96: one-click Backup button (header) — Full backup + all Work/Order series + Google Drive ===== */
+let BKALL_BUSY = false;
+async function backupAll() {
+  if (BKALL_BUSY) return toast('Backup already running…');
+  if (typeof isEmployeeMode !== 'undefined' && isEmployeeMode) return;
+  if (isViewMode) return toast('Exit the old backup view first');
+  BKALL_BUSY = true;
+  const done = [];
+  let driveOk = false, driveWhy = '';
+  try {
+    // Google sign-in must start from the tap itself, so do it first
+    if (!db.settings.driveClientId) driveWhy = 'Google Drive is not connected (no Client ID).';
+    else { try { await driveAuth(); } catch (e) { driveWhy = e.message || 'Google sign-in failed.'; } }
+    // offline backups
+    if (rootDir && folderPerm) { try { await mirrorNow(true); done.push('Live snapshot'); } catch (_) {} }
+    await backupFullDB(); done.push('Full backup');
+    if (rootDir && folderPerm) {
+      for (const kind of ['work', 'order']) {
+        const list = seriesCached(kind).map(s => s.name);
+        for (const n of list) { await downloadSeriesBackup(n, kind); }
+        if (list.length) done.push((kind === 'order' ? 'Order' : 'Work') + ' backups (' + list.length + ')');
+      }
+    }
+    // Google Drive
+    if (!driveWhy) { driveOk = await driveBackupUp(true); if (driveOk) done.push('Google Drive'); else driveWhy = driveBackupUp.err || 'Drive upload failed.'; }
+  } catch (e) { alert('Backup failed: ' + e.message); }
+  finally { BKALL_BUSY = false; }
+  if (driveOk) return toast('✅ All backups done: ' + done.join(' · '));
+  backupAllPrompt(done, driveWhy);
+}
+function backupAllPrompt(done, why) {
+  const old = document.getElementById('bkAllModal'); if (old) old.remove();
+  const hasId = !!(db.settings && db.settings.driveClientId);
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="bkAllModal" onclick="if(event.target===this)this.remove()"><section class="card record-modal" style="width:min(420px,100%)"><div class="section-title"><h3>💾 Backup</h3><button class="btn smallbtn" onclick="document.getElementById('bkAllModal').remove()">✕</button></div><p class="small" style="color:var(--green2);margin-top:-4px">✅ Done: ${esc(done.join(' · ') || '—')}</p><p class="small" style="color:var(--amber)">☁ Google Drive backup was not done.<br>${esc(why || '')}</p><div class="actions" style="flex-direction:column">${hasId ? `<button class="btn blue" onclick="document.getElementById('bkAllModal').remove();backupDriveRetry()">☁ Try Drive again</button>` : ''}<button class="btn amber" onclick="document.getElementById('bkAllModal').remove();moreSub='drive';go('settings')">☁ Google Drive (direct, needs Client ID)</button><button class="btn" onclick="document.getElementById('bkAllModal').remove()">Skip Drive</button></div></section></div>`);
+}
+async function backupDriveRetry() {
+  try { await driveAuth(); } catch (e) { return backupAllPrompt([], e.message); }
+  if (await driveBackupUp(true)) toast('☁ Drive backup done'); else backupAllPrompt([], driveBackupUp.err);
 }
 function pickOld(k) {
   pendingKind = k; document.getElementById('oldModal')?.remove(); document.getElementById('srcModal')?.remove();
@@ -2658,6 +2736,43 @@ function render() {
 }
 
 const PR = { type: 'carpenter', mode: 'all', from: '', to: '', sort: 'qty', person: '', dlim: 20 };
+
+/* ===== V1.0.96: progressive chunk renderer (IntersectionObserver sentinel + rAF fallback) =====
+   ckList(name, items, fn, opts) -> HTML of the first chunk (+ a sentinel). The rest is appended
+   automatically while the user scrolls. A new call with the same name cancels the old job. */
+const CK = { jobs: {}, gen: 0, io: null, mo: null, q: false };
+function ckList(name, items, fn, o) {
+  o = o || {};
+  const job = CK.jobs[name] = { gen: ++CK.gen, items, fn, pos: Math.min(o.first || 24, items.length), step: o.step || 30, terms: window.__terms };
+  let h = ''; for (let i = 0; i < job.pos; i++) h += fn(items[i], i);
+  return h + (job.pos < items.length ? '<div class="ck-sent" data-ck="' + name + '" data-gen="' + job.gen + '" aria-hidden="true"></div>' : '');
+}
+function ckMore(sent) {
+  const job = CK.jobs[sent.dataset.ck];
+  if (!sent.isConnected || !job || String(job.gen) !== sent.dataset.gen) { if (CK.io) CK.io.unobserve(sent); sent.remove(); return false; }
+  const end = Math.min(job.pos + job.step, job.items.length), keep = window.__terms; let h = '';
+  window.__terms = job.terms;                                   // keep search-term highlighting of this list
+  try { for (let i = job.pos; i < end; i++) h += job.fn(job.items[i], i); } finally { window.__terms = keep; }
+  job.pos = end; sent.insertAdjacentHTML('beforebegin', h);
+  if (end >= job.items.length) { if (CK.io) CK.io.unobserve(sent); sent.remove(); return false; }
+  return true;
+}
+function ckArm() {
+  CK.q = false;
+  const L = document.querySelectorAll('.ck-sent:not([data-on])'); if (!L.length) return;
+  if (!CK.io && 'IntersectionObserver' in window) CK.io = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return; const t = e.target;
+    if (ckMore(t)) { CK.io.unobserve(t); requestAnimationFrame(() => { if (t.isConnected) CK.io.observe(t); }); }   // re-check: still in view -> next chunk
+  }), { rootMargin: '900px 0px' });
+  L.forEach(t => {
+    t.setAttribute('data-on', '1');
+    if (CK.io) CK.io.observe(t);
+    else (function step() { if (!t.isConnected) return; if (ckMore(t)) requestAnimationFrame(step); })();   // no IntersectionObserver: fill in rAF chunks
+  });
+}
+function ckSchedule() { if (CK.q) return; CK.q = true; requestAnimationFrame(ckArm); }
+if (typeof MutationObserver !== 'undefined') { CK.mo = new MutationObserver(ckSchedule); CK.mo.observe(document.documentElement, { childList: true, subtree: true }); }
+
 const PRF = { q: '', lim: 30, dlim: 15 };
 let prfT = null;
 const PR_LABEL = { carpenter: 'Carpenter', polish: 'Polish Contractor', sanding: 'Sanding Contractor', woodSupplier: 'Wood Supplier' };
@@ -2938,7 +3053,7 @@ function prfResults() {
   if (terms.length) rows = rows.filter(r => { const h = prHay(r); return terms.every(t => h.includes(t)); });
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(a.tae).localeCompare(String(b.tae), undefined, { numeric: true }));
   if (!rows.length) return '<div class="empty">No entries match.</div>';
-  return `<div class="small muted" style="margin-bottom:8px">${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}</div>` + rows.slice(0, PRF.lim).map(prEntryCard).join('') + (rows.length > PRF.lim ? `<button class="btn" style="width:100%" onclick="PRF.lim+=30;prfRender()">Show more (${rows.length - PRF.lim} left)</button>` : '');
+  return `<div class="small muted" style="margin-bottom:8px">${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}</div>` + ckList('prfList', rows, r => prEntryCard(r));
 }
 function prfRender() { refreshTerms(); const el = document.getElementById('prfList'); if (el) el.innerHTML = prfResults(); }
 function prfDeb() { clearTimeout(prfT); prfT = setTimeout(prfRender, 150); }
@@ -3189,9 +3304,9 @@ function msResults() {
   for (let i = A.work.length - 1; i >= 0; i--) { const h = msHayW(A.work[i]); if (terms.every(t => h.includes(t))) W.push(A.work[i]); }
   for (let i = A.orders.length - 1; i >= 0; i--) { const h = msHayO(A.orders[i]); if (terms.every(t => h.includes(t))) O.push(A.orders[i]); }
   if (!W.length && !O.length) return '<div class="empty">Nothing found.</div>';
-  const more = (n, lim) => n > lim ? `<button class="btn" style="width:100%;margin-bottom:10px" onclick="msLim+=25;msRender()">Show more (${n - lim} left)</button>` : '';
-  return (W.length ? `<div class="small muted" style="margin:10px 0 6px">⚒ Work entries (${W.length})</div>` + W.slice(0, msLim).map(x => workCard(x)).join('') + more(W.length, msLim) : '')
-    + (O.length ? `<div class="small muted" style="margin:10px 0 6px">📦 Orders (${O.length})</div>` + O.slice(0, msLim).map(o => orderCard(o)).join('') + more(O.length, msLim) : '');
+  // two sections: Work first, Orders after it. Orders only start loading once the Work list is fully shown (sentinel order)
+  return (W.length ? `<div class="small muted" style="margin:10px 0 6px">⚒ Work entries (${W.length})</div><div id="msWork">${ckList('msWork', W, x => workCard(x), { first: 20 })}</div>` : '')
+    + (O.length ? `<div class="small muted" style="margin:10px 0 6px">📦 Orders (${O.length})</div><div id="msOrd">${ckList('msOrd', O, o => orderCard(o), { first: 20 })}</div>` : '');
 }
 
 
@@ -3256,8 +3371,8 @@ function statHtml() {
   const TC = stK === 'topcarp' ? topCarp(getActiveDB()).list : [], medals = [];
   const rankBox = stK === 'topcarp' && TC.length ? `<div class="dsec" style="margin:0 0 12px"><h4>Ranking · last 7 days</h4>${TC.slice(0, 10).map((c, i) => `<div class="tl-r"><span><b>${medals[i] || (i + 1) + '.'} ${esc(c.name)}</b><br><small class="muted">${c.n} entr${c.n === 1 ? 'y' : 'ies'}</small></span><b style="color:var(--green2)">${prQ(c.qty)} pcs</b></div>`).join('')}</div>` : '';
   const chip = r => stK === 'topcarp' ? (() => { const i = TC.findIndex(c => c.k === r.k), c = TC[i]; return `<div class="small" style="margin:0;color:var(--green2);font-weight:800">${medals[i] || (i + 1) + '.'} ${esc(r.p.name)} — total ${prQ(c.qty)} pcs · this entry: ${prQ(r.n)} / ${prQ(r.p.qty)} pcs on ${esc(r.p.date)}${r.p.supplier ? ' · Supplier: ' + esc(r.p.supplier) : ''}${r.p.link ? ' · from Polish ' + esc(r.p.link) : ''}</div>`; })() : stK === 'today' ? `<div class="small" style="margin:0;color:var(--green2);font-weight:800">📦 Sent to Packing Hall today: ${prQ(r.n)} pcs</div>` : stK === 'pending' ? `<div class="small" style="margin:0;color:var(--amber);font-weight:800">⏳ Pending: ${prQ(r.n)} pcs</div>` : stK === 'balance' ? `<div class="small" style="margin:0;color:var(--green2);font-weight:800">🪚 Balance OK today: ${prQ(r.n)} pcs<br>${splitsOf(r.x, 'carpenter').filter(p => p.date === todayStr() && Number(p.done) > 0).map(p => esc(p.name) + ' — ' + prQ(p.done) + ' / ' + prQ(p.qty) + ' pcs' + (p.supplier ? ' · Supplier: ' + esc(p.supplier) : '') + (p.link ? ' · from Polish ' + esc(p.link) : '')).join('<br>')}</div>` : '';
-  const list = rows.slice(0, stLim).map(r => stK === 'repairs' ? repairStatCard(r) : workCard(r.x, { top: chip(r), click: `statClose();viewWork('${r.x.id}')` })).join('');
-  return head + rankBox + list + (rows.length > stLim ? `<button class="btn" style="width:100%" onclick="stLim+=40;statRender()">Show more (${rows.length - stLim} left)</button>` : '');
+  const k = stK, list = ckList('statList', rows, r => k === 'repairs' ? repairStatCard(r) : workCard(r.x, { top: chip(r), click: `statClose();viewWork('${r.x.id}')` }), { first: 20 });
+  return head + rankBox + list;
 }
 function statRender() { const el = document.getElementById('statList'); if (el) el.innerHTML = statHtml(); }
 function openStat(k) {
@@ -3903,7 +4018,7 @@ function wlResults() {
   const sn = x => { const m = String(x.subOrder || '').trim().match(/\/(\d+)$/); return m ? Number(m[1]) : Infinity; };
   list = list.slice().sort((a, b) => (tn(a) - tn(b)) || String(a.orderNo || '').localeCompare(String(b.orderNo || '')) || (sn(a) - sn(b)) || String(a.subOrder || '').localeCompare(String(b.subOrder || ''), undefined, { numeric: true }));
   if (!list.length) return '<div class="empty">No production entries match.</div>';
-  return `<div class="small muted" style="margin-bottom:8px">${list.length} entr${list.length === 1 ? 'y' : 'ies'}</div>` + list.slice(0, wlLim).map(x => workCard(x, { act: true })).join('') + (list.length > wlLim ? `<button class="btn" style="width:100%" onclick="wlLim+=50;wlRender()">Show more (${list.length - wlLim} left)</button>` : '');
+  return `<div class="small muted" style="margin-bottom:8px">${list.length} entr${list.length === 1 ? 'y' : 'ies'}</div>` + ckList('wlList', list, x => workCard(x, { act: true }));
 }
 function wlRender() { refreshTerms(); const el = document.getElementById('wlList'); if (el) el.innerHTML = wlResults(); }
 
@@ -4218,7 +4333,7 @@ function olResults() {
   if (!tae && !sup && ol.st === 'all') return `<div class="empty">Enter a TAE number or supplier name to see orders.${ol.buyer.trim() ? '<br>Buyer alone does not list orders.' : ''}</div>`;
   const list = olFiltered();
   if (!list.length) return '<div class="empty">No orders match.</div>';
-  return `<div class="actions" style="justify-content:space-between;align-items:center;margin-bottom:8px"><span class="small muted">${list.length} order(s)</span><button class="btn smallbtn blue" onclick="printOrders(olFiltered().map(o=>o.id))">🖨 PDF</button><button class="btn smallbtn blue" onclick="showOrderPNG(olFiltered().map(o=>o.id))">🖼 PNG</button></div>` + list.slice(0, olLim).map(orderCard).join('') + (list.length > olLim ? `<button class="btn" style="width:100%" onclick="olLim+=50;olRender()">Show more (${list.length - olLim} left)</button>` : '');
+  return `<div class="actions" style="justify-content:space-between;align-items:center;margin-bottom:8px"><span class="small muted">${list.length} order(s)</span><button class="btn smallbtn blue" onclick="printOrders(olFiltered().map(o=>o.id))">🖨 PDF</button><button class="btn smallbtn blue" onclick="showOrderPNG(olFiltered().map(o=>o.id))">🖼 PNG</button></div>` + ckList('olList', list, o => orderCard(o));
 }
 function olRender() { refreshTerms(); const el = document.getElementById('olList'); if (el) el.innerHTML = olResults(); }
 function orderListPage() {
@@ -4805,7 +4920,7 @@ function settingsPage() {
   }
   let sub = window.moreSub || 'settings';
   if (sub === 'settings') {
-    return card('⚙️ Settings & Setup', `<div class="grid" style="margin-bottom:14px"><button class="btn blue" onclick="SS.sel=null;moreSub='dataAdmin';render()">Admin Data</button><button class="btn blue" onclick="SS.sel=null;moreSub='dataUser';render()">User Data</button><button class="btn blue" onclick="SS.sel=null;moreSub='dataEntry';render()">Entry Account Data</button><button class="btn primary" onclick="DIR.sel=null;DIR.q='';moreSub='directory';render()">People Directory</button></div><button class="btn primary" style="width:100%;margin-bottom:14px" onclick="moreSub='peopleCodes';render()">👥 Names & Codes</button><div class="grid"><button class="btn" onclick="moreSub='buyers';render()">🏷 Buyers</button><button class="btn" onclick="moreSub='workers';render()">👷 Workers (Attendance)</button><button class="btn" onclick="moreSub='folder';render()">📁 Thar Flow Folder</button><button class="btn" onclick="moreSub='drive';render()">☁ Google Drive</button><button class="btn" onclick="moreSub='fullBackup';render()">💾 Backup & Restore</button><button class="btn" onclick="moreSub='profile';render()">👤 App Profile & PIN</button><button class="btn danger" onclick="moreSub='trash';render()">♻ Recycle Bin</button></div>`);
+    return card('⚙️ Settings & Setup', `<div class="grid" style="margin-bottom:14px"><button class="btn blue" onclick="SS.sel=null;moreSub='dataAdmin';render()">Admin Data</button><button class="btn blue" onclick="SS.sel=null;moreSub='dataUser';render()">User Data</button><button class="btn blue" onclick="SS.sel=null;moreSub='dataEntry';render()">Entry Account Data</button><button class="btn primary" onclick="DIR.sel=null;DIR.q='';moreSub='directory';render()">People Directory</button></div><button class="btn primary" style="width:100%;margin-bottom:14px" onclick="moreSub='peopleCodes';render()">👥 Names & Codes</button><div class="grid"><button class="btn" onclick="moreSub='buyers';render()">🏷 Buyers</button><button class="btn" onclick="moreSub='workers';render()">👷 Workers (Attendance)</button><button class="btn" onclick="moreSub='folder';render()">📁 Thar Flow Folder</button><button class="btn" onclick="moreSub='drive';render()">☁ Google Drive</button><button class="btn" onclick="moreSub='fullBackup';render()">💾 Backup & Restore</button><button class="btn" onclick="moreSub='graphics';render()">🎮 Graphics</button><button class="btn" onclick="moreSub='profile';render()">👤 App Profile & PIN</button><button class="btn danger" onclick="moreSub='trash';render()">♻ Recycle Bin</button></div>`);
   }
   if (sub === 'dataAdmin' || sub === 'dataUser' || sub === 'dataEntry') return sessPage(sub);
   if (sub === 'directory') return dirPage();
@@ -4819,6 +4934,7 @@ function settingsPage() {
   if (sub === 'folder') return folderPage();
   if (sub === 'drive') return drivePage();
   if (sub === 'fullBackup') return fullBackupPage();
+  if (sub === 'graphics') return graphicsPage();
   if (sub === 'profile') return profilePage();
   return '';
 }
@@ -4867,6 +4983,24 @@ function backupCard(kind) {
     <p class="small muted" style="margin-top:-5px">TAE numbers are grouped in blocks of 50 (e.g. TAE 2801-2850 = ${pre}28A.json). ${isO ? 'These files contain only Order Send data.' : 'These files contain only Work entries and Repairs.'} After backing up a completed block you can remove it to keep the live app light and fast. Open these files later with Home → View Old Backup.</p>
     ${folderStatusHtml(kind)}
     ${rows || '<div class="empty">Nothing to backup yet.</div>'}`);
+}
+const GFX_OPTS = [
+  ['low', 'Low', 'No effects and no animations. Fastest. Recommended for low-end devices.'],
+  ['medium', 'Medium', 'Normal effects and animations.'],
+  ['high', 'High', 'All effects and animations, including glow, shimmer and hover effects.']
+];
+function applyGraphics(l) {
+  if (!GFX_OPTS.some(o => o[0] === l)) l = 'low';
+  window.__gfx = l; window.__gfxLow = l === 'low';
+  document.documentElement.setAttribute('data-gfx', l);
+  try { localStorage.setItem('thar_gfx_v1', l); } catch (e) {}
+}
+function setGraphics(l) { applyGraphics(l); toast('Graphics set to ' + (GFX_OPTS.find(o => o[0] === l) || GFX_OPTS[0])[1]); render(); }
+function graphicsPage() {
+  const cur = window.__gfx || 'low';
+  return card('🎮 Graphics', `<button class="btn smallbtn" style="margin-bottom:12px" onclick="moreSub='settings';render()">← Back</button>
+    <p class="small muted" style="margin-top:-4px">Choose how many visual effects the app uses. This setting is saved on this device only. New installations start with Low.</p>`
+    + GFX_OPTS.map(o => `<div class="item" style="cursor:pointer" onclick="setGraphics('${o[0]}')"><div><strong>${o[1]}${o[0] === 'low' ? ' (default)' : ''}</strong><small>${o[2]}</small></div><span class="pill ${cur === o[0] ? '' : 'blue'}">${cur === o[0] ? '✓ Selected' : 'Select'}</span></div>`).join(''));
 }
 function fullBackupPage() {
   return card('💾 Backup & Restore', `
@@ -5064,7 +5198,7 @@ async function osxHtml(data, A) {
         if (!sp.length) return '<div class="oxb"><div class="oxh">' + l + '<span>Not started</span></div></div>';
         const lines = sp.map(p => {
           const d = N(p.done), al = N(p.qty);
-          return '<div class="oxl"><b>' + e(p.name || '-') + '</b> — <b>' + d + '</b> of ' + q + ' pcs done' + (k === 'carpenter' ? ' · ' + (p.date ? e(osxDate(p.date)) : '<span class="oxm2">date not entered</span>') : '') + '</div>';
+          return '<div class="oxl"><b>' + e(p.name || '-') + '</b> — <b>' + d + '</b> of ' + q + ' pcs done' + (k === 'carpenter' ? ' · ' + (p.date ? e(osxDate(p.date)) : '<span class="oxm2">date not entered</span>') + (String(p.link || '').trim() ? ' (<b>' + e(String(p.link).trim()) + '</b>)' : '') : '') + '</div>';
         }).join('');
         return '<div class="oxb"><div class="oxh">' + l + '<span>Total ' + tot + ' of ' + q + ' pcs</span></div>' + lines + '</div>';
       };
@@ -5498,7 +5632,7 @@ boot().catch(e => { console.error(e); showFatal(e && e.message); });
   }))).observe(document.body, { childList: true });
   const _rm = Element.prototype.remove;
   Element.prototype.remove = function () {
-    if (this.classList && this.classList.contains('modal-backdrop') && this.isConnected && !this.classList.contains('closing') && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
+    if (this.classList && this.classList.contains('modal-backdrop') && this.isConnected && !this.classList.contains('closing') && !window.__gfxLow && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
       this.removeAttribute('id'); this.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
       this.classList.add('closing'); const self = this;
       setTimeout(() => _rm.call(self), 150); return;
@@ -5877,7 +6011,7 @@ body .item,body .card{backdrop-filter:none}
   const OUT_MS = 140;
   let timer = null, seq = 0;
 
-  const reduced = () => { try { return matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
+  const reduced = () => { try { return !!window.__gfxLow || matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
   document.body.insertAdjacentHTML('afterbegin','<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="axBgGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e293b"/><stop offset="100%" stop-color="#0f172a"/></linearGradient><linearGradient id="axFlowGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#38bdf8"/><stop offset="50%" stop-color="#34d399"/><stop offset="100%" stop-color="#059669"/></linearGradient></defs></svg>');
   const axMark = (cls) => `<svg class="ax-mark ${cls || ''}" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="THAR"><rect class="m-tile" x="16" y="16" width="480" height="480" rx="115" fill="url(#axBgGrad)" stroke="rgba(255,255,255,0.12)" stroke-width="8"/><rect x="24" y="24" width="464" height="464" rx="107" fill="none" stroke="url(#axFlowGrad)" stroke-width="3" opacity=".4"/><path class="m-bar" d="M 116 142 C 116 128, 128 116, 144 116 L 368 116 C 384 116, 396 128, 396 142 L 396 164 C 396 178, 384 190, 368 190 L 144 190 C 128 190, 116 178, 116 164 Z" fill="url(#axFlowGrad)"/><path class="m-l1" pathLength="1" d="M 224 190 L 288 190 L 288 285 C 288 340, 350 365, 385 320 C 415 282, 380 230, 335 242" fill="none" stroke="url(#axFlowGrad)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/><path class="m-l2" pathLength="1" d="M 288 245 C 265 210, 195 205, 155 248 C 115 292, 140 372, 220 376 C 268 378, 288 335, 288 285" fill="none" stroke="url(#axFlowGrad)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/><circle class="m-d m-d1" cx="256" cy="153" r="8" fill="#0f172a"/><circle class="m-d m-d2" cx="370" cy="153" r="6" fill="#0f172a" opacity=".6"/><circle class="m-d m-d3" cx="142" cy="153" r="6" fill="#0f172a" opacity=".6"/></svg>`;
   window.axMark = axMark;
@@ -5996,7 +6130,7 @@ body .item,body .card{backdrop-filter:none}
 (function () {
   const hl = document.querySelector('.top-brand .logo');
   if (hl && window.axMark) { hl.classList.add('ax-hlogo'); hl.innerHTML = axMark(''); }
-  const reduced = () => { try { return matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
+  const reduced = () => { try { return !!window.__gfxLow || matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
   function axSplash(role) {
     document.getElementById('axSplash')?.remove();
     const h = document.querySelector('.ax-hlogo .ax-mark');
@@ -6688,6 +6822,7 @@ function dirPage() {
 (function(){
   const tap=(el,n,ms,fn)=>{let c=0,t;el&&el.addEventListener('click',()=>{c++;clearTimeout(t);t=setTimeout(()=>c=0,ms);if(c>=n){c=0;fn();}});};
   function confetti(){
+    if(window.__gfxLow)return;
     const cv=document.createElement('canvas');cv.style.cssText='position:fixed;inset:0;z-index:99999;pointer-events:none;width:100%;height:100%';
     cv.width=innerWidth;cv.height=innerHeight;document.body.appendChild(cv);const x=cv.getContext('2d');
     const cols=['#34d399','#38bdf8','#f59e0b','#f43f5e','#a78bfa','#fff'];
@@ -6837,7 +6972,7 @@ function dirPage() {
 
 (function(){
   const col = v => 'hsl(' + Math.round(Math.max(0, Math.min(100, v)) * 1.2) + ',78%,52%)';
-  const reduced = () => { try { return matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
+  const reduced = () => { try { return !!window.__gfxLow || matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) { return false; } };
   function set(el, v) { el.style.setProperty('--p', v); el.style.setProperty('--rc', col(v)); const b = el.querySelector('b'); if (b) b.textContent = Math.round(v) + '%'; }
   function run(el) {
     const T = Math.max(0, Math.min(100, Number(el.dataset.p) || 0));
@@ -7366,22 +7501,30 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
     inp.click();
   };
   window.axTp=function(){};
-  var t0=0, tm=null, done=false;
+  var t0=0, tm=null, done=false, armed=false, armT=0;
   function hit(e){ var x=e&&e.target; return !!(x&&x.closest&&x.closest('.ax-q')); }
-  function reset(){ clearTimeout(tm); tm=null; t0=0; }
+  function reset(){ clearTimeout(tm); tm=null; t0=0; armed=false; }
   var st=document.createElement('style'); st.textContent='.ax-q{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}'; document.head.appendChild(st);
   document.addEventListener('contextmenu',function(e){ if(hit(e)) e.preventDefault(); },true);
-  document.addEventListener('pointerdown',function(e){
-    if(!hit(e)) return; reset(); done=false; t0=Date.now();
-    tm=setTimeout(function(){ try{ navigator.vibrate&&navigator.vibrate(40); }catch(x){} },2500);
-  },true);
-  function up(){
-    if(!t0) return; var held=Date.now()-t0; reset();
-    if(held>=2500 && !done){ done=true; try{ window.mkPick(); }catch(x){} }
+  function begin(e){
+    if(!hit(e)) return;
+    if(t0 && Date.now()-t0<400) return;               // pointer + touch + mouse fire together: count once
+    reset(); done=false; t0=Date.now();
+    tm=setTimeout(function(){ armed=true; armT=Date.now(); try{ navigator.vibrate&&navigator.vibrate(40); }catch(x){} },2500);
   }
-  document.addEventListener('pointerup',up,true);
-  document.addEventListener('pointercancel',up,true);
-  document.addEventListener('touchend',up,true);
+  function open(){ if(done) return; done=true; armT=0; try{ window.mkPick(); }catch(x){} }
+  function end(e){
+    var cancel=!!(e&&(e.type==='pointercancel'||e.type==='touchcancel'));
+    if(armT && Date.now()-armT<6000 && !done && !t0){ open(); return; }   // armed earlier; this tap gives the browser the click permission
+    if(!t0) return;
+    var held=Date.now()-t0;
+    if(cancel && held<2500) return;                    // Chrome may cancel a long press early (desktop mode): keep counting
+    if(held>=2500||armed){ reset(); open(); return; }
+    reset();
+  }
+  ['pointerdown','touchstart','mousedown'].forEach(function(n){ document.addEventListener(n,begin,true); });
+  ['pointerup','pointercancel','touchend','touchcancel','mouseup'].forEach(function(n){ document.addEventListener(n,end,true); });
+  document.addEventListener('click',function(){ if(armT && Date.now()-armT<6000 && !done) open(); },true);
 })();
 </script>
 
@@ -8251,7 +8394,7 @@ var all=[],mood='',reduce=false;try{reduce=matchMedia('(prefers-reduced-motion:r
 function bot(svg,bub){var P={},o={svg:svg,anims:[],busy:0,last:-1,bub:bub,timer:0};['bd','hd','amL','amR','lgL','lgR','lk','ey'].forEach(function(k){P[k]=svg.querySelector('.'+k)});var ei=svg.querySelector('.ei');
 function eyes(n){ei.innerHTML=RB_EYES[n]||RB_EYES.happy}
 function stop(){o.anims.forEach(function(a){try{a.cancel()}catch(_){}});o.anims=[];eyes('happy');if(o.bub)o.bub.classList.remove('on');o.busy=0}
-function vis(){if(document.hidden)return 0;var r=svg.getBoundingClientRect();if(!r.width)return 0;var f=svg.closest('#taeFab');if(f&&f.classList.contains('hidden'))return 0;return 1}
+function vis(){if(document.hidden||window.__gfxLow)return 0;var r=svg.getBoundingClientRect();if(!r.width)return 0;var f=svg.closest('#taeFab');if(f&&f.classList.contains('hidden'))return 0;return 1}
 o.play=function(a,loop){if(reduce||!svg.animate)return;stop();o.busy=1;eyes(a.e);var n=0,fin=function(){n--;if(n<=0&&!loop){stop()}};
 var run=function(el,kf,pre){if(!kf||!el)return;var steps=kf.steps,arr=kf.k||kf;var fr=pre==='x'?R(arr):pre?A(pre,arr):R(arr);n++;var an=el.animate(fr,{duration:a.d,easing:steps?'steps(1,end)':'ease-in-out',iterations:loop?Infinity:1});an.onfinish=fin;o.anims.push(an)};
 run(P.bd,a.bd,'x');run(P.hd,a.hd,'x');run(P.lk,a.lk,'x');run(P.amL,a.L,'L');run(P.amR,a.R,'R');run(P.lgL,a.lL,'L');run(P.lgR,a.lR,'R');
@@ -10414,6 +10557,10 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.99-live: Desktop-site mode fix: no empty left column, bottom nav no longer squashed; master admin long-press works in desktop mode.
+  V1.0.98-live: New Graphics setting (Settings > Graphics): Low (no effects, no animation, default on new install), Medium (normal), High (all effects).
+  V1.0.97-live: Bot Studio (size/outfit/look) button is back in the chat history menu; Work List, Order List, Search, Stat and Production lists now load in chunks while scrolling (no freeze).
+  V1.0.96-live: Drive backup now overwrites one file (Thar-Full-Backup.json); PDF Carpenter lines show the Polish contractor in bold after the date; one-click Backup button in the header (full + all series + Drive).
   V1.0.92-live: Drafts: entries sent with "Save to Draft" from the AI chat are now counted in the page Draft badge and listed in the Draft window (AI drafts row), so they no longer look missing.
   V1.0.91-live: FIX AI entry draft: Confirm & save / Save to Draft work again (draft engine could not see the database), chat edits no longer crash on the draft card, Entry users can send add-only drafts to Admin.
   V1.0.90-live: Classic camera, attachment tray, message box (field chips), entry logic and tools (Help, Format, Brief, Undo, Redo, Drafts) work inside the chat; Classic entry workflow merged into the chat (order sheet -> entry card -> Confirm & save / Save to Draft / Keep editing / Discard); Classic mode link removed.
@@ -11450,7 +11597,7 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="openai">ChatGPT</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="openai">ChatGPT</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apBot">🎨 Bot Studio (size, outfit, look)</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><span class="apRb">'+RB+'</span><span class="ti">ERP Assistant</span><button id="apTts" title="Speak replies">🔊</button><button id="apX">✕</button></header><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice input">'+MIC+'</button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
   root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root);
   try { const A = window.TAE_ASSISTANT; if (A && !A.__apSay) { const o = A.say; A.say = function (t) { eSay(t); return true; }; A.__apSay = 1; }
     if (A && A.log && !A.log.__ap) { const op = A.log.push; A.log.push = function (m) { const r = op.apply(this, arguments); try { if (m && m.who === 'b') eSay(m.text || '', { html: m.html, cc: m.chips }); } catch (e) { } return r; }; A.log.__ap = 1; } } catch (e) { }
@@ -11464,6 +11611,9 @@ function build() {
   $('.apCls', root).onclick = e => { const b = e.target.closest('button[data-cls]'); if (!b) return; $('.apSb', root).classList.remove('open'); const k = b.dataset.cls; if (k === 'drafts') { try { window.THAR_AI_TX.openDrafts(); } catch (x) { } return; } if (!S) newChat(); S.messages.push({ role: 'user', text: ({ format: 'format', help: 'help', brief: 'brief me', undo: 'undo', redo: 'redo' })[k], ts: Date.now() }); save(); draw(); clsSend(({ format: 'format', help: 'help', brief: 'brief me', undo: 'undo', redo: 'redo' })[k]); };
   $('#apClr', root).onclick = () => { const t = $('#apIn'); t.value = ''; pendingAttachment = []; attDraw(); fit(); apCaps(true); t.focus(); };
   $('#apTheme', root).onclick = () => { close(); try { window.UTheme && window.UTheme.open(); } catch (e) { } };
+  const openBotSt = () => { close(); setTimeout(() => { try { if (window.openBotStudio) window.openBotStudio(); else toast('Bot Studio is not ready yet'); } catch (e) { } }, 60); };
+  $('#apBot', root).onclick = openBotSt;
+  const rbEl = $('.apRb', root); if (rbEl) { rbEl.style.cursor = 'pointer'; rbEl.onclick = openBotSt; }
   $('#apSettings', root).onclick = () => { close(); try { window.moreSub = 'settings'; window.go('settings'); } catch (e) { } };
   if (typeof isEmployeeMode !== 'undefined' && isEmployeeMode) $('#apSettings', root).style.display = 'none';
   aiDraw();
