@@ -1769,7 +1769,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.117';
+const APP_VER = 'V1.0.118';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -5299,7 +5299,10 @@ function rsHead(title, dateTxt, tag, a, b, c, d, lab) {
 }
 const RS_LAB = '<tr class="o3"><td>SNo.</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>@DET@</td><td>Wood Supplier /<br>Vendor</td></tr>';
 var RS_PREPARED_BY = 'Pradeep Bishnoi';   /* name printed under "Prepared by" */
-function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>'; }
+var RS_APPROVED_BY = 'Mohit Ji';   /* name printed under "Approved by" */
+var RS_VERIFY_NOTE = 'Balance and Gap Verified by Supplier, Cross-Checked by Carpenter';   /* bold note under supplier name in Vendor column */
+function rsVend(v) { return esc(v) + (String(v || '').trim() ? '<br><b>(' + esc(RS_VERIFY_NOTE) + ')</b>' : ''); }
+function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + esc(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>'; }
 function rsTotal(q, c) { return '<tr class="ot"><td colspan="4" class="oxr"><b>TOTAL</b></td><td><b>' + prQ(q) + '</b></td><td></td><td><b>' + prC(c) + '</b></td><td></td><td></td></tr>'; }
 function rsGroupRow(left, right) { return '<tr class="oxg"><td colspan="9"><div class="oxgd"><b>' + left + '</b><span>' + right + '</span></div></td></tr>'; }
 
@@ -5315,7 +5318,7 @@ function rsEntry(r, w, type, name, sn) {
     '<div class="oxb"><div class="oxh">Status<span>' + (r.complete ? 'COMPLETE' : 'Pending ' + prQ(pend) + ' of ' + prQ(tot) + ' pcs') + '</span></div>' + others +
     (r.target ? '<div class="oxl">Target Date : <b>' + e(osxDate(r.target)) + '</b></div>' : '') + '</div>';
   const vend = type === 'woodSupplier' ? String(w.woodSupplier || '').trim() : [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
-  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + e(vend) + '</td></tr>';
+  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + rsVend(vend) + '</td></tr>';
 }
 
 /* ---------- RANKING report: one sheet per date (+ ranking summary for multi-day periods) ---------- */
@@ -5429,7 +5432,7 @@ function rscRow(it, first, span, raw) {
     '<td><b>' + prQ(r.done) + '</b></td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td>' +
     '<td><b>' + prQ(r.done) + '</b> of ' + prQ(tot) + (link ? '<br>from Polish <b>' + e(link) + '</b>' : '') + '</td>' + oth +
     '<td>' + (r.target ? '<b>' + e(osxDate(r.target)) + '</b>' : '-') + '</td>' +
-    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + e(vend) + '</td></tr>';
+    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + rsVend(vend) + '</td></tr>';
 }
 
 function rscTable(raw, items, tail) {
@@ -5442,7 +5445,7 @@ function rscTable(raw, items, tail) {
   const seen = new Set();
   const rows = items.map(it => { const first = !seen.has(it.g); seen.add(it.g); return rscRow(it, first, cnt.get(it.g), raw); }).join('');
   const tl = tail ? '<tr class="tt"><td colspan="5" style="text-align:right;padding-right:8px!important"><b>TOTAL</b></td><td><b>' + prQ(raw.tq) + '</b></td><td></td><td><b>' + prC(raw.tc) + '</b></td><td colspan="6"></td></tr>' +
-    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>' : '';
+    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + e(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>' : '';
   return '<table class="rst">' + cols + h + rows + tl + '</table>';
 }
 
