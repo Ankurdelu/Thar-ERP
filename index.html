@@ -1769,7 +1769,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.119';
+const APP_VER = 'V1.0.120';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2811,7 +2811,12 @@ function prTop(map, n) { return [...map.values()].sort((a, b) => b.qty - a.qty |
 function prOpen(r) { return !r.complete && r.source !== 'Wood Supply' && !r.stDone && r.alloc > r.done; }
 
 function prRange() {
-  const t = todayStr(), m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
+  const t = todayStr(), W = PR.type === 'woodSupplier' || PR.type === 'carpenter';
+  if (!W && (PR.mode === 'next7' || PR.mode === 'next30')) PR.mode = 'all';
+  const m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
+  if (W && m === 'next7') return mk(t, prAdd(t, 6), 'Next 7 Days');
+  if (W && m === 'next30') return mk(t, prAdd(t, 29), 'Next 30 Days');
+  if (W && m === 'month') { const nx = prAdd(t.slice(0, 8) + '01', 32).slice(0, 8) + '01'; return mk(t.slice(0, 8) + '01', prAdd(nx, -1), 'This Month'); }
   if (m === 'today') return mk(t, t, 'Today');
   if (m === 'yest') { const y = prAdd(t, -1); return mk(y, y, 'Yesterday'); }
   if (m === '7') return mk(prAdd(t, -6), t, 'Last 7 Days');
@@ -2819,7 +2824,7 @@ function prRange() {
   if (m === 'month') return mk(t.slice(0, 8) + '01', t, 'This Month');
   if (m === 'lastmonth') { const f = prAdd(t.slice(0, 8) + '01', -1); return mk(f.slice(0, 8) + '01', f, 'Last Month'); }
   if (m === 'custom') {
-    let f = PR.from || '', to = PR.to || t;
+    let f = PR.from || '', to = PR.to || t;   /* supplier: future estimate dates allowed */
     if (f && to < f) { const x = f; f = to; to = x; }
     return { from: f, to, label: (f || 'Start') + ' to ' + to, finite: true };
   }
@@ -2830,11 +2835,22 @@ function prPrev(R) {
   const len = prDiff(R.from, R.to) + 1;
   return { from: prAdd(R.from, -len), to: prAdd(R.from, -1), finite: true, label: 'previous ' + len + ' day' + (len === 1 ? '' : 's') };
 }
+/* Supplier (wood) rows are filtered / grouped by the ESTIMATE (target) date, every other category by the production date */
+function prDt(r) { return r.est ? String(r.target || '').slice(0, 10) : r.date; }
 function prIn(r, R) {
+  const dt = prDt(r), ok = prValid(dt);
+  if (!R.finite) return r.est ? true : (ok && dt <= R.to);
+  return ok && dt >= R.from && dt <= R.to;
+}
+/* production-date filter (used by the printed Carpenter daily report) */
+function prInD(r, R) {
   const ok = prValid(r.date);
   if (!R.finite) return r.wood ? true : (ok && r.date <= R.to);
   return ok && r.date >= R.from && r.date <= R.to;
 }
+const prInP = (r, R) => PR.type === 'carpenter' ? prInD(r, R) : prIn(r, R);
+/* which date the period filter works on */
+function prDateNote(type) { return type === 'woodSupplier' || type === 'carpenter' ? 'Estimate (Target) Date' : 'Carpenter Balance Date'; }
 
 function prCollect(A, type) {
   const wood = type === 'woodSupplier', reg = new Map(), codes = new Map(), rows = [], unreg = new Map();
@@ -2848,7 +2864,7 @@ function prCollect(A, type) {
   const note = (n, q) => { n = String(n || '').trim(); if (!n) return; const k = prNorm(n), u = unreg.get(k) || { name: n, qty: 0, entries: 0 }; u.qty += q; u.entries++; unreg.set(k, u); };
   A.work.forEach(w => {
     const total = Number(w.qty) || 0, cbmT = prNum(w.cbm), st = statusOf(w);
-    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood };
+    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood, est: wood || type === 'carpenter' };
     if (wood) {
       if (total > 0) {
         const p = resolve(w.woodSupplier);
@@ -2897,11 +2913,12 @@ function prAgg(rows, factory) {
     if (!(r.done > 0)) return;
     o.qty += r.done; o.cbm += r.cbm; o.entries++;
     if (r.done > o.max) o.max = r.done;
-    if (prValid(r.date)) {
-      const d = o.days.get(r.date) || { date: r.date, qty: 0, cbm: 0, entries: 0 };
-      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(r.date, d);
-      if (!o.last || r.date > o.last) o.last = r.date;
-      if (!o.first || r.date < o.first) o.first = r.date;
+    const dd = prDt(r);
+    if (prValid(dd)) {
+      const d = o.days.get(dd) || { date: dd, qty: 0, cbm: 0, entries: 0 };
+      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(dd, d);
+      if (!o.last || dd > o.last) o.last = dd;
+      if (!o.first || dd < o.first) o.first = dd;
     }
     if (!(factory && r.source === 'Stage 3 Balance')) { prBump(o.buyers, r.buyer, r.done, r.cbm); prBump(o.items, r.item, r.done, r.cbm); }
     if (r.source) prBump(o.sources, r.source, r.done, r.cbm);
@@ -2965,19 +2982,21 @@ function prBars(s, scope) {
 function prShift(n) {
   const R = prRange(), t = todayStr(); if (!R.finite) return;
   const base = R.from || R.to, len = prDiff(base, R.to) + 1;
-  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (to > t) to = t; if (f > to) f = to;
+  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (PR.type !== 'woodSupplier' && PR.type !== 'carpenter') { if (to > t) to = t; if (f > to) f = to; }
   PR.mode = 'custom'; PR.from = f; PR.to = to; PR.dlim = 20; render();
 }
 function prControls(R, withSort) {
-  const chips = PR_PERIODS.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
-  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}" max="${todayStr()}" onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}" max="${todayStr()}" onchange="PR.to=this.value;render()"></div></div>` : '';
+  const WS = PR.type === 'woodSupplier' || PR.type === 'carpenter', mx = WS ? '' : ` max="${todayStr()}"`;
+  const per = WS ? [...PR_PERIODS.slice(0, 3), ['next7', 'Next 7 Days'], ['next30', 'Next 30 Days'], ...PR_PERIODS.slice(3)] : PR_PERIODS;
+  const chips = per.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
+  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}"${mx} onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}"${mx} onchange="PR.to=this.value;render()"></div></div>` : '';
   let sort = '';
   if (withSort) {
     const opts = [['qty', 'Most Pieces'], ['cbm', 'Most CBM']]; if (PR.type !== 'woodSupplier') opts.push(['pending', 'Most Pending']);
     sort = `<div class="small muted" style="margin:2px 0 8px;font-weight:800">SORT RANKING BY</div><div class="stage-chips">${opts.map(([k, l]) => `<button class="chip ${PR.sort === k ? 'active' : ''}" onclick="PR.sort='${k}';render()">${l}</button>`).join('')}</div>`;
   }
-  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
-  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">PERIOD</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
+  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
+  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">${PR.type === 'da' ? 'PERIOD' : 'PERIOD (BY ' + prDateNote(PR.type).toUpperCase() + ')'}</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
 }
 
 function prTypeChips(cur) {
@@ -3031,10 +3050,11 @@ function productionPage() {
     <div class="stage-chips">${prTypeChips(type)}</div>
     ${prControls(R, true)}
     <div class="small muted" style="margin:4px 0 0">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)} (${esc(P.from)} to ${esc(P.to)})` : ''}</div>
+    <div class="small muted" style="margin:4px 0 0">Ranking is filtered by <b style="color:var(--text)">${prDateNote(type)}</b>.${prDt({ est: true, target: '' }) === '' && (type === 'woodSupplier' || type === 'carpenter') ? ' Entries without a target date show only in All Time.' : ''}</div>
     ${kpis}
     <div class="actions" style="margin-top:14px"><button class="btn blue smallbtn" onclick="prPrintRanking()">🖨 Ranking Report PDF</button><button class="btn blue smallbtn" onclick="prPrintRanking(true)">🖼 Ranking PNG</button></div>
     ${prSec((wood ? 'Supplier Ranking' : 'Ranking'), 'Tap a name to open the full production profile', rankHtml)}
-    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month'), prBars(prSeries(all.days, R), 'all'))}
+    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(prSeries(all.days, R), 'all'))}
   `);
 }
 
@@ -3046,7 +3066,7 @@ function registerUnlisted(type, enc) {
 }
 
 function openPersonDetail(type, enc) {
-  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRF.lim = 30; PRF.dlim = 15;
+  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRW.buyer = ''; PRW.tae = ''; PRW.item = ''; PRF.lim = 30; PRF.dlim = 15;
   tab = 'personDetail'; render(); window.scrollTo(0, 0);
 }
 function prHay(r) { return [r.tae, r.sub, r.item, r.itemName, r.size, r.buyer, r.source, r.via, r.link, r.date].join(' ').toLowerCase(); }
@@ -3081,13 +3101,14 @@ function prDetails(kind, enc, scope) {
   const val = decodeURIComponent(enc), A = getActiveDB(), R = prRange(), C = prData(A, PR.type), all = scope === 'all';
   const norm = s => String(s || '').trim() || 'Not specified';
   let rows = C.rows.filter(r => r.done > 0 && prIn(r, R) && (all || r.key === PR.person));
-  const titles = { buyer: 'Buyer', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
+  const titles = { buyer: 'Buyer', tae: 'TAE', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
   if (kind === 'buyer' || kind === 'item') {
     if (all) rows = rows.filter(r => r.source !== 'Stage 3 Balance');
     rows = rows.filter(r => norm(kind === 'buyer' ? r.buyer : r.item) === val);
-  } else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
-  else if (kind === 'month') rows = rows.filter(r => prValid(r.date) && r.date.slice(0, 7) === val);
-  else if (kind === 'day') rows = rows.filter(r => r.date === val);
+  } else if (kind === 'tae') rows = rows.filter(r => (String(r.tae || '').trim() || 'No TAE') === val);
+  else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
+  else if (kind === 'month') rows = rows.filter(r => prValid(prDt(r)) && prDt(r).slice(0, 7) === val);
+  else if (kind === 'day') rows = rows.filter(r => prDt(r) === val);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(a.tae).localeCompare(String(b.tae), undefined, { numeric: true }));
   const qty = rows.reduce((t, r) => t + r.done, 0), cbm = rows.reduce((t, r) => t + r.cbm, 0);
   const cards = rows.slice(0, 300).map(r => (all ? `<div class="small muted" style="margin:10px 0 4px">👤 ${esc((C.reg.get(r.key) || {}).name || '')}</div>` : '') + prEntryCard(r).replace(`onclick="viewWork('`, `onclick="prDetClose();viewWork('`)).join('') || '<div class="empty">No entries.</div>';
@@ -3115,6 +3136,30 @@ function daDetailPage() {
   if (!r) return card('📈 Data Analysis', back + '<div class="empty">This report is not available.</div>');
   return card('📈 ' + esc(r.title), back + `<p class="small muted" style="margin:8px 0 10px">${esc(r.sub || '')}</p>` + r.html);
 }
+var PRW = { buyer: '', tae: '', item: '' };
+function prWoodOrders(D) {
+  const e = esc, bv = r => String(r.buyer || '').trim() || 'Not specified', iv = r => String(r.item || '').trim() || 'Not specified', tv = r => String(r.tae || '').trim() || 'No TAE';
+  const base = D.me.cur.filter(r => r.done > 0);
+  const total = base.reduce((t, r) => t + r.done, 0);
+  /* one list: name -> pieces, high to low; tap a row to open the full list of its entries */
+  const list = (title, kind, fn, sub) => {
+    const m = new Map();
+    base.forEach(r => { const k = fn(r), o = m.get(k) || { k, q: 0, rs: [] }; o.q += r.done; o.rs.push(r); m.set(k, o); });
+    const arr = [...m.values()].sort((a, b) => b.q - a.q || a.k.localeCompare(b.k, undefined, { numeric: true }));
+    const body = arr.map((o, n) => {
+      const pct = total ? Math.round(100 * o.q / total) : 0;
+      return `<div class="item" role="button" tabindex="0" style="cursor:pointer" onclick="prDetails('${kind}','${prEnc(o.k)}','me')" onkeydown="if(event.key==='Enter')this.click()"><div style="min-width:0;flex:1"><strong>${n + 1}. ${e(o.k)}</strong><small>${sub(o.rs)}</small></div><div class="right"><strong>${prQ(o.q)} pcs</strong><small>${pct}% · tap for full list ›</small></div></div>`;
+    }).join('');
+    return `<div class="small muted" style="margin:16px 0 6px;font-weight:800">${title} · ${arr.length}</div>${body}`;
+  };
+  const cnt = (rs, f) => new Set(rs.map(f)).size, pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  const itemName = rs => { const x = rs.find(r => r.itemName); return x ? e(x.itemName) + ' · ' : ''; };
+  if (!base.length) return '<div class="empty">No entries in this period. Entries without a target date show only in All Time.</div>';
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:18px">${prQ(total)} pcs</b><span class="small muted">Tap any row to open its full list</span></div>` +
+    list('BUYER', 'buyer', bv, rs => pl(cnt(rs, tv), 'TAE') + ' · ' + pl(cnt(rs, iv), 'item code')) +
+    list('TAE', 'tae', tv, rs => e([...new Set(rs.map(bv))].join(', ')) + ' · ' + pl(cnt(rs, iv), 'item code')) +
+    list('ITEM CODE', 'item', iv, rs => itemName(rs) + pl(cnt(rs, tv), 'TAE'));
+}
 function personDetailPage() {
   const D = prProfileData(), type = PR.type, wood = type === 'woodSupplier';
   const back = `<button class="btn smallbtn" onclick="tab='production';render();window.scrollTo(0,0)">← Back to Ranking</button>`;
@@ -3140,8 +3185,8 @@ function personDetailPage() {
     <div class="small muted">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)}` : ''}</div>
     ${kpis}
     <div class="actions"><button class="btn blue smallbtn" onclick="prPrintProfile()">🖨 Profile Report PDF</button><button class="btn blue smallbtn" onclick="prPrintProfile(true)">🖼 Profile PNG</button></div>
-    ${prSec('⏳ Current Workload', 'Open entries where allocated pieces are not yet completed (all dates)', prMetrics([['Pending Pieces', prQ(pendPcs)], ['Open Entries', open.length], ['Overdue Entries', overdue], ['Completion Rate (allocated work)', rate + '%']]) + `<div style="margin-top:12px">${openHtml}</div>`)}
-    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month'), prBars(ser, 'me'))}
+    ${prSec('📋 Order Details', 'Buyer-wise · TAE-wise · item code-wise (by ' + esc(prDateNote(type).toLowerCase()) + ', ' + esc(R.label) + ')', prWoodOrders(D))}
+    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(ser, 'me'))}
   `);
 }
 
@@ -5495,7 +5540,7 @@ async function rsEmit(groups, name, asPng) {
 }
 async function prPrintCarpenterSheet(asPng) {
   const A = getActiveDB(), type = PR.type, R = prRange(), C = prData(A, type);
-  const rowsIn = C.rows.filter(r => prIn(r, R) && r.done > 0);
+  const rowsIn = C.rows.filter(r => prInP(r, R) && r.done > 0);
   if (!rowsIn.length) return toast('No production data in this period to print.');
   const ranking = prPeople(C, R, PR.sort).filter(p => p.qty > 0 || p.pendPcs > 0);
   const days = [...new Set(rowsIn.map(r => r.date || ''))];
@@ -5507,7 +5552,7 @@ async function prPrintProfileSheet(asPng) {
   const D = prProfileData(); if (!D) return toast('Profile not found.');
   const A = getActiveDB(), e = esc, type = D.type, R = D.R, me = D.me, a = D.a, no = rsNo();
   const rate = D.allocAll ? Math.round(100 * D.doneAll / D.allocAll) : 0, pend = D.open.reduce((s, r) => s + (r.alloc - r.done), 0);
-  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prIn(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
+  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prInP(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
   if (!rows0.length) return toast('No entries in this period to print.');
   const wk = id => A.work.find(w => w.id === id) || {}, dn = prDn(type, me.name, R, a.days.size);
   const by = new Map(); rows0.forEach(r => { const k = (r.date || '').slice(0, 7) || 'No date'; const g = by.get(k) || { k, qty: 0, cbm: 0, days: new Set(), list: [] }; g.qty += r.done; g.cbm += r.cbm; if (r.date) g.days.add(r.date); g.list.push(r); by.set(k, g); });
