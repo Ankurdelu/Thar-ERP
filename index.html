@@ -246,8 +246,8 @@ body.light .item small{color:#475569}
   .kp i { display: block; font-style: normal; font-size: 9.5px; color: #475569; text-transform: uppercase; letter-spacing: .6px; } .kp b { font-size: 17px; }
   h3.pt { margin: 16px 0 6px; font-size: 12px; color: #111111; border-left: 4px solid #111111; padding-left: 8px; text-transform: uppercase; letter-spacing: .6px; }
   #printContainer table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 10.5px; } thead { display: table-header-group; } tr { break-inside: avoid; }
-  #printContainer th { background: #fff; color: #111; font-weight: 700; text-align: left; font-size: 10px; padding: 6px 7px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1.5px solid #111; }
-  #printContainer td { border-bottom: 1px solid #e2e8f0; padding: 6px 7px; vertical-align: top; } #printContainer tbody tr:nth-child(even) td { background: #f8fafc; } tfoot td { font-weight: 800; border-top: 2px solid #111111; background: #eef2f7 !important; }
+  #printContainer th { background: #fff; color: #111; font-weight: 700; text-align: left; font-size: 10px; padding: 6px 7px; text-transform: uppercase; letter-spacing: .4px; border: 1px solid #333; }
+  #printContainer td { border: 1px solid #333; padding: 6px 7px; vertical-align: top; } #printContainer tbody tr:nth-child(even) td { background: #f8fafc; } tfoot td { font-weight: 800; border: 1px solid #333; background: #eef2f7 !important; }
   .mu { color: #64748b; } .nw { white-space: nowrap; } .rt { text-align: right; }
   #printContainer th.rt, #printContainer td.rt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   #printContainer th { vertical-align: bottom; }
@@ -1766,7 +1766,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.113';
+const APP_VER = 'V1.0.115';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -4122,10 +4122,9 @@ async function showRepairPNG(idv){
   const parts=r.parts?.length ? r.parts : [{part:r.issueType||'Part',qty:r.qty||0}];
   const open=!r.receiveDate, row=(k,v)=>`<tr><th>${k}</th><td>${v}</td></tr>`;
   const css=`<style>
-#printContainer table.rp,#pngStage table.rp{width:100%;border-collapse:separate;border-spacing:0;border:1.5px solid #111;border-radius:12px;overflow:hidden;margin:10px 0 6px;font-size:13px;table-layout:fixed}
-#printContainer table.rp th,#pngStage table.rp th{width:38%;background:#f3f4f6!important;color:#111!important;font-size:10.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;text-align:left;vertical-align:middle;padding:12px 14px;border:0!important;border-bottom:1px solid #d9dce2!important;border-right:1px solid #d9dce2!important}
-#printContainer table.rp td,#pngStage table.rp td{background:#fff!important;color:#111;font-size:13.5px;font-weight:600;vertical-align:middle;padding:12px 14px;border:0!important;border-bottom:1px solid #d9dce2!important;word-break:break-word}
-#printContainer table.rp tr:last-child th,#printContainer table.rp tr:last-child td,#pngStage table.rp tr:last-child th,#pngStage table.rp tr:last-child td{border-bottom:0!important}
+#printContainer table.rp,#pngStage table.rp{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #333;border-radius:0;overflow:hidden;margin:10px 0 6px;font-size:13px;table-layout:fixed}
+#printContainer table.rp th,#pngStage table.rp th{width:38%;background:#f3f4f6!important;color:#111!important;font-size:10.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;text-align:left;vertical-align:middle;padding:12px 14px;border:1px solid #333!important;border-right:1px solid #d9dce2!important}
+#printContainer table.rp td,#pngStage table.rp td{background:#fff!important;color:#111;font-size:13.5px;font-weight:600;vertical-align:middle;padding:12px 14px;border:1px solid #333!important;word-break:break-word}
 .stb{display:inline-block;padding:3px 14px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.8px;border:1.5px solid}
 .stb.o{color:#b91c1c;border-color:#b91c1c;background:#fef2f2}.stb.c{color:#047857;border-color:#047857;background:#ecfdf5}
 </style>`;
@@ -4621,16 +4620,7 @@ function buildPdf(jp) {
 }
 const cvBlob = (cv, type, q) => new Promise(r => cv.toBlob(r, type, q));
 function saveBlob(blob, file) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000); }
-async function htmlToPdf(name) {
-  const html = document.getElementById('printContainer').innerHTML;
-  if (!html.trim()) return toast('Nothing to save.');
-  toast('Preparing PDF...');
-  try {
-    const jp = [];
-    await reportPages(html, { S: OC.sc('pdf') }, async cv => { const b = await cvBlob(cv, 'image/jpeg', OC.q()); jp.push({ bytes: new Uint8Array(await b.arrayBuffer()), w: cv.width, h: cv.height }); cv.width = cv.height = 1; });
-    saveBlob(buildPdf(jp), name + '.pdf'); toast('PDF saved (' + jp.length + ' page' + (jp.length > 1 ? 's' : '') + ')');
-  } catch (e) { alert('PDF could not be created: ' + e.message); }
-}
+async function htmlToPdf(name) { return sharpPrint(name); } /* always real-text PDF via print; no image PDFs */
 async function htmlToPng(name) {
   const html = document.getElementById('printContainer').innerHTML;
   if (!html.trim()) return toast('Nothing to save.');
@@ -4715,10 +4705,24 @@ async function htmlToPngNb(name) {
     return openPngModal(cv, name);
   } catch (e) { document.getElementById('pngStage')?.remove(); alert('Image could not be created: ' + e.message); }
 }
-function emitReport(name, asPng) {
-  if (asPng) return htmlToPng(name);
-  if (/class="nb[" ]/.test(document.getElementById('printContainer').innerHTML)) { toast("In the print dialog, choose 'Save as PDF'."); return setTimeout(() => printNamed(name), 400); }
-  return htmlToPdf(name);
+function sharpPrint(name) {
+  const c = document.getElementById('printContainer');
+  if (!c || !c.innerHTML.trim()) return toast('Nothing to save.');
+  const F = window.__ocForce, html = c.innerHTML;
+  const osx = /class="osx"|class="oxp"/.test(html);
+  const st = document.createElement('style'); st.id = 'sharpPrintCss';
+  st.textContent = osx ? '@media print{@page{size:297mm 210mm;margin:0}html,body{background:#fff!important}html body #printContainer:not(:has(.nb)){padding:18px!important;margin:0!important;box-sizing:border-box!important;border:0!important;border-radius:0!important;background:#fff!important}#printContainer .osx .oxp{height:742px}}' : '';
+  document.body.appendChild(st);
+  const done = () => { st.remove(); window.__ocForce = null; window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  toast("Print dialog mein 'Save as PDF' chuno (real text PDF banegi)");
+  setTimeout(() => { window.__ocForce = F; printNamed(name); }, 300);
+}
+async function emitReport(name, asPng) {
+  /* every report: fixed A4 landscape, plain white (Classic Framed look), Customize is not applied */
+  if (!window.__ocForce) window.__ocForce = OSX_FORCE;
+  if (asPng) { try { return await htmlToPng(name); } finally { window.__ocForce = null; } }
+  return sharpPrint(name);
 }
 function pngReset() { const b = document.getElementById('cropBox'); if (b) b.style.display = 'none'; if (window.__png) window.__png.sel = null; }
 function pngOut(crop) {
