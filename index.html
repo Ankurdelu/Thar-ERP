@@ -922,7 +922,7 @@ window.cloudDb = firebase.firestore();
 
 const ADMIN_PASSWORD = '';
 const EMP_KEY = 'thar_employee_v1';
-const POSTS = ['Owner', 'Manager', 'Admin', 'Production Incharge', 'Final Floor Incharge', 'Production Supervisor', 'Final Supervisor', 'Packing Supervisor', 'Office Staff'];
+const POSTS = ['Owner', 'Manager', 'Mini Admin', 'Production Incharge', 'Final Floor Incharge', 'Production Supervisor', 'Final Supervisor', 'Packing Supervisor', 'Office Staff'];
 const UCOL = 'thar_factory', U_PRE = 'u_', A_PRE = 'a_';
 const ONLINE_MS = 150000, HB_MS = 60000;
 let isEmployeeMode = true, authDone = false, curUser = null, authNote = '';
@@ -961,8 +961,7 @@ async function refreshAdminPw() {
   if (!window.cloudDb) return;
   try { const d = await window.cloudDb.collection(UCOL).doc(ADMIN_PW_DOC).get(); const x = d.exists && d.data(); if (x && x.pw) setAdminPwLocal(String(x.pw)); } catch (e) {}
 }
-const postFix = p => p === 'Mini Admin' ? 'Admin' : p;
-function getEmp() { try { const o = JSON.parse(localStorage.getItem(EMP_KEY) || 'null'); if (o && o.post) o.post = postFix(o.post); return o; } catch (e) { return null; } }
+function getEmp() { try { return JSON.parse(localStorage.getItem(EMP_KEY) || 'null'); } catch (e) { return null; } }
 function setEmpLocal(o) { try { localStorage.setItem(EMP_KEY, JSON.stringify(o)); } catch (e) {} }
 function curUserName() { if (typeof VIEWAS !== 'undefined' && VIEWAS) return VIEWAS.name; if (!isEmployeeMode) return 'Admin'; if (curUser) return curUser.name; const e = getEmp(); return (e && e.name) || 'Employee'; }
 const EMP_BLOCKED = ['orders', 'attendance', 'settings', 'oldTaeList', 'oldTaeDetail', 'users', 'production', 'overall', 'personDetail', 'daDetail'];
@@ -1032,8 +1031,8 @@ function loginDoc(d, pin) {
   if (x.pin !== pin) { authBusy(false); return authBad(['auPin'], 'Incorrect PIN'); }
   const uid = d.id.slice(U_PRE.length);
   if (x.status === 'pending' || x.status === 'rejected') { authBusy(false); setEmpLocal({ uid, name: x.name, post: x.post, pin: x.pin, st: x.status }); return showPending(x.name, x.post, uid, x.status); }
-  curUser = { id: uid, name: x.name, post: postFix(x.post), pin: x.pin };
-  setEmpLocal({ uid, name: x.name, post: postFix(x.post), pin: x.pin });
+  curUser = { id: uid, name: x.name, post: x.post, pin: x.pin };
+  setEmpLocal({ uid, name: x.name, post: x.post, pin: x.pin });
   enterApp('employee');
 }
 
@@ -1243,8 +1242,8 @@ function startSession() {
     if (snap.metadata.hasPendingWrites || !curUser) return;
     if (!snap.exists) { if (!snap.metadata.fromCache) kickUser('Your account was removed by Admin.'); return; }
     const d = snap.data();
-    if (postFix(d.post) !== curUser.post || d.name !== curUser.name || d.pin !== curUser.pin) {
-      curUser.post = postFix(d.post); curUser.name = d.name; curUser.pin = d.pin;
+    if (d.post !== curUser.post || d.name !== curUser.name || d.pin !== curUser.pin) {
+      curUser.post = d.post; curUser.name = d.name; curUser.pin = d.pin;
       setEmpLocal({ uid: curUser.id, name: d.name, post: d.post, pin: d.pin });
       document.getElementById('profileLine').textContent = d.name + ' (' + d.post + ')';
     }
@@ -1327,7 +1326,7 @@ function startAdminListen() {
   if (isEmployeeMode || !window.cloudDb) { U.err = window.cloudDb ? '' : 'Cloud is not reachable. Check internet and reload.'; return; }
   if (!U.unsub) U.unsub = window.cloudDb.collection(UCOL).where('kind', '==', 'user').onSnapshot(s => {
     const old = new Set(U.list.filter(u => u.status === 'pending').map(u => u.id)), was = U.loaded;
-    U.list = s.docs.map(d => { const o = Object.assign({}, d.data(), { id: d.id.slice(U_PRE.length) }); if (o.post) o.post = postFix(o.post); return o; }); U.loaded = true;
+    U.list = s.docs.map(d => Object.assign({}, d.data(), { id: d.id.slice(U_PRE.length) })); U.loaded = true;
     if (was) U.list.filter(u => u.status === 'pending' && !old.has(u.id)).forEach(u => { try { toast('🕒 ' + u.name + ' is waiting for your approval'); navigator.vibrate && navigator.vibrate(80); } catch (e) {} }); U.err = ''; uBadge(); uRefreshSoon();
   }, e => { U.err = cloudErr(e); uRefreshSoon(); });
   startExtraListen();
@@ -1622,7 +1621,6 @@ async function cloudPushOnce() {
       if (!it || it.id == null) continue;
       const idv = String(it.id); if (!cloudIdOk(idv)) continue;
       seen.add(idv);
-      { const su = window.__cloudSeenU && window.__cloudSeenU[col]; if (su && su.has(idv) && su.get(idv) > (it._u || 0)) continue; }   // cloud copy is newer: the sync listener will merge it
       let json; try { json = JSON.stringify(it); } catch (_) { continue; }   // JSON round-trip also strips `undefined` (Firestore rejects it)
       const sig = cloudHash(json);
       if (prev.get(idv) === sig) continue;                                   // unchanged since last push
@@ -1652,8 +1650,8 @@ async function cloudPushOnce() {
     await Promise.race([b.commit(), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
     chunk.forEach(o => { if (o.t === 's') cloudSig[o.col].set(o.idv, o.sig); else cloudSig[o.col].delete(o.idv); });
   }
-  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: (window.__metaNow = Date.now()), by: window.__DEVID || '' }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
-  cloudSig.meta = metaSig; try { localStorage.setItem('thar_meta_ts', String(window.__metaNow)); } catch (e) {}
+  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: Date.now() }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
+  cloudSig.meta = metaSig;
 }
 
 const KEY = 'attendanceProFactory_v4';
@@ -1713,9 +1711,7 @@ let metaDirty = false, fullRewrite = false, flushTimer = null, flushing = Promis
 const C = { st: new WeakMap(), hay: new WeakMap(), ms: new WeakMap() };
 function inval(x) { if (x && typeof x === 'object') { C.st.delete(x); C.hay.delete(x); C.ms.delete(x); } }
 function touch(store, obj) {
-  if (!obj || !dirty[store]) return;
-  if (!window.__merging && !isViewMode && !isEmployeeMode && (store === 'work' || store === 'orders' || store === 'repairs')) obj._u = Date.now();   // last-modified stamp: newest edit wins when two admin phones sync
-  inval(obj); dataVer++;
+  if (!obj || !dirty[store]) return; inval(obj); dataVer++;
   if (isViewMode) { viewTouch(store, obj); return; }
   dirty[store].set(obj.id, obj); gone[store].delete(obj.id); mir[store].set(obj.id, obj); mir.gone[store].delete(obj.id); scheduleFlush();
 }
@@ -1773,7 +1769,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.122';
+const APP_VER = 'V1.0.117';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2815,12 +2811,7 @@ function prTop(map, n) { return [...map.values()].sort((a, b) => b.qty - a.qty |
 function prOpen(r) { return !r.complete && r.source !== 'Wood Supply' && !r.stDone && r.alloc > r.done; }
 
 function prRange() {
-  const t = todayStr(), W = PR.type === 'woodSupplier' || PR.type === 'carpenter';
-  if (!W && (PR.mode === 'next7' || PR.mode === 'next30')) PR.mode = 'all';
-  const m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
-  if (W && m === 'next7') return mk(t, prAdd(t, 6), 'Next 7 Days');
-  if (W && m === 'next30') return mk(t, prAdd(t, 29), 'Next 30 Days');
-  if (W && m === 'month') { const nx = prAdd(t.slice(0, 8) + '01', 32).slice(0, 8) + '01'; return mk(t.slice(0, 8) + '01', prAdd(nx, -1), 'This Month'); }
+  const t = todayStr(), m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
   if (m === 'today') return mk(t, t, 'Today');
   if (m === 'yest') { const y = prAdd(t, -1); return mk(y, y, 'Yesterday'); }
   if (m === '7') return mk(prAdd(t, -6), t, 'Last 7 Days');
@@ -2828,7 +2819,7 @@ function prRange() {
   if (m === 'month') return mk(t.slice(0, 8) + '01', t, 'This Month');
   if (m === 'lastmonth') { const f = prAdd(t.slice(0, 8) + '01', -1); return mk(f.slice(0, 8) + '01', f, 'Last Month'); }
   if (m === 'custom') {
-    let f = PR.from || '', to = PR.to || t;   /* supplier: future estimate dates allowed */
+    let f = PR.from || '', to = PR.to || t;
     if (f && to < f) { const x = f; f = to; to = x; }
     return { from: f, to, label: (f || 'Start') + ' to ' + to, finite: true };
   }
@@ -2839,69 +2830,12 @@ function prPrev(R) {
   const len = prDiff(R.from, R.to) + 1;
   return { from: prAdd(R.from, -len), to: prAdd(R.from, -1), finite: true, label: 'previous ' + len + ' day' + (len === 1 ? '' : 's') };
 }
-/* Supplier (wood) rows are filtered / grouped by the ESTIMATE (target) date, every other category by the production date */
-function prDt(r) { return r.est ? String(r.target || '').slice(0, 10) : r.date; }
 function prIn(r, R) {
-  const dt = prDt(r), ok = prValid(dt);
-  if (!R.finite) return r.est ? true : (ok && dt <= R.to);
-  return ok && dt >= R.from && dt <= R.to;
-}
-/* production-date filter (used by the printed Carpenter daily report) */
-function prInD(r, R) {
   const ok = prValid(r.date);
   if (!R.finite) return r.wood ? true : (ok && r.date <= R.to);
   return ok && r.date >= R.from && r.date <= R.to;
 }
-const prInP = (r, R) => PR.type === 'carpenter' ? prInD(r, R) : prIn(r, R);
-/* which date the period filter works on */
-function prDateNote(type) { return type === 'woodSupplier' || type === 'carpenter' ? 'Estimate (Target) Date' : 'Carpenter Balance Date'; }
 
-/* ---- V121: completion date lock + balance-date allocation for Sanding / Polish ---- */
-function stampDone(x, wasComplete) {   // first-time "done" date: set once, never changed afterwards
-  if (!x || x.completedOn) return x;
-  if (x.workComplete && !wasComplete) x.completedOn = todayStr();
-  return x;
-}
-function fillBalDates(x, prev) {       // carpenter balance rows with pcs but no date: keep the old date, else stamp today
-  const pc = Array.isArray(prev) ? prev : [];
-  (x.carpenterSplits || []).forEach(s => {
-    if (Number(s.done) > 0 && !s.date) {
-      const m = pc.find(p => p.date && Number(p.done) > 0 && p.name === s.name && (p.link || '') === (s.link || ''));
-      s.date = m ? m.date : todayStr();
-    }
-  });
-  return x;
-}
-function prDoneDate(w) {               // date used when pcs have no carpenter balance: the first "All Complete" date
-  if (w.completedOn) return String(w.completedOn).slice(0, 10);
-  const cs = splitsOf(w, 'carpenter').filter(c => Number(c.done) > 0 && c.date).map(c => String(c.date).slice(0, 10)).sort();
-  return cs.length ? cs[cs.length - 1] : String(w.packingDate || w.date || '').slice(0, 10);
-}
-function prPortions(w, type) {         // -> array (same order as splitsOf(w,type)) of [{q, date}] portions
-  const fb = prDoneDate(w), byDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-  const pool = splitsOf(w, 'carpenter').filter(c => Number(c.done) > 0).map(c => ({ q: Number(c.done), date: String(c.date || '').slice(0, 10) || fb, owner: prNorm(c.link), kind: 'c' })).sort(byDate);
-  const assign = (splits, src, passes) => {
-    const res = splits.map(() => []), need = splits.map(sp => Number(sp.done) || 0);
-    passes.forEach(ok => splits.forEach((sp, i) => {
-      for (const t of src) {
-        if (need[i] <= 0) break;
-        if (!(t.q > 0) || !ok(sp, t)) continue;
-        const g = Math.min(t.q, need[i]); t.q -= g; need[i] -= g; res[i].push({ q: g, date: t.date });
-      }
-    }));
-    splits.forEach((sp, i) => { if (need[i] > 0) res[i].push({ q: need[i], date: fb }); });
-    return res;
-  };
-  const pol = splitsOf(w, 'polish');
-  // Polish: pcs balanced by a carpenter "From Polish = this contractor" first, then unlinked balances, then any left over
-  const polRes = assign(pol, pool, [(sp, t) => t.owner && t.owner === prNorm(sp.name), (sp, t) => !t.owner, () => true]);
-  if (type === 'polish') return polRes;
-  // Sanding: same person as polish -> same dates; sanding-only people -> polish contractor's dates; rest -> carpenter balance dates
-  const src = [];
-  pol.forEach((sp, i) => polRes[i].forEach(t => src.push({ q: t.q, date: t.date, owner: prNorm(sp.name), kind: 'p' })));
-  src.sort(byDate); pool.forEach(t => src.push(t));
-  return assign(splitsOf(w, 'sanding'), src, [(sp, t) => t.kind === 'p' && t.owner === prNorm(sp.name), (sp, t) => t.kind === 'p', () => true]);
-}
 function prCollect(A, type) {
   const wood = type === 'woodSupplier', reg = new Map(), codes = new Map(), rows = [], unreg = new Map();
   const cc = new Map(); (db.peopleCodes || []).forEach(p => { const c = prNorm(p.code); if (c) { if (!cc.has(c)) cc.set(c, new Set()); cc.get(c).add(prNorm(p.name)); } });
@@ -2914,7 +2848,7 @@ function prCollect(A, type) {
   const note = (n, q) => { n = String(n || '').trim(); if (!n) return; const k = prNorm(n), u = unreg.get(k) || { name: n, qty: 0, entries: 0 }; u.qty += q; u.entries++; unreg.set(k, u); };
   A.work.forEach(w => {
     const total = Number(w.qty) || 0, cbmT = prNum(w.cbm), st = statusOf(w);
-    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood, est: wood || type === 'carpenter' };
+    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood };
     if (wood) {
       if (total > 0) {
         const p = resolve(w.woodSupplier);
@@ -2929,13 +2863,14 @@ function prCollect(A, type) {
       });
       return;
     }
-    const PO = (type === 'sanding' || type === 'polish') ? prPortions(w, type) : null;
-    splitsOf(w, type).forEach((sp, si) => {
+    splitsOf(w, type).forEach(sp => {
       const q = Number(sp.done) || 0, p = resolve(sp.name);
       if (!p) { if (String(sp.name || '').trim()) note(sp.name, q); return; }
-      const mk = (qq, dd) => rows.push({ ...base, key: p.key, date: dd, alloc: qq, done: qq, cbm: total ? cbmT * qq / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
-      if (PO) { const ps = PO[si]; if (ps && ps.length) ps.forEach(t => mk(t.q, t.date)); else mk(q, prDoneDate(w)); }
-      else mk(q, String(sp.date || '').slice(0, 10));
+      const carpSplits = splitsOf(w, 'carpenter');
+      const balDates = carpSplits.filter(c => Number(c.done) > 0 && c.date).map(c => String(c.date).slice(0, 10)).sort();
+      const inheritedDate = balDates.length ? balDates[balDates.length - 1] : (carpSplits.length > 0 && carpSplits[0].date ? String(carpSplits[0].date).slice(0, 10) : (w.date || '').slice(0, 10));
+      const finalDate = (type === 'sanding' || type === 'polish') ? inheritedDate : String(sp.date || '').slice(0, 10);
+      rows.push({ ...base, key: p.key, date: finalDate, alloc: q, done: q, cbm: total ? cbmT * q / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
     });
   });
   return { reg, rows, unreg, type };
@@ -2962,12 +2897,11 @@ function prAgg(rows, factory) {
     if (!(r.done > 0)) return;
     o.qty += r.done; o.cbm += r.cbm; o.entries++;
     if (r.done > o.max) o.max = r.done;
-    const dd = prDt(r);
-    if (prValid(dd)) {
-      const d = o.days.get(dd) || { date: dd, qty: 0, cbm: 0, entries: 0 };
-      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(dd, d);
-      if (!o.last || dd > o.last) o.last = dd;
-      if (!o.first || dd < o.first) o.first = dd;
+    if (prValid(r.date)) {
+      const d = o.days.get(r.date) || { date: r.date, qty: 0, cbm: 0, entries: 0 };
+      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(r.date, d);
+      if (!o.last || r.date > o.last) o.last = r.date;
+      if (!o.first || r.date < o.first) o.first = r.date;
     }
     if (!(factory && r.source === 'Stage 3 Balance')) { prBump(o.buyers, r.buyer, r.done, r.cbm); prBump(o.items, r.item, r.done, r.cbm); }
     if (r.source) prBump(o.sources, r.source, r.done, r.cbm);
@@ -3031,26 +2965,23 @@ function prBars(s, scope) {
 function prShift(n) {
   const R = prRange(), t = todayStr(); if (!R.finite) return;
   const base = R.from || R.to, len = prDiff(base, R.to) + 1;
-  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (PR.type !== 'woodSupplier' && PR.type !== 'carpenter') { if (to > t) to = t; if (f > to) f = to; }
+  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (to > t) to = t; if (f > to) f = to;
   PR.mode = 'custom'; PR.from = f; PR.to = to; PR.dlim = 20; render();
 }
 function prControls(R, withSort) {
-  const WS = PR.type === 'woodSupplier' || PR.type === 'carpenter', mx = WS ? '' : ` max="${todayStr()}"`;
-  const per = WS ? [...PR_PERIODS.slice(0, 3), ['next7', 'Next 7 Days'], ['next30', 'Next 30 Days'], ...PR_PERIODS.slice(3)] : PR_PERIODS;
-  const chips = per.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
-  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}"${mx} onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}"${mx} onchange="PR.to=this.value;render()"></div></div>` : '';
+  const chips = PR_PERIODS.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
+  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}" max="${todayStr()}" onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}" max="${todayStr()}" onchange="PR.to=this.value;render()"></div></div>` : '';
   let sort = '';
   if (withSort) {
     const opts = [['qty', 'Most Pieces'], ['cbm', 'Most CBM']]; if (PR.type !== 'woodSupplier') opts.push(['pending', 'Most Pending']);
     sort = `<div class="small muted" style="margin:2px 0 8px;font-weight:800">SORT RANKING BY</div><div class="stage-chips">${opts.map(([k, l]) => `<button class="chip ${PR.sort === k ? 'active' : ''}" onclick="PR.sort='${k}';render()">${l}</button>`).join('')}</div>`;
   }
-  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
-  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">${PR.type === 'da' ? 'PERIOD' : 'PERIOD (BY ' + prDateNote(PR.type).toUpperCase() + ')'}</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
+  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
+  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">PERIOD</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
 }
 
 function prTypeChips(cur) {
-  const lim = !!window.__subMode;   // Admin accounts: no Supplier and no Data Analysis option in Overall
-  return ['woodSupplier', 'sanding', 'polish', 'carpenter'].filter(k => !(lim && k === 'woodSupplier')).map(k => `<button class="chip ${k === cur ? 'active' : ''}" onclick="PR.type='${k}';PR.dlim=20;render()">${PR_ICON[k]} ${({ woodSupplier: 'Supplier', sanding: 'Sanding', polish: 'Polish', carpenter: 'Carpenter' })[k]}</button>`).join('') + (lim ? '' : `<button class="chip ${cur === 'da' ? 'active' : ''}" onclick="PR.type='da';render()">📈 Data Analysis</button>`);
+  return ['woodSupplier', 'sanding', 'polish', 'carpenter'].map(k => `<button class="chip ${k === cur ? 'active' : ''}" onclick="PR.type='${k}';PR.dlim=20;render()">${PR_ICON[k]} ${({ woodSupplier: 'Supplier', sanding: 'Sanding', polish: 'Polish', carpenter: 'Carpenter' })[k]}</button>`).join('') + `<button class="chip ${cur === 'da' ? 'active' : ''}" onclick="PR.type='da';render()">📈 Data Analysis</button>`;
 }
 function productionPage() {
   if (PR.type === 'da') return card('▦ Overall', `<div class="stage-chips">${prTypeChips('da')}</div>`) + card('📈 Data Analysis', `<p class="small muted" style="margin-top:-6px">Tap a report to open it</p>` + ((window.THAR105 && THAR105.rows) ? THAR105.rows() : ''));
@@ -3100,11 +3031,10 @@ function productionPage() {
     <div class="stage-chips">${prTypeChips(type)}</div>
     ${prControls(R, true)}
     <div class="small muted" style="margin:4px 0 0">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)} (${esc(P.from)} to ${esc(P.to)})` : ''}</div>
-    <div class="small muted" style="margin:4px 0 0">Ranking is filtered by <b style="color:var(--text)">${prDateNote(type)}</b>.${prDt({ est: true, target: '' }) === '' && (type === 'woodSupplier' || type === 'carpenter') ? ' Entries without a target date show only in All Time.' : ''}</div>
     ${kpis}
     <div class="actions" style="margin-top:14px"><button class="btn blue smallbtn" onclick="prPrintRanking()">🖨 Ranking Report PDF</button><button class="btn blue smallbtn" onclick="prPrintRanking(true)">🖼 Ranking PNG</button></div>
     ${prSec((wood ? 'Supplier Ranking' : 'Ranking'), 'Tap a name to open the full production profile', rankHtml)}
-    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(prSeries(all.days, R), 'all'))}
+    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month'), prBars(prSeries(all.days, R), 'all'))}
   `);
 }
 
@@ -3116,7 +3046,7 @@ function registerUnlisted(type, enc) {
 }
 
 function openPersonDetail(type, enc) {
-  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRW.buyer = ''; PRW.tae = ''; PRW.item = ''; PRF.lim = 30; PRF.dlim = 15;
+  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRF.lim = 30; PRF.dlim = 15;
   tab = 'personDetail'; render(); window.scrollTo(0, 0);
 }
 function prHay(r) { return [r.tae, r.sub, r.item, r.itemName, r.size, r.buyer, r.source, r.via, r.link, r.date].join(' ').toLowerCase(); }
@@ -3151,14 +3081,13 @@ function prDetails(kind, enc, scope) {
   const val = decodeURIComponent(enc), A = getActiveDB(), R = prRange(), C = prData(A, PR.type), all = scope === 'all';
   const norm = s => String(s || '').trim() || 'Not specified';
   let rows = C.rows.filter(r => r.done > 0 && prIn(r, R) && (all || r.key === PR.person));
-  const titles = { buyer: 'Buyer', tae: 'TAE', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
+  const titles = { buyer: 'Buyer', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
   if (kind === 'buyer' || kind === 'item') {
     if (all) rows = rows.filter(r => r.source !== 'Stage 3 Balance');
     rows = rows.filter(r => norm(kind === 'buyer' ? r.buyer : r.item) === val);
-  } else if (kind === 'tae') rows = rows.filter(r => (String(r.tae || '').trim() || 'No TAE') === val);
-  else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
-  else if (kind === 'month') rows = rows.filter(r => prValid(prDt(r)) && prDt(r).slice(0, 7) === val);
-  else if (kind === 'day') rows = rows.filter(r => prDt(r) === val);
+  } else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
+  else if (kind === 'month') rows = rows.filter(r => prValid(r.date) && r.date.slice(0, 7) === val);
+  else if (kind === 'day') rows = rows.filter(r => r.date === val);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(a.tae).localeCompare(String(b.tae), undefined, { numeric: true }));
   const qty = rows.reduce((t, r) => t + r.done, 0), cbm = rows.reduce((t, r) => t + r.cbm, 0);
   const cards = rows.slice(0, 300).map(r => (all ? `<div class="small muted" style="margin:10px 0 4px">👤 ${esc((C.reg.get(r.key) || {}).name || '')}</div>` : '') + prEntryCard(r).replace(`onclick="viewWork('`, `onclick="prDetClose();viewWork('`)).join('') || '<div class="empty">No entries.</div>';
@@ -3186,30 +3115,6 @@ function daDetailPage() {
   if (!r) return card('📈 Data Analysis', back + '<div class="empty">This report is not available.</div>');
   return card('📈 ' + esc(r.title), back + `<p class="small muted" style="margin:8px 0 10px">${esc(r.sub || '')}</p>` + r.html);
 }
-var PRW = { buyer: '', tae: '', item: '' };
-function prWoodOrders(D) {
-  const e = esc, bv = r => String(r.buyer || '').trim() || 'Not specified', iv = r => String(r.item || '').trim() || 'Not specified', tv = r => String(r.tae || '').trim() || 'No TAE';
-  const base = D.me.cur.filter(r => r.done > 0);
-  const total = base.reduce((t, r) => t + r.done, 0);
-  /* one list: name -> pieces, high to low; tap a row to open the full list of its entries */
-  const list = (title, kind, fn, sub) => {
-    const m = new Map();
-    base.forEach(r => { const k = fn(r), o = m.get(k) || { k, q: 0, rs: [] }; o.q += r.done; o.rs.push(r); m.set(k, o); });
-    const arr = [...m.values()].sort((a, b) => b.q - a.q || a.k.localeCompare(b.k, undefined, { numeric: true }));
-    const body = arr.map((o, n) => {
-      const pct = total ? Math.round(100 * o.q / total) : 0;
-      return `<div class="item" role="button" tabindex="0" style="cursor:pointer" onclick="prDetails('${kind}','${prEnc(o.k)}','me')" onkeydown="if(event.key==='Enter')this.click()"><div style="min-width:0;flex:1"><strong>${n + 1}. ${e(o.k)}</strong><small>${sub(o.rs)}</small></div><div class="right"><strong>${prQ(o.q)} pcs</strong><small>${pct}% · tap for full list ›</small></div></div>`;
-    }).join('');
-    return `<div class="small muted" style="margin:16px 0 6px;font-weight:800">${title} · ${arr.length}</div>${body}`;
-  };
-  const cnt = (rs, f) => new Set(rs.map(f)).size, pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-  const itemName = rs => { const x = rs.find(r => r.itemName); return x ? e(x.itemName) + ' · ' : ''; };
-  if (!base.length) return '<div class="empty">No entries in this period. Entries without a target date show only in All Time.</div>';
-  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:18px">${prQ(total)} pcs</b><span class="small muted">Tap any row to open its full list</span></div>` +
-    list('BUYER', 'buyer', bv, rs => pl(cnt(rs, tv), 'TAE') + ' · ' + pl(cnt(rs, iv), 'item code')) +
-    list('TAE', 'tae', tv, rs => e([...new Set(rs.map(bv))].join(', ')) + ' · ' + pl(cnt(rs, iv), 'item code')) +
-    list('ITEM CODE', 'item', iv, rs => itemName(rs) + pl(cnt(rs, tv), 'TAE'));
-}
 function personDetailPage() {
   const D = prProfileData(), type = PR.type, wood = type === 'woodSupplier';
   const back = `<button class="btn smallbtn" onclick="tab='production';render();window.scrollTo(0,0)">← Back to Ranking</button>`;
@@ -3235,8 +3140,8 @@ function personDetailPage() {
     <div class="small muted">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)}` : ''}</div>
     ${kpis}
     <div class="actions"><button class="btn blue smallbtn" onclick="prPrintProfile()">🖨 Profile Report PDF</button><button class="btn blue smallbtn" onclick="prPrintProfile(true)">🖼 Profile PNG</button></div>
-    ${prSec('📋 Order Details', 'Buyer-wise · TAE-wise · item code-wise (by ' + esc(prDateNote(type).toLowerCase()) + ', ' + esc(R.label) + ')', prWoodOrders(D))}
-    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(ser, 'me'))}
+    ${prSec('⏳ Current Workload', 'Open entries where allocated pieces are not yet completed (all dates)', prMetrics([['Pending Pieces', prQ(pendPcs)], ['Open Entries', open.length], ['Overdue Entries', overdue], ['Completion Rate (allocated work)', rate + '%']]) + `<div style="margin-top:12px">${openHtml}</div>`)}
+    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month'), prBars(ser, 'me'))}
   `);
 }
 
@@ -4135,7 +4040,7 @@ function copyWork(idv) {
   const x = curDB().work.find(a => a.id === idv); if (!x) return;
   const c = JSON.parse(JSON.stringify(x));
   Object.assign(c, { subOrder: '', dupMark: '', date: '', workComplete: false, packingStatus: 'Pending', packingDate: '', packingSplits: [], needsRepair: false, qcV: 2 });
-  delete c.completedOn; QCK.forEach(k => c[k] = false);
+  QCK.forEach(k => c[k] = false);
   ['sanding', 'polish', 'carpenter'].forEach(k => (c[k + 'Splits'] || []).forEach(p => { p.done = 0; p.date = ''; }));
   editWork(null, c); toast('Cloned. Enter the new Sub Order and save.');
 }
@@ -4823,7 +4728,7 @@ function sharpPrint(name) {
   document.body.appendChild(st);
   const done = () => { st.remove(); window.__ocForce = null; window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
-  toast("In the print dialog choose 'Save as PDF' (a real text PDF will be created)");
+  toast("Print dialog mein 'Save as PDF' chuno (real text PDF banegi)");
   setTimeout(() => { window.__ocForce = F; printNamed(name); }, 300);
 }
 async function emitReport(name, asPng) {
@@ -5394,10 +5299,7 @@ function rsHead(title, dateTxt, tag, a, b, c, d, lab) {
 }
 const RS_LAB = '<tr class="o3"><td>SNo.</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>@DET@</td><td>Wood Supplier /<br>Vendor</td></tr>';
 var RS_PREPARED_BY = 'Pradeep Bishnoi';   /* name printed under "Prepared by" */
-var RS_APPROVED_BY = 'Mohit Ji';   /* name printed under "Approved by" */
-var RS_VERIFY_NOTE = 'Balance and Gap Verified by Supplier, Cross-Checked by Carpenter';   /* bold note under supplier name in Vendor column */
-function rsVend(v, show) { return esc(v) + (show && String(v || '').trim() ? '<br><b>(' + esc(RS_VERIFY_NOTE) + ')</b>' : ''); }
-function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + esc(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>'; }
+function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>'; }
 function rsTotal(q, c) { return '<tr class="ot"><td colspan="4" class="oxr"><b>TOTAL</b></td><td><b>' + prQ(q) + '</b></td><td></td><td><b>' + prC(c) + '</b></td><td></td><td></td></tr>'; }
 function rsGroupRow(left, right) { return '<tr class="oxg"><td colspan="9"><div class="oxgd"><b>' + left + '</b><span>' + right + '</span></div></td></tr>'; }
 
@@ -5413,7 +5315,7 @@ function rsEntry(r, w, type, name, sn) {
     '<div class="oxb"><div class="oxh">Status<span>' + (r.complete ? 'COMPLETE' : 'Pending ' + prQ(pend) + ' of ' + prQ(tot) + ' pcs') + '</span></div>' + others +
     (r.target ? '<div class="oxl">Target Date : <b>' + e(osxDate(r.target)) + '</b></div>' : '') + '</div>';
   const vend = type === 'woodSupplier' ? String(w.woodSupplier || '').trim() : [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
-  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + rsVend(vend, type === 'woodSupplier' ? r.source === 'Stage 3 Balance' : (type === 'carpenter' && String(r.source || '').trim() !== '')) + '</td></tr>';
+  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + e(vend) + '</td></tr>';
 }
 
 /* ---------- RANKING report: one sheet per date (+ ranking summary for multi-day periods) ---------- */
@@ -5435,7 +5337,7 @@ function prCarpBuild(C, rowsIn, R, ranking, A, type) {
       rows.push(rsGroupRow((gi + 1) + '. ' + e(g.name), 'Total ' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM · ' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies')));
       g.list.sort((a, b) => b.done - a.done).forEach(r => rows.push(rsEntry(r, wk(r.workId), type, g.name, ++sn)));
     });
-    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), (d && dayName(d) ? e(dayName(d)) : 'Period : ' + e(R.label)), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
+    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), 'Period : ' + e(R.label) + (d ? ' &nbsp;(' + e(dayName(d)) + ')' : ''), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
     return { head, rows, tail: rsTotal(tq, tc) + rsSig(), hdr, raw: type === 'woodSupplier' ? null : { type, d, people, tq, tc, rs, label: R.label, day: dayName(d), no, wk, attOf: n => rscAtt(n, d), absent: type === 'carpenter' ? [...new Set([...C.reg.values()].map(p => p.name).filter(n => rscAtt(n, d) === 'Absent'))] : [] } };
   });
   if (dates.length > 1) {
@@ -5521,26 +5423,26 @@ function rscRow(it, first, span, raw) {
   const oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type).map(x => '<td>' + e(rsWho(w, x)) + '</td>').join('');
   const vend = [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
   return '<tr>' + (first ? '<td rowspan="' + span + '">' + it.sn + '</td>' : '') +
-    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br><b>Total Pc : ' + prQ(g.qty) + '</b></td>' : '') +
+    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br>' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM<br>' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies') + '</td>' : '') +
     '<td>' + wb(r.item || '') + (r.buyer ? ' ' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td>' +
     '<td class="l"><b>' + e(r.itemName || '') + '</b>' + (r.size ? ' <span class="sz">· ' + e(r.size) + '</span>' : '') + '</td>' +
     '<td><b>' + prQ(r.done) + '</b></td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td>' +
     '<td><b>' + prQ(r.done) + '</b> of ' + prQ(tot) + (link ? '<br>from Polish <b>' + e(link) + '</b>' : '') + '</td>' + oth +
     '<td>' + (r.target ? '<b>' + e(osxDate(r.target)) + '</b>' : '-') + '</td>' +
-    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + rsVend(vend, type === 'carpenter' && String(r.source || '').trim() !== '') + '</td></tr>';
+    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + e(vend) + '</td></tr>';
 }
 
 function rscTable(raw, items, tail) {
   const e = esc, type = raw.type, oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type);
   const cols = '<colgroup>' + RSC_COLS.map(w => '<col style="width:' + w + '%">').join('') + '</colgroup>';
   const h = '<tr class="h1"><td colspan="3" class="l"><img src="' + OSX_LOGO + '" alt="THAR"></td><td colspan="3" class="l">UNIT-02 :G793, G793A,</td><td colspan="5"><b>' + RS_TITLES[type] + '</b></td><td colspan="3"><span class="sp"><b>Date : ' + (raw.d ? e(osxDate(raw.d)) : '—') + '</b><b>[' + raw.rs.length + ']</b></span></td></tr>' +
-    '<tr class="h2"><td colspan="4"><b>' + (raw.d && raw.day ? e(raw.day) : 'Period : ' + e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
+    '<tr class="h2"><td colspan="4"><b>Period : ' + (raw.d && raw.day ? e(raw.day) : e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
     '<tr class="h3"><td>SNo.</td><td>' + PR_LABEL[type] + '</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description / Size</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>Done of<br>Order Qty</td><td>' + RS_STAGE[oth[0]] + '</td><td>' + RS_STAGE[oth[1]] + '</td><td>Target<br>Date</td><td>' + (type === 'carpenter' ? 'Time' : 'Status') + '</td><td>Wood Supplier /<br>Vendor</td></tr>';
   const cnt = new Map(); items.forEach(it => cnt.set(it.g, (cnt.get(it.g) || 0) + 1));
   const seen = new Set();
   const rows = items.map(it => { const first = !seen.has(it.g); seen.add(it.g); return rscRow(it, first, cnt.get(it.g), raw); }).join('');
   const tl = tail ? '<tr class="tt"><td colspan="5" style="text-align:right;padding-right:8px!important"><b>TOTAL</b></td><td><b>' + prQ(raw.tq) + '</b></td><td></td><td><b>' + prC(raw.tc) + '</b></td><td colspan="6"></td></tr>' +
-    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + e(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>' : '';
+    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>' : '';
   return '<table class="rst">' + cols + h + rows + tl + '</table>';
 }
 
@@ -5590,7 +5492,7 @@ async function rsEmit(groups, name, asPng) {
 }
 async function prPrintCarpenterSheet(asPng) {
   const A = getActiveDB(), type = PR.type, R = prRange(), C = prData(A, type);
-  const rowsIn = C.rows.filter(r => prInP(r, R) && r.done > 0);
+  const rowsIn = C.rows.filter(r => prIn(r, R) && r.done > 0);
   if (!rowsIn.length) return toast('No production data in this period to print.');
   const ranking = prPeople(C, R, PR.sort).filter(p => p.qty > 0 || p.pendPcs > 0);
   const days = [...new Set(rowsIn.map(r => r.date || ''))];
@@ -5602,7 +5504,7 @@ async function prPrintProfileSheet(asPng) {
   const D = prProfileData(); if (!D) return toast('Profile not found.');
   const A = getActiveDB(), e = esc, type = D.type, R = D.R, me = D.me, a = D.a, no = rsNo();
   const rate = D.allocAll ? Math.round(100 * D.doneAll / D.allocAll) : 0, pend = D.open.reduce((s, r) => s + (r.alloc - r.done), 0);
-  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prInP(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
+  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prIn(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
   if (!rows0.length) return toast('No entries in this period to print.');
   const wk = id => A.work.find(w => w.id === id) || {}, dn = prDn(type, me.name, R, a.days.size);
   const by = new Map(); rows0.forEach(r => { const k = (r.date || '').slice(0, 7) || 'No date'; const g = by.get(k) || { k, qty: 0, cbm: 0, days: new Set(), list: [] }; g.qty += r.done; g.cbm += r.cbm; if (r.date) g.days.add(r.date); g.list.push(r); by.set(k, g); });
@@ -5748,8 +5650,6 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       if(itemDupFind(o.orderNo, o.itemCode, workEditId)) { checkItemCodeDuplicate(); return toast('This Item Code already exists in this TAE! The same Item Code cannot be used twice in one TAE.'); }
 
       ['sanding','polish','carpenter'].forEach(stage => { o[`${stage}Splits`] = getSplitsFromDOM(stage); });
-      const prevW = workEditId ? A.work.find(x => x.id === workEditId) : null;
-      fillBalDates(o, prevW && splitsOf(prevW, 'carpenter'));
       o.packingSplits = getPackFromDOM(); if (wf.elements.noPacking?.checked) o.packingSplits = [];
       if (o.packingSplits.reduce((t, p) => t + p.qty, 0) > Number(o.qty || 0)) return toast('Packing Hall pcs cannot exceed total quantity.');
       if (o.packingSplits.some(p => !p.date)) return toast('Packing Hall row needs a date.');
@@ -5776,7 +5676,6 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       for (const k of ['sanding','polish','carpenter']) { const dn = o[`${k}Splits`].reduce((t, p) => t + p.done, 0); if (dn > Number(o.qty || 0)) return toast(`${k[0].toUpperCase() + k.slice(1)}: completed ${dn} is more than total ${o.qty}. Please correct the Done quantities.`); }
       if (['sanding','polish','carpenter'].some(k => o[`${k}Splits`].some(p => p.done > p.qty))) return toast('Done qty cannot exceed allocated qty.');
       const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending';
-      if (prevW && prevW.completedOn) o.completedOn = prevW.completedOn; else stampDone(o, !!(prevW && prevW.workComplete));
 
       if (!workEditId) o.id = id(); else o.id = workEditId;
 
@@ -7958,7 +7857,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
     return new Promise(function(res){
       try{ var o=document.getElementById('mkAskBox'); if(o) o.remove(); }catch(e){}
       var m=document.createElement('div'); m.className='modal-backdrop'; m.id='mkAskBox'; m.style.zIndex='300';
-      m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>🔑 '+esc(title)+'</h3><p class="small muted">Select the key file to confirm.</p><div class="actions"><button type="button" class="btn danger" style="flex:1" id="mkAskPick">Choose key file</button><button type="button" class="btn" style="flex:1" id="mkAskNo">Cancel</button></div></section>';
+      m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>🔑 '+esc(title)+'</h3><p class="small muted">Select the master key file to confirm.</p><div class="actions"><button type="button" class="btn danger" style="flex:1" id="mkAskPick">Choose key file</button><button type="button" class="btn" style="flex:1" id="mkAskNo">Cancel</button></div></section>';
       document.body.appendChild(m);
       var fin=function(v){ try{ m.remove(); }catch(e){} res(v); };
       document.getElementById('mkAskNo').onclick=function(){ fin(false); };
@@ -7993,7 +7892,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
 <style id="subCSS">
 .sa-box{display:flex!important;justify-content:center;align-items:center;margin:0 auto 22px!important;width:92px;min-width:0!important;height:30px;padding:0 14px!important;font-size:12.5px;text-align:center;font-weight:700;letter-spacing:.3px}
 .sa-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:rgba(var(--blue-rgb),.14);border:1px solid rgba(var(--blue-rgb),.4);color:var(--blue);font-size:11px;font-weight:800}
-body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips [onclick^="PR.type='da'"]{display:none!important}
+body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
 </style>
 <script>
 (function () {
@@ -8057,17 +7956,20 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
     } catch (e) { authBusy(false); authErr(cloudErr(e)); }
   };
 
+  var BLOCKED_OFF = ['orders', 'attendance', 'production', 'personDetail'];
   function enterSub(a) {
-    window.__subMode = true; window.__subLoginMode = false; window.__mkOk = true;
-    curUser = null; document.body.classList.add('sub');
-    try { enterApp('admin'); } catch (e) { console.error(e); }
-    try {
-      if (window.__subUn) { try { window.__subUn(); } catch (e) { } }
-      window.__subUn = cdb().collection(UCOL).doc('sa_' + a.id).onSnapshot(function (s) {
-        if (!s.exists && !s.metadata.fromCache && window.__subMode) { try { toast('Your Admin account was removed.'); } catch (e) { } doLogout(); }
-      }, function () { });
-    } catch (e) { }
-    toast('Admin login successful');
+    SA = { id: a.id, name: a.name }; window.__subMode = true; window.__subLoginMode = false;
+    ['scheduleFlush', 'flushNow', 'doFlush', 'mirrorSoon', 'mirrorNow'].forEach(function (n) { window[n] = NOOP; });
+    BLOCKED_OFF.forEach(function (t) { var i = EMP_BLOCKED.indexOf(t); if (i > -1) EMP_BLOCKED.splice(i, 1); });
+    try { PEND = JSON.parse(localStorage.getItem(PKEY + SA.id) || 'null') || { orders: {}, att: {} }; } catch (e) { PEND = { orders: {}, att: {} }; }
+    curUser = null; window.__entering = true; document.body.classList.add('entry', 'sub');
+    try { ENTRY = { id: 'sa_' + a.id, name: a.name, sub: true }; enterApp('employee'); } finally { window.__entering = false; }
+    document.body.classList.add('sub');
+    PR.type = 'carpenter';
+    var pl = $('profileLine'); if (pl) pl.textContent = a.name + ' (Mini Admin)';
+    fixRole(); var ub = $('usersBtn'); if (ub) ub.classList.add('hidden');
+    subListen(); epRestore(); try { epResend(); } catch (e) { } subSend();
+    render(); toast('Mini Admin login · attendance and repairing controls enabled');
   }
 
   var subUns = [], saSeen = new Set(), saReady = false;
@@ -8215,12 +8117,12 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
     try { return _lists.apply(this, arguments); } finally { isEmployeeMode = e; }
   };
   var _prod = window.productionPage;
-  window.productionPage = function () { if (window.__subMode && ['sanding', 'polish', 'carpenter'].indexOf(PR.type) < 0) PR.type = 'carpenter'; return _prod.apply(this, arguments); };
+  window.productionPage = function () { if (SA) PR.type = 'carpenter'; return _prod.apply(this, arguments); };
 
   var _lo = window.doLogout;
   window.doLogout = async function () {
-    var was = !!window.__subMode, r = await _lo.apply(this, arguments);
-    if (was) { try { if (window.__subUn) window.__subUn(); } catch (e) { } window.__subUn = null; window.__subMode = false; setTimeout(function () { location.reload(); }, 200); }
+    var was = !!SA, r = await _lo.apply(this, arguments);
+    if (was) { subStop(); SA = null; setTimeout(function () { location.reload(); }, 200); }    
     return r;
   };
 
@@ -8293,7 +8195,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
 
   function subCard() {
     var L = SAL.slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
-    return card('🛡 Admin Accounts', '<p class="small muted" style="margin-top:-6px">Login with the <b>Admin</b> box on the first screen. Everything syncs through the cloud, so keep both phones online. Admin accounts get the same screens and controls as you. Only Supplier and Data Analysis are missing from Overall.</p>' +
+    return card('🛡 Admin Accounts', '<p class="small muted" style="margin-top:-6px">Login with the <b>Admin</b> box on the first screen. They can approve entries, add Work Entry, Order Send, mark Attendance and see Carpenter ranking. Everything is applied on <b>this phone</b>, so keep it online. They never see settings, backups or other rankings.</p>' +
       '<div class="field"><label>Name</label><input id="saName" type="text" autocomplete="off" placeholder="e.g. Suresh (Manager)"></div>' +
       '<div class="row"><div class="field"><label>Username</label><input id="saUser" type="text" autocomplete="off" autocapitalize="none"></div><div class="field"><label>Password</label><input id="saPass" type="text" autocomplete="off"></div></div>' +
       '<button class="btn primary" style="width:100%" onclick="subCreate()">＋ Create Admin Account</button>' +
@@ -9111,7 +9013,7 @@ function pickName(stage, x, text) {
 // ---------- COMMIT NEW ----------
 function mkWork(d) {
   const o = { id: id(), orderNo: d.orderNo, subOrder: cleanTae(d.subOrder), dupMark: '', itemCode: d.itemCode, buyer: d.buyer || '', itemName: d.itemName || '', size: d.size, sizeUnit: d.sizeUnit || 'Cm', qty: Number(d.qty), cbm: String(d.cbm), woodSupplier: d.woodSupplier, date: d.date || todayStr(), targetDate: d.targetDate || '', sandingSplits: [], polishSplits: [], carpenterSplits: [], packingSplits: [], qcV: 2 };
-  const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(o, false); return slim(o);
+  const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending'; return slim(o);
 }
 function putWork(o) { A().work.push(o); touch('work', o); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(o.id); }
 function commitNew(d) {
@@ -9234,7 +9136,7 @@ function commitPlan(P) {
   const xs = new Map(); P.sim.forEach(v => xs.set(v.x.id, v.x)); const g = [], tips = [], chips = [{ l: '↩ Undo', send: 'undo' }];
   xs.forEach(x => g.push({ id: x.id, b: JSON.stringify(x) }));
   P.sim.forEach(v => { v.x[v.k + 'Splits'] = v.rows; if (NO_STAGE[v.k]) delete v.x[NO_STAGE[v.k]]; });
-  xs.forEach(x => { const gb = g.find(e => e.id === x.id), pv = gb ? JSON.parse(gb.b) : null; fillBalDates(x, pv && splitsOf(pv, 'carpenter')); inval(x); const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(x, !!(pv && pv.workComplete)); slim(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id); });
+  xs.forEach(x => { inval(x); const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; slim(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id); });
   save(); render(); g.forEach(e => { e.a = JSON.stringify(workOf(e.id)); }); pushU(g); S.lastItems = S.items; S.items = null;
   P.sim.forEach(v => { const x = v.x, tq = Number(x.qty || 0), nx = STORD[STORD.indexOf(v.k) + 1];
     if (tq > 0 && stg(x, v.k).done >= tq) { S.rl = 'win'; tips.push(short(x) + ': ' + STL[v.k] + ' is now 100%.' + (nx && !noSt(x, nx) && stg(x, nx).alloc < tq ? ' Want to allocate ' + STL[nx] + '?' : '')); if (nx && !noSt(x, nx) && stg(x, nx).alloc < tq && chips.length < 4) likely(nx, x).slice(0, 3).forEach(n => chips.push({ l: n + ' · ' + STL[nx], send: n + ' ' + nx + ' ' + tq + ' of 0' })); }
@@ -9778,7 +9680,7 @@ function commitEdit(P) {
   const x0 = workOf(P.id); if (!x0) return say('That entry is no longer there.');
   const b = JSON.stringify(x0); setWork(P.id, P.after);
   const x = workOf(P.id); inval(x);
-  if (P.recalc) { const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(x, !!JSON.parse(b).workComplete); }
+  if (P.recalc) { const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; }
   slim(x); inval(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id);
   save(); render(); pushU([{ id: P.id, b, a: JSON.stringify(x) }]); S.target = x.id;
   return say('✅ Updated ' + lbl(x) + ' (' + P.n + ' change' + (P.n > 1 ? 's' : '') + ').', { chips: [{ l: '↩ Undo', send: 'undo' }] });
@@ -11411,7 +11313,7 @@ function decide(pid, yes) {
       if (it.base) { const a = it.after, b = it.base; new Set(Object.keys(a).concat(Object.keys(b))).forEach(k => { if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) { if (a[k] === undefined) delete r[k]; else r[k] = clone(a[k]); } }); }
       else { Object.keys(r).forEach(k => delete r[k]); Object.assign(r, it.after); }
       inval(r);
-      if (it.store === 'work') { const st = statusOf(r); r.workComplete = st.complete; r.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(r, !!JSON.parse(before).workComplete); }
+      if (it.store === 'work') { const st = statusOf(r); r.workComplete = st.complete; r.packingStatus = st.complete ? 'Send' : 'Pending'; }
       slim(r); inval(r); touch(it.store, r); undo.push({ store: it.store, id: r.id, before });
     });
     if (!p.del) { save2(); }
@@ -11572,13 +11474,13 @@ function vRecStart() {
   r.onresult = e => { errN = 0; let all = ''; for (let i = 0; i < e.results.length; i++) all += ' ' + e.results[i][0].transcript; vSess = vsquash(all); vOnHear(); };
   r.onerror = e => {
     const er = e && e.error;
-    if (er === 'not-allowed' || er === 'service-not-allowed') { vStopAll(); note('Microphone permission is blocked. Allow the microphone in your browser or app settings.'); }
-    else if (er === 'audio-capture') { vStopAll(); note('Microphone not found. If another app is using it, close that app.'); }
-    else if (er === 'network' && ++errN > 3) { vStopAll(); note('Cannot reach the voice service. Check your internet and try again.'); }
+    if (er === 'not-allowed' || er === 'service-not-allowed') { vStopAll(); note('Microphone permission block hai. Browser/app settings mein mic allow karo.'); }
+    else if (er === 'audio-capture') { vStopAll(); note('Mic nahi mil raha. Koi aur app use kar rahi ho to band karo.'); }
+    else if (er === 'network' && ++errN > 3) { vStopAll(); note('Voice service tak internet nahi pahunch raha. Net check karke dobara try karo.'); }
   };
   r.onend = () => {
     if (rec !== r) return; rec = null; const t = vSess; vSess = ''; if (t) vBuf = vmerge(vBuf, t);
-    if (!t && Date.now() - vT0 < 500) { if (++vFast > 6) { vStopAll(); note('Microphone cannot start. Open the page in Chrome over HTTPS and check the microphone permission.'); return; } } else vFast = 0;
+    if (!t && Date.now() - vT0 < 500) { if (++vFast > 6) { vStopAll(); note('Mic start nahi ho pa raha. Page ko Chrome mein HTTPS par kholo aur mic permission check karo.'); return; } } else vFast = 0;
     vOnEnd(!!t);
   };
   try { r.start(); } catch (e) { rec = null; vRest = setTimeout(vRecStart, 600); }
@@ -11600,7 +11502,7 @@ function vOnEnd(had) {
 function vStopAll() { if (live) liveOff(); dictStop(); }
 /* ---- voice typing (mic button) ---- */
 function dictStart() {
-  if (!SR) { note('Voice typing needs Chrome, Edge or Safari (HTTPS).'); return; }
+  if (!SR) { note('Voice typing ke liye Chrome/Edge/Safari (HTTPS) chahiye.'); return; }
   if (live) liveOff(); const IN = $('#apIn');
   vDict = true; micOn = true; vMuted = false; vBuf = vnz(IN && IN.value); vSess = ''; vFast = 0; vRecStart(); head();
 }
@@ -11613,7 +11515,7 @@ function mic(on) { if (on) dictStart(); else { if (live) liveOff(); dictStop(); 
 const LV_END = /^\s*(bye|goodbye|stop( live| listening)?|end (live|call)|that'?s all|band kar(o| do)?|bas( karo| ho gaya)?|ruk ?jao|बंद करो|बस|रुक जाओ)\s*[.!]?\s*$/i;
 function lvDigits(t) { return t.replace(/[\u0966-\u096F]/g, d => d.charCodeAt(0) - 0x966); }
 function liveOn() {
-  if (!SR || !TS) { note('Live voice needs Chrome, Edge or Safari (HTTPS).'); return; }
+  if (!SR || !TS) { note('Live voice ke liye Chrome/Edge/Safari (HTTPS) chahiye.'); return; }
   if (!S) newChat(); dictStop(); lvBuild();
   live = true; vMuted = false; micOn = true; vBuf = ''; vSess = ''; vFast = 0; try { TS.cancel(); } catch (e) { } spk++; spkOn = false;
   lvShow(true); lvUser(''); lvBot(''); lvLang(); lvSet('listen');
@@ -11674,7 +11576,7 @@ function say(t, cb) {
 /* ---- Live full-screen UI ---- */
 function lvSet(st) {
   lvSt = st; lvT = Date.now(); if (!lvEl) return; lvEl.className = 'apLv st-' + st;
-  $('#apLvSt', lvEl).textContent = ({ listen: 'Listening… speak now', hear: 'Listening…', think: 'Thinking…', speak: 'Speaking · tap the orb to interrupt', muted: 'Mic is muted · tap to unmute' })[st] || '';
+  $('#apLvSt', lvEl).textContent = ({ listen: 'Sun raha hu… bolo', hear: 'Sun raha hu…', think: 'Soch raha hu…', speak: 'Bol raha hu · rokne ke liye orb dabao', muted: 'Mic mute hai · Unmute dabao' })[st] || '';
   const m = $('#apLvMute', lvEl); if (m) { m.querySelector('span').textContent = vMuted ? '🔇' : '🎙️'; m.querySelector('em').textContent = vMuted ? 'Unmute' : 'Mute'; }
 }
 const lvUser = t => { const e = lvEl && $('#apLvU', lvEl); if (e) e.textContent = t ? '🎙 ' + t : ''; };
@@ -11758,7 +11660,7 @@ function makeDoc(a) {
 function docHtml(d) { return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(d.title || d.name) + '</title><style>body{font-family:Arial,"Noto Sans Devanagari",sans-serif;font-size:12pt;line-height:1.5;padding:24px;color:#000}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 8px;text-align:left}h1,h2,h3{margin:14px 0 6px}</style></head><body>' + md(d.content) + '</body></html>'; }
 function dlDoc(i) {
   const m = S && S.messages[i]; if (!m || !m.doc) return; const d = m.doc;
-  if (d.fmt === 'pdf') { const w = window.open('', '_blank'); if (!w) { note('Popup is blocked. Allow popups and tap again.'); return; } w.document.write(docHtml(d)); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) { } }, 400); return; }
+  if (d.fmt === 'pdf') { const w = window.open('', '_blank'); if (!w) { note('Popup block hai. Popups allow karke dobara dabao.'); return; } w.document.write(docHtml(d)); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) { } }, 400); return; }
   const blob = d.fmt === 'csv' ? new Blob(['\ufeff' + d.content], { type: 'text/csv;charset=utf-8' }) : d.fmt === 'txt' ? new Blob([d.content], { type: 'text/plain;charset=utf-8' }) : new Blob(['\ufeff' + docHtml(d)], { type: 'application/msword' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
@@ -11801,7 +11703,7 @@ function head() {
   const mb = $('#apMic', root); if (mb) { mb.classList.toggle('on', vDict && micOn); mb.setAttribute('aria-pressed', vDict ? 'true' : 'false'); } lvHead();
   const ls = $('#apLs', root);
   if (ls) {
-    const dict = vDict && micOn, x = dict ? '🎤 Voice typing ON · speak, the text appears in the box, then tap Send (tap the mic to stop)' : (spkOn && !live ? '🔊 Speaking… (tap the speaker button to mute)' : '');
+    const dict = vDict && micOn, x = dict ? '🎤 Voice typing ON · bolo, text box mein likha jayega, phir Send dabao (band karne ke liye mic dabao)' : (spkOn && !live ? '🔊 Bol raha hu… (speaker button se mute karo)' : '');
     ls.innerHTML = x ? (dict ? '<span class="eq"><i></i><i></i><i></i><i></i><i></i></span>' : '') + '<span>' + esc(x) + '</span>' : ''; ls.classList.toggle('on', !!x);
   }
 }
@@ -12244,7 +12146,7 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: speak and the text appears in the box">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: bolo, text box mein likha jayega">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
   root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root); try { lvBuild(); } catch (e) { console.error('live voice ui', e); }
   try { const A = window.TAE_ASSISTANT; if (A && !A.__apSay) { const o = A.say; A.say = function (t) { eSay(t); return true; }; A.__apSay = 1; }
     if (A && A.log && !A.log.__ap) { const op = A.log.push; A.log.push = function (m) { const r = op.apply(this, arguments); try { if (m && m.who === 'b') eSay(m.text || '', { html: m.html, cc: m.chips }); } catch (e) { } return r; }; A.log.__ap = 1; } } catch (e) { }
@@ -14154,114 +14056,5 @@ body.light .field input,body.light .field select,body.light .field textarea,body
 body.light .field input:focus,body.light .field select:focus,body.light .field textarea:focus,body.light .search:focus{border-color:var(--blue)!important}
 body.light .card{border:1px solid #cbd5e1}
 </style>
-
-<script>
-/* V1.0.122: two-way sync between Master and Admin phones (newest edit wins, per record) */
-(function () {
-  'use strict';
-  var DEV; try { DEV = localStorage.getItem('thar_dev_id'); if (!DEV) { DEV = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('thar_dev_id', DEV); } } catch (e) { DEV = 'd' + Math.random().toString(36).slice(2, 10); }
-  window.__DEVID = DEV;
-  var unsubs = [], seenU = { work: new Map(), orders: new Map(), repairs: new Map() }, ready = { work: false, orders: false, repairs: false, meta: false }, first = { work: true, orders: true, repairs: true }, rt = null;
-  window.__cloudSeenU = seenU;
-  function allReady() { return ready.work && ready.orders && ready.repairs && ready.meta; }
-  window.__syncBlocked = function () { return unsubs.length > 0 && !allReady(); };
-  function scheduleRender() {
-    clearTimeout(rt);
-    rt = setTimeout(function () {
-      var a = document.activeElement;
-      if ((a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || document.querySelector('.modal-backdrop:not(.closing)')) return scheduleRender();
-      try { render(); } catch (e) { }
-    }, 700);
-  }
-  function kick() { if (allReady()) { window.__syncWait = 0; try { doPushCloud(); } catch (e) { } } }
-
-  function mergeCol(col, snap) {
-    var arr = db[col]; if (!Array.isArray(arr)) arr = db[col] = [];
-    var idx = new Map(); arr.forEach(function (x) { if (x && x.id != null) idx.set(String(x.id), x); });
-    var changed = false, sub = !!window.__subMode, wipe = first[col] && sub && !snap.metadata.fromCache;
-    window.__merging = true;
-    try {
-      if (wipe) {   // Admin phone, first real load: make this phone an exact copy of the cloud
-        var ids = new Set(snap.docs.map(function (d) { return d.id; }));
-        idx.forEach(function (o, id) { if (!ids.has(id)) { var i = arr.indexOf(o); if (i >= 0) arr.splice(i, 1); try { untouch(col, id); } catch (e) { } idx.delete(id); changed = true; } });
-      }
-      var changes = wipe ? snap.docs.map(function (d) { return { type: 'added', doc: d }; }) : snap.docChanges();
-      changes.forEach(function (ch) {
-        var id = ch.doc.id;
-        if (ch.type === 'removed') {
-          seenU[col].delete(id);
-          var o = idx.get(id);
-          if (o && cloudSig[col].has(id)) { var i2 = arr.indexOf(o); if (i2 >= 0) arr.splice(i2, 1); try { untouch(col, id); } catch (e) { } idx.delete(id); cloudSig[col].delete(id); changed = true; }
-          return;
-        }
-        var d = ch.doc.data(); if (d.id == null) d.id = id;
-        seenU[col].set(id, d._u || 0);
-        var loc = idx.get(id);
-        if (!loc) {
-          if (db.deleted && db.deleted[id]) return;
-          arr.push(d); idx.set(id, d); cloudSig[col].set(id, cloudHash(JSON.stringify(d))); touch(col, d); changed = true; return;
-        }
-        var hd = cloudHash(JSON.stringify(d));
-        if ((d._u || 0) > (loc._u || 0) || (wipe && cloudHash(JSON.stringify(loc)) !== hd)) {
-          Object.keys(loc).forEach(function (k) { delete loc[k]; }); Object.assign(loc, d);
-          cloudSig[col].set(id, cloudHash(JSON.stringify(loc))); touch(col, loc); changed = true;
-        }
-      });
-    } finally { window.__merging = false; }
-    if (!snap.metadata.fromCache) first[col] = false;
-    if (changed) { try { dataVer++; } catch (e) { } scheduleRender(); }
-  }
-
-  function metaTs() { try { return Number(localStorage.getItem('thar_meta_ts') || 0); } catch (e) { return 0; } }
-  function mergeMeta(doc) {
-    if (!doc.exists) return;
-    var d = doc.data() || {}, lu = d.lastUpdated || 0;
-    if (d.by === DEV) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
-    if (!d.by && !window.__subMode) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
-    if (lu <= metaTs()) return;
-    window.__merging = true;
-    try {
-      if (Array.isArray(d.buyers)) db.buyers = d.buyers;
-      if (Array.isArray(d.peopleCodes)) db.peopleCodes = d.peopleCodes;
-      if (d.attendance && typeof d.attendance === 'object') db.attendance = Object.assign({}, db.attendance || {}, d.attendance);
-      if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
-    } finally { window.__merging = false; }
-    try {
-      cloudSig.meta = cloudHash(JSON.stringify({ company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '', buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, schema: 2 }));
-      localStorage.setItem('thar_meta_ts', String(lu));
-    } catch (e) { }
-    try { dataVer++; metaDirty = true; mir.meta = true; scheduleFlush(); } catch (e) { }
-    scheduleRender();
-  }
-
-  function start() {
-    if (unsubs.length || !window.cloudDb || isEmployeeMode || isViewMode) return;
-    CLOUD_COLS.forEach(function (col) {
-      unsubs.push(cloudColRef(col).onSnapshot(function (snap) {
-        if (isEmployeeMode) return;
-        try { mergeCol(col, snap); } catch (e) { console.error('sync merge', e); }
-        if (!snap.metadata.fromCache) { ready[col] = true; kick(); }
-      }, function (e) { console.error('sync', e); }));
-    });
-    unsubs.push(window.cloudDb.collection('thar_factory').doc('meta_info').onSnapshot(function (doc) {
-      if (isEmployeeMode) return;
-      try { mergeMeta(doc); } catch (e) { console.error('sync meta', e); }
-      if (!doc.metadata.fromCache) { ready.meta = true; kick(); }
-    }, function (e) { console.error('sync meta', e); }));
-  }
-  function stop() {
-    unsubs.forEach(function (u) { try { u(); } catch (e) { } }); unsubs = [];
-    ready = { work: false, orders: false, repairs: false, meta: false }; first = { work: true, orders: true, repairs: true };
-    CLOUD_COLS.forEach(function (c) { seenU[c].clear(); });
-  }
-  var _sa = window.startAdminListen; window.startAdminListen = function () { var r = _sa.apply(this, arguments); try { start(); } catch (e) { console.error(e); } return r; };
-  var _xa = window.stopAdminListen; window.stopAdminListen = function () { try { stop(); } catch (e) { } return _xa.apply(this, arguments); };
-  var _dp = window.doPushCloud;
-  window.doPushCloud = function () {
-    if (window.__syncBlocked()) { window.__syncWait = (window.__syncWait || 0) + 1; if (window.__syncWait < 40) setTimeout(function () { window.doPushCloud(); }, 1500); return Promise.resolve(); }
-    return _dp.apply(this, arguments);
-  };
-})();
-</script>
 </body>
 </html>
