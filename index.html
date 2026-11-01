@@ -1766,7 +1766,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.112';
+const APP_VER = 'V1.0.113';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2879,7 +2879,7 @@ function prData(A, type) {
 }
 const ATT_OK = ['P', 'P+½OT', 'P+FOT', 'P+2OT', 'Half Day', 'HOL+P', 'HOL+P+½OT', 'HOL+P+FOT'];
 function prAttSet(name, R) {
-  const k = prNorm(name), ws = (db.workers || []).filter(x => prNorm(x.name) === k); if (!ws.length) return null;
+  const ws = rscWorkersOf(name); if (!ws.length) return null;
   const t = todayStr(), set = new Set(), att = db.attendance || {};
   ws.forEach(x => Object.keys(att).forEach(key => {
     if (!key.startsWith(x.id + '|') || !ATT_OK.includes(att[key])) return;
@@ -5381,7 +5381,16 @@ function rscCss(k, c) {
 }
 
 var RSC_ATT_TIME = { 'P': '9am to 6pm', 'P+½OT': '9am to 9pm', 'P+FOT': 'Full OT', 'P+2OT': 'Double OT', 'Half Day': 'Half Day', 'Absent': 'Absent', 'Holiday': 'Holiday', 'Weekly Off': 'Weekly Off', 'HOL+P': 'Holiday + Present', 'HOL+P+½OT': 'Holiday + ½ OT', 'HOL+P+FOT': 'Holiday + Full OT' };   /* edit the text/time here */
-function rscAtt(name, d) { const k = prNorm(name), att = db.attendance || {}; let v = ''; (db.workers || []).forEach(x => { const a = att[x.id + '|' + d]; if (!v && a && prNorm(x.name) === k) v = a; }); return v; }
+function rscLev(a, b) { let p = Array.from({ length: b.length + 1 }, (_, j) => j); for (let i = 1; i <= a.length; i++) { const c = [i]; for (let j = 1; j <= b.length; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[b.length]; }
+/* attendance workers for a registered person: exact name first, else the single closest spelling (1-2 letters off) */
+function rscWorkersOf(name) {
+  const k = prNorm(name), ws = db.workers || [], ex = ws.filter(x => prNorm(x.name) === k);
+  if (ex.length || !k) return ex;
+  const taken = new Set((db.peopleCodes || []).map(p => prNorm(p.name))), lim = Math.max(1, Math.floor(k.length * 0.15));
+  const sc = ws.filter(x => !taken.has(prNorm(x.name))).map(x => ({ x, d: rscLev(k, prNorm(x.name)) })).filter(o => o.d <= lim).sort((a, b) => a.d - b.d);
+  return sc.length && (sc.length === 1 || sc[0].d < sc[1].d) ? [sc[0].x] : [];
+}
+function rscAtt(name, d) { const att = db.attendance || {}; let v = ''; rscWorkersOf(name).forEach(x => { const a = att[x.id + '|' + d]; if (!v && a) v = a; }); return v; }
 function rscTime(v) { return v && v !== 'Unmarked' ? (RSC_ATT_TIME[v] || v) : '-'; }
 function rscItems(raw) {
   const out = []; let sn = 0;
