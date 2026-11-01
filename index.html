@@ -1769,7 +1769,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.118';
+const APP_VER = 'V1.0.119';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -5301,7 +5301,7 @@ const RS_LAB = '<tr class="o3"><td>SNo.</td><td>Alias Code /<br>Buyer Sku</td><t
 var RS_PREPARED_BY = 'Pradeep Bishnoi';   /* name printed under "Prepared by" */
 var RS_APPROVED_BY = 'Mohit Ji';   /* name printed under "Approved by" */
 var RS_VERIFY_NOTE = 'Balance and Gap Verified by Supplier, Cross-Checked by Carpenter';   /* bold note under supplier name in Vendor column */
-function rsVend(v) { return esc(v) + (String(v || '').trim() ? '<br><b>(' + esc(RS_VERIFY_NOTE) + ')</b>' : ''); }
+function rsVend(v, show) { return esc(v) + (show && String(v || '').trim() ? '<br><b>(' + esc(RS_VERIFY_NOTE) + ')</b>' : ''); }
 function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + esc(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>'; }
 function rsTotal(q, c) { return '<tr class="ot"><td colspan="4" class="oxr"><b>TOTAL</b></td><td><b>' + prQ(q) + '</b></td><td></td><td><b>' + prC(c) + '</b></td><td></td><td></td></tr>'; }
 function rsGroupRow(left, right) { return '<tr class="oxg"><td colspan="9"><div class="oxgd"><b>' + left + '</b><span>' + right + '</span></div></td></tr>'; }
@@ -5318,7 +5318,7 @@ function rsEntry(r, w, type, name, sn) {
     '<div class="oxb"><div class="oxh">Status<span>' + (r.complete ? 'COMPLETE' : 'Pending ' + prQ(pend) + ' of ' + prQ(tot) + ' pcs') + '</span></div>' + others +
     (r.target ? '<div class="oxl">Target Date : <b>' + e(osxDate(r.target)) + '</b></div>' : '') + '</div>';
   const vend = type === 'woodSupplier' ? String(w.woodSupplier || '').trim() : [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
-  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + rsVend(vend) + '</td></tr>';
+  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + rsVend(vend, type === 'woodSupplier' ? r.source === 'Stage 3 Balance' : (type === 'carpenter' && String(r.source || '').trim() !== '')) + '</td></tr>';
 }
 
 /* ---------- RANKING report: one sheet per date (+ ranking summary for multi-day periods) ---------- */
@@ -5340,7 +5340,7 @@ function prCarpBuild(C, rowsIn, R, ranking, A, type) {
       rows.push(rsGroupRow((gi + 1) + '. ' + e(g.name), 'Total ' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM · ' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies')));
       g.list.sort((a, b) => b.done - a.done).forEach(r => rows.push(rsEntry(r, wk(r.workId), type, g.name, ++sn)));
     });
-    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), 'Period : ' + e(R.label) + (d ? ' &nbsp;(' + e(dayName(d)) + ')' : ''), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
+    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), (d && dayName(d) ? e(dayName(d)) : 'Period : ' + e(R.label)), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
     return { head, rows, tail: rsTotal(tq, tc) + rsSig(), hdr, raw: type === 'woodSupplier' ? null : { type, d, people, tq, tc, rs, label: R.label, day: dayName(d), no, wk, attOf: n => rscAtt(n, d), absent: type === 'carpenter' ? [...new Set([...C.reg.values()].map(p => p.name).filter(n => rscAtt(n, d) === 'Absent'))] : [] } };
   });
   if (dates.length > 1) {
@@ -5426,20 +5426,20 @@ function rscRow(it, first, span, raw) {
   const oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type).map(x => '<td>' + e(rsWho(w, x)) + '</td>').join('');
   const vend = [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
   return '<tr>' + (first ? '<td rowspan="' + span + '">' + it.sn + '</td>' : '') +
-    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br>' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM<br>' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies') + '</td>' : '') +
+    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br><b>Total Pc : ' + prQ(g.qty) + '</b></td>' : '') +
     '<td>' + wb(r.item || '') + (r.buyer ? ' ' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td>' +
     '<td class="l"><b>' + e(r.itemName || '') + '</b>' + (r.size ? ' <span class="sz">· ' + e(r.size) + '</span>' : '') + '</td>' +
     '<td><b>' + prQ(r.done) + '</b></td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td>' +
     '<td><b>' + prQ(r.done) + '</b> of ' + prQ(tot) + (link ? '<br>from Polish <b>' + e(link) + '</b>' : '') + '</td>' + oth +
     '<td>' + (r.target ? '<b>' + e(osxDate(r.target)) + '</b>' : '-') + '</td>' +
-    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + rsVend(vend) + '</td></tr>';
+    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + rsVend(vend, type === 'carpenter' && String(r.source || '').trim() !== '') + '</td></tr>';
 }
 
 function rscTable(raw, items, tail) {
   const e = esc, type = raw.type, oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type);
   const cols = '<colgroup>' + RSC_COLS.map(w => '<col style="width:' + w + '%">').join('') + '</colgroup>';
   const h = '<tr class="h1"><td colspan="3" class="l"><img src="' + OSX_LOGO + '" alt="THAR"></td><td colspan="3" class="l">UNIT-02 :G793, G793A,</td><td colspan="5"><b>' + RS_TITLES[type] + '</b></td><td colspan="3"><span class="sp"><b>Date : ' + (raw.d ? e(osxDate(raw.d)) : '—') + '</b><b>[' + raw.rs.length + ']</b></span></td></tr>' +
-    '<tr class="h2"><td colspan="4"><b>Period : ' + (raw.d && raw.day ? e(raw.day) : e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
+    '<tr class="h2"><td colspan="4"><b>' + (raw.d && raw.day ? e(raw.day) : 'Period : ' + e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
     '<tr class="h3"><td>SNo.</td><td>' + PR_LABEL[type] + '</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description / Size</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>Done of<br>Order Qty</td><td>' + RS_STAGE[oth[0]] + '</td><td>' + RS_STAGE[oth[1]] + '</td><td>Target<br>Date</td><td>' + (type === 'carpenter' ? 'Time' : 'Status') + '</td><td>Wood Supplier /<br>Vendor</td></tr>';
   const cnt = new Map(); items.forEach(it => cnt.set(it.g, (cnt.get(it.g) || 0) + 1));
   const seen = new Set();
