@@ -871,6 +871,7 @@ body.ut-dragging *, body.ut-dragging *::before, body.ut-dragging *::after { tran
       <small id="profileLine"></small>
     </div>
     <button id="bkAllBtn" class="btn smallbtn role-btn bk-all-btn" onclick="event.stopPropagation();backupAll()">Backup</button>
+    <button id="astBtn" class="btn smallbtn role-btn bk-all-btn hidden" style="margin-left:6px;white-space:nowrap" onclick="event.stopPropagation();tfOpenAst()">Assistant</button>
   </div>
   <div class="actions">
     <button id="usersBtn" class="btn smallbtn users-btn hidden" onclick="openUsers()">👥 Users <span id="usersBadge" class="ubadge zero">0</span></button>
@@ -922,7 +923,7 @@ window.cloudDb = firebase.firestore();
 
 const ADMIN_PASSWORD = '';
 const EMP_KEY = 'thar_employee_v1';
-const POSTS = ['Owner', 'Manager', 'Mini Admin', 'Production Incharge', 'Final Floor Incharge', 'Production Supervisor', 'Final Supervisor', 'Packing Supervisor', 'Office Staff'];
+const POSTS = ['Owner', 'Manager', 'Admin', 'Production Incharge', 'Final Floor Incharge', 'Production Supervisor', 'Final Supervisor', 'Packing Supervisor', 'Office Staff'];
 const UCOL = 'thar_factory', U_PRE = 'u_', A_PRE = 'a_';
 const ONLINE_MS = 150000, HB_MS = 60000;
 let isEmployeeMode = true, authDone = false, curUser = null, authNote = '';
@@ -961,7 +962,8 @@ async function refreshAdminPw() {
   if (!window.cloudDb) return;
   try { const d = await window.cloudDb.collection(UCOL).doc(ADMIN_PW_DOC).get(); const x = d.exists && d.data(); if (x && x.pw) setAdminPwLocal(String(x.pw)); } catch (e) {}
 }
-function getEmp() { try { return JSON.parse(localStorage.getItem(EMP_KEY) || 'null'); } catch (e) { return null; } }
+const postFix = p => p === 'Mini Admin' ? 'Admin' : p;
+function getEmp() { try { const o = JSON.parse(localStorage.getItem(EMP_KEY) || 'null'); if (o && o.post) o.post = postFix(o.post); return o; } catch (e) { return null; } }
 function setEmpLocal(o) { try { localStorage.setItem(EMP_KEY, JSON.stringify(o)); } catch (e) {} }
 function curUserName() { if (typeof VIEWAS !== 'undefined' && VIEWAS) return VIEWAS.name; if (!isEmployeeMode) return 'Admin'; if (curUser) return curUser.name; const e = getEmp(); return (e && e.name) || 'Employee'; }
 const EMP_BLOCKED = ['orders', 'attendance', 'settings', 'oldTaeList', 'oldTaeDetail', 'users', 'production', 'overall', 'personDetail', 'daDetail'];
@@ -1017,7 +1019,7 @@ function authShow(step, err) {
     h = brand + `<section class="card"><h3>${_u('8J+boSBBZG1pbiBMb2dpbg==')}</h3>`
       + `<div class="field"><label>Password</label><input id="auPass" type="password" placeholder="${_u('RW50ZXIgYWRtaW4gcGFzc3dvcmQ=')}" autocomplete="off" onkeydown="if(event.key==='Enter')gateGo()"></div>`
       + E + `<button class="btn primary" style="width:100%;margin-top:8px" onclick="gateGo()">Login</button></section>`
-      + `<button class="auth-link" onclick="recoverFromFolder()">📁 Restore from existing Thar Flow folder</button><button class="auth-link" onclick="authShow('choose')">← Back</button>`;
+      + `<button class="auth-link" onclick="authShow('choose')">← Back</button>`;
   } else { return authShow('empRegister', err); }
   const corner = '';
   ov.innerHTML = '<div class="auth-box">' + h + '</div>' + corner;
@@ -1031,8 +1033,8 @@ function loginDoc(d, pin) {
   if (x.pin !== pin) { authBusy(false); return authBad(['auPin'], 'Incorrect PIN'); }
   const uid = d.id.slice(U_PRE.length);
   if (x.status === 'pending' || x.status === 'rejected') { authBusy(false); setEmpLocal({ uid, name: x.name, post: x.post, pin: x.pin, st: x.status }); return showPending(x.name, x.post, uid, x.status); }
-  curUser = { id: uid, name: x.name, post: x.post, pin: x.pin };
-  setEmpLocal({ uid, name: x.name, post: x.post, pin: x.pin });
+  curUser = { id: uid, name: x.name, post: postFix(x.post), pin: x.pin };
+  setEmpLocal({ uid, name: x.name, post: postFix(x.post), pin: x.pin });
   enterApp('employee');
 }
 
@@ -1242,8 +1244,8 @@ function startSession() {
     if (snap.metadata.hasPendingWrites || !curUser) return;
     if (!snap.exists) { if (!snap.metadata.fromCache) kickUser('Your account was removed by Admin.'); return; }
     const d = snap.data();
-    if (d.post !== curUser.post || d.name !== curUser.name || d.pin !== curUser.pin) {
-      curUser.post = d.post; curUser.name = d.name; curUser.pin = d.pin;
+    if (postFix(d.post) !== curUser.post || d.name !== curUser.name || d.pin !== curUser.pin) {
+      curUser.post = postFix(d.post); curUser.name = d.name; curUser.pin = d.pin;
       setEmpLocal({ uid: curUser.id, name: d.name, post: d.post, pin: d.pin });
       document.getElementById('profileLine').textContent = d.name + ' (' + d.post + ')';
     }
@@ -1326,7 +1328,7 @@ function startAdminListen() {
   if (isEmployeeMode || !window.cloudDb) { U.err = window.cloudDb ? '' : 'Cloud is not reachable. Check internet and reload.'; return; }
   if (!U.unsub) U.unsub = window.cloudDb.collection(UCOL).where('kind', '==', 'user').onSnapshot(s => {
     const old = new Set(U.list.filter(u => u.status === 'pending').map(u => u.id)), was = U.loaded;
-    U.list = s.docs.map(d => Object.assign({}, d.data(), { id: d.id.slice(U_PRE.length) })); U.loaded = true;
+    U.list = s.docs.map(d => { const o = Object.assign({}, d.data(), { id: d.id.slice(U_PRE.length) }); if (o.post) o.post = postFix(o.post); return o; }); U.loaded = true;
     if (was) U.list.filter(u => u.status === 'pending' && !old.has(u.id)).forEach(u => { try { toast('🕒 ' + u.name + ' is waiting for your approval'); navigator.vibrate && navigator.vibrate(80); } catch (e) {} }); U.err = ''; uBadge(); uRefreshSoon();
   }, e => { U.err = cloudErr(e); uRefreshSoon(); });
   startExtraListen();
@@ -1560,8 +1562,14 @@ function startCloudListen() {
       if (!isEmployeeMode || !doc.exists) return;
       const d = doc.data(); if (!d) return;
       const first = !cloudMetaOK; cloudMetaOK = true;     // collections are only applied once migration has written meta_info
-      if (Array.isArray(d.buyers)) db.buyers = d.buyers;
-      if (Array.isArray(d.peopleCodes)) db.peopleCodes = d.peopleCodes;
+      /* FIX: merge (union) instead of replace, so a stale cloud copy can never drop registered suppliers / names (the "Needs fix" bug) */
+      if (Array.isArray(d.buyers)) db.buyers = Array.from(new Set((db.buyers || []).concat(d.buyers)));
+      if (Array.isArray(d.peopleCodes)) {
+        var have = new Set((db.peopleCodes || []).map(function (p) { return [p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|'); }));
+        var add = d.peopleCodes.filter(function (p) { return p && !have.has([p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|')); });
+        db.peopleCodes = (db.peopleCodes || []).concat(add);
+        window.__nr = null;
+      }
       if (d.attendance && typeof d.attendance === 'object') db.attendance = d.attendance;
       if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
       if (first) CLOUD_COLS.forEach(cloudApplyCol);        // apply anything that arrived before meta_info
@@ -1621,6 +1629,7 @@ async function cloudPushOnce() {
       if (!it || it.id == null) continue;
       const idv = String(it.id); if (!cloudIdOk(idv)) continue;
       seen.add(idv);
+      { const su = window.__cloudSeenU && window.__cloudSeenU[col]; if (su && su.has(idv) && su.get(idv) > (it._u || 0)) continue; }   // cloud copy is newer: the sync listener will merge it
       let json; try { json = JSON.stringify(it); } catch (_) { continue; }   // JSON round-trip also strips `undefined` (Firestore rejects it)
       const sig = cloudHash(json);
       if (prev.get(idv) === sig) continue;                                   // unchanged since last push
@@ -1650,8 +1659,8 @@ async function cloudPushOnce() {
     await Promise.race([b.commit(), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
     chunk.forEach(o => { if (o.t === 's') cloudSig[o.col].set(o.idv, o.sig); else cloudSig[o.col].delete(o.idv); });
   }
-  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: Date.now() }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
-  cloudSig.meta = metaSig;
+  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: (window.__metaNow = Date.now()), by: window.__DEVID || '' }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
+  cloudSig.meta = metaSig; try { localStorage.setItem('thar_meta_ts', String(window.__metaNow)); } catch (e) {}
 }
 
 const KEY = 'attendanceProFactory_v4';
@@ -1711,7 +1720,9 @@ let metaDirty = false, fullRewrite = false, flushTimer = null, flushing = Promis
 const C = { st: new WeakMap(), hay: new WeakMap(), ms: new WeakMap() };
 function inval(x) { if (x && typeof x === 'object') { C.st.delete(x); C.hay.delete(x); C.ms.delete(x); } }
 function touch(store, obj) {
-  if (!obj || !dirty[store]) return; inval(obj); dataVer++;
+  if (!obj || !dirty[store]) return;
+  if (!window.__merging && !isViewMode && !isEmployeeMode && (store === 'work' || store === 'orders' || store === 'repairs')) obj._u = Date.now();   // last-modified stamp: newest edit wins when two admin phones sync
+  inval(obj); dataVer++;
   if (isViewMode) { viewTouch(store, obj); return; }
   dirty[store].set(obj.id, obj); gone[store].delete(obj.id); mir[store].set(obj.id, obj); mir.gone[store].delete(obj.id); scheduleFlush();
 }
@@ -1769,7 +1780,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.117';
+const APP_VER = 'V1.0.130';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -1911,7 +1922,7 @@ const HDB = 'thar_erp_handles';
 function hOpen() { return new Promise((res, rej) => { const r = indexedDB.open(HDB, 1); r.onupgradeneeded = () => r.result.createObjectStore('h'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
 async function hGet() { try { const d = await hOpen(); const v = await idbReq(d.transaction('h').objectStore('h').get('root')); d.close(); return v || null; } catch (e) { return null; } }
 async function hSet(v) { const d = await hOpen(); const tx = d.transaction('h', 'readwrite'); tx.objectStore('h').put(v, 'root'); await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); d.close(); }
-async function folderInit() { rootDir = await hGet(); folderPerm = !!rootDir && (await rootDir.queryPermission({ mode: 'readwrite' })) === 'granted'; }
+async function folderInit() { rootDir = null; folderPerm = false; }   /* V1.0.128: Thar Flow folder system removed */
 async function fsGet(path, create) { const p = path.split('/'); let d = rootDir; for (let i = 0; i < p.length - 1; i++) d = await d.getDirectoryHandle(p[i], { create: !!create }); return d.getFileHandle(p[p.length - 1], { create: !!create }); }
 async function ensureDirs() { for (const n of ['Data', 'Work Backup', 'Order Backup']) await rootDir.getDirectoryHandle(n, { create: true }); }
 async function tailOk(f) { try { const t = (await f.slice(Math.max(0, f.size - 300)).text()).trim(); const l = t.split('\n').pop(); return l.startsWith('{"f":1,') || l.endsWith('}'); } catch (_) { return false; } }
@@ -2275,7 +2286,7 @@ async function backupDriveRetry() {
 }
 function pickOld(k) {
   pendingKind = k; document.getElementById('oldModal')?.remove(); document.getElementById('srcModal')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="srcModal" onclick="if(event.target===this)this.remove()"><section class="card record-modal" style="width:min(420px,100%)"><div class="section-title"><h3>${k === 'order' ? '📦 Order' : '⚒ Work'} Backup · Open from</h3><button class="btn smallbtn" onclick="document.getElementById('srcModal').remove()">✕</button></div><div class="actions" style="flex-direction:column"><button class="btn blue" onclick="pickFromFolder('${k}')">📁 Thar Flow folder</button><button class="btn" onclick="document.getElementById('srcModal').remove();document.getElementById('viewOldFile').click()">📱 Phone / Files / Google Drive app</button><button class="btn amber" onclick="document.getElementById('srcModal').remove();moreSub='drive';go('settings')">☁ Google Drive (direct, needs Client ID)</button></div></section></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" id="srcModal" onclick="if(event.target===this)this.remove()"><section class="card record-modal" style="width:min(420px,100%)"><div class="section-title"><h3>${k === 'order' ? '📦 Order' : '⚒ Work'} Backup · Open from</h3><button class="btn smallbtn" onclick="document.getElementById('srcModal').remove()">✕</button></div><div class="actions" style="flex-direction:column"><button class="btn" onclick="document.getElementById('srcModal').remove();document.getElementById('viewOldFile').click()">📱 Phone / Files / Google Drive app</button><button class="btn amber" onclick="document.getElementById('srcModal').remove();moreSub='drive';go('settings')">☁ Google Drive (direct, needs Client ID)</button></div></section></div>`);
 }
 async function pickFromFolder(k) {
   document.getElementById('srcModal')?.remove();
@@ -2299,7 +2310,8 @@ function folderStatusHtml(kind) {
   if (!folderPerm) return `<button class="btn amber smallbtn" style="margin-bottom:10px" onclick="reconnectFolder()">🔓 Reconnect Thar Flow folder</button>`;
   return `<div class="small" style="color:var(--green2);margin-bottom:10px">📁 Saving to Thar Flow / ${kind === 'order' ? 'Order Backup' : 'Work Backup'} · same file is overwritten, no duplicates</div>`;
 }
-function folderBanner() {
+function folderBanner() { return ''; }
+function folderBannerOld() {
   if (isEmployeeMode || isViewMode || !window.showDirectoryPicker || folderPerm) return '';
   return `<div style="background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.35); color:var(--amber); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>📁 Thar Flow folder ${rootDir ? 'needs reconnect' : 'not set'}</span><button class="btn smallbtn amber" onclick="${rootDir ? 'reconnectFolder()' : 'pickFolder()'}">${rootDir ? 'Reconnect' : 'Choose'}</button></div>`;
 }
@@ -2811,7 +2823,12 @@ function prTop(map, n) { return [...map.values()].sort((a, b) => b.qty - a.qty |
 function prOpen(r) { return !r.complete && r.source !== 'Wood Supply' && !r.stDone && r.alloc > r.done; }
 
 function prRange() {
-  const t = todayStr(), m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
+  const t = todayStr(), W = PR.type === 'woodSupplier';
+  if (!W && (PR.mode === 'next7' || PR.mode === 'next30')) PR.mode = 'all';
+  const m = PR.mode, mk = (from, to, label) => ({ from, to, label, finite: true });
+  if (W && m === 'next7') return mk(t, prAdd(t, 6), 'Next 7 Days');
+  if (W && m === 'next30') return mk(t, prAdd(t, 29), 'Next 30 Days');
+  if (W && m === 'month') { const nx = prAdd(t.slice(0, 8) + '01', 32).slice(0, 8) + '01'; return mk(t.slice(0, 8) + '01', prAdd(nx, -1), 'This Month'); }
   if (m === 'today') return mk(t, t, 'Today');
   if (m === 'yest') { const y = prAdd(t, -1); return mk(y, y, 'Yesterday'); }
   if (m === '7') return mk(prAdd(t, -6), t, 'Last 7 Days');
@@ -2819,7 +2836,7 @@ function prRange() {
   if (m === 'month') return mk(t.slice(0, 8) + '01', t, 'This Month');
   if (m === 'lastmonth') { const f = prAdd(t.slice(0, 8) + '01', -1); return mk(f.slice(0, 8) + '01', f, 'Last Month'); }
   if (m === 'custom') {
-    let f = PR.from || '', to = PR.to || t;
+    let f = PR.from || '', to = PR.to || t;   /* supplier: future estimate dates allowed */
     if (f && to < f) { const x = f; f = to; to = x; }
     return { from: f, to, label: (f || 'Start') + ' to ' + to, finite: true };
   }
@@ -2830,12 +2847,70 @@ function prPrev(R) {
   const len = prDiff(R.from, R.to) + 1;
   return { from: prAdd(R.from, -len), to: prAdd(R.from, -1), finite: true, label: 'previous ' + len + ' day' + (len === 1 ? '' : 's') };
 }
+/* Supplier (wood) rows are filtered / grouped by the ESTIMATE (target) date, every other category by the production date */
+function prDt(r) { return r.est ? String(r.target || '').slice(0, 10) : r.date; }
 function prIn(r, R) {
+  const dt = prDt(r), ok = prValid(dt);
+  if (!R.finite) return r.est ? true : (ok && dt <= R.to);
+  return ok && dt >= R.from && dt <= R.to;
+}
+/* production-date filter (used by the printed Carpenter daily report) */
+function prInD(r, R) {
   const ok = prValid(r.date);
   if (!R.finite) return r.wood ? true : (ok && r.date <= R.to);
   return ok && r.date >= R.from && r.date <= R.to;
 }
+const prInP = (r, R) => PR.type === 'carpenter' ? prInD(r, R) : prIn(r, R);
+/* which date the period filter works on */
+function prDateNote(type) { return type === 'woodSupplier' ? 'Estimate (Target) Date' : type === 'carpenter' ? 'Production Date' : 'Carpenter Balance Date'; }
 
+/* ---- V121: completion date lock + balance-date allocation for Sanding / Polish ---- */
+function stampDone(x, wasComplete) {   // first-time "done" date: set once, never changed afterwards
+  if (!x || x.completedOn) return x;
+  if (x.workComplete && !wasComplete) x.completedOn = todayStr();
+  return x;
+}
+function fillBalDates(x, prev) {       // carpenter balance rows with pcs but no date: keep the old date, else stamp today
+  const pc = Array.isArray(prev) ? prev : [];
+  (x.carpenterSplits || []).forEach(s => {
+    if (Number(s.done) > 0 && !s.date) {
+      const m = pc.find(p => p.date && Number(p.done) > 0 && p.name === s.name && (p.link || '') === (s.link || ''));
+      s.date = m ? m.date : todayStr();
+    }
+  });
+  return x;
+}
+function prDoneDate(w) {               // date used when pcs have no carpenter balance: the Fitting Date (Balance ticked), else the first "All Complete" date
+  if (w.noBalance && w.fitDate) return String(w.fitDate).slice(0, 10);
+  if (w.completedOn) return String(w.completedOn).slice(0, 10);
+  const cs = splitsOf(w, 'carpenter').filter(c => Number(c.done) > 0 && c.date).map(c => String(c.date).slice(0, 10)).sort();
+  return cs.length ? cs[cs.length - 1] : String(w.packingDate || w.date || '').slice(0, 10);
+}
+function prPortions(w, type) {         // -> array (same order as splitsOf(w,type)) of [{q, date}] portions
+  const fb = prDoneDate(w), byDate = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  const pool = splitsOf(w, 'carpenter').filter(c => Number(c.done) > 0).map(c => ({ q: Number(c.done), date: String(c.date || '').slice(0, 10) || fb, owner: prNorm(c.link), kind: 'c' })).sort(byDate);
+  const assign = (splits, src, passes) => {
+    const res = splits.map(() => []), need = splits.map(sp => Number(sp.done) || 0);
+    passes.forEach(ok => splits.forEach((sp, i) => {
+      for (const t of src) {
+        if (need[i] <= 0) break;
+        if (!(t.q > 0) || !ok(sp, t)) continue;
+        const g = Math.min(t.q, need[i]); t.q -= g; need[i] -= g; res[i].push({ q: g, date: t.date });
+      }
+    }));
+    splits.forEach((sp, i) => { if (need[i] > 0) res[i].push({ q: need[i], date: fb }); });
+    return res;
+  };
+  const pol = splitsOf(w, 'polish');
+  // Polish: pcs balanced by a carpenter "From Polish = this contractor" first, then unlinked balances, then any left over
+  const polRes = assign(pol, pool, [(sp, t) => t.owner && t.owner === prNorm(sp.name), (sp, t) => !t.owner, () => true]);
+  if (type === 'polish') return polRes;
+  // Sanding: same person as polish -> same dates; sanding-only people -> polish contractor's dates; rest -> carpenter balance dates
+  const src = [];
+  pol.forEach((sp, i) => polRes[i].forEach(t => src.push({ q: t.q, date: t.date, owner: prNorm(sp.name), kind: 'p' })));
+  src.sort(byDate); pool.forEach(t => src.push(t));
+  return assign(splitsOf(w, 'sanding'), src, [(sp, t) => t.kind === 'p' && t.owner === prNorm(sp.name), (sp, t) => t.kind === 'p', () => true]);
+}
 function prCollect(A, type) {
   const wood = type === 'woodSupplier', reg = new Map(), codes = new Map(), rows = [], unreg = new Map();
   const cc = new Map(); (db.peopleCodes || []).forEach(p => { const c = prNorm(p.code); if (c) { if (!cc.has(c)) cc.set(c, new Set()); cc.get(c).add(prNorm(p.name)); } });
@@ -2848,7 +2923,7 @@ function prCollect(A, type) {
   const note = (n, q) => { n = String(n || '').trim(); if (!n) return; const k = prNorm(n), u = unreg.get(k) || { name: n, qty: 0, entries: 0 }; u.qty += q; u.entries++; unreg.set(k, u); };
   A.work.forEach(w => {
     const total = Number(w.qty) || 0, cbmT = prNum(w.cbm), st = statusOf(w);
-    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood };
+    const base = { workId: w.id, total, tae: w.orderNo || '', sub: w.subOrder || '', item: w.itemCode || '', itemName: w.itemName || '', size: sizeTxt(w), buyer: w.buyer || '', complete: st.complete, target: w.targetDate || '', wood, est: wood };
     if (wood) {
       if (total > 0) {
         const p = resolve(w.woodSupplier);
@@ -2863,14 +2938,13 @@ function prCollect(A, type) {
       });
       return;
     }
-    splitsOf(w, type).forEach(sp => {
+    const PO = (type === 'sanding' || type === 'polish') ? prPortions(w, type) : null;
+    splitsOf(w, type).forEach((sp, si) => {
       const q = Number(sp.done) || 0, p = resolve(sp.name);
       if (!p) { if (String(sp.name || '').trim()) note(sp.name, q); return; }
-      const carpSplits = splitsOf(w, 'carpenter');
-      const balDates = carpSplits.filter(c => Number(c.done) > 0 && c.date).map(c => String(c.date).slice(0, 10)).sort();
-      const inheritedDate = balDates.length ? balDates[balDates.length - 1] : (carpSplits.length > 0 && carpSplits[0].date ? String(carpSplits[0].date).slice(0, 10) : (w.date || '').slice(0, 10));
-      const finalDate = (type === 'sanding' || type === 'polish') ? inheritedDate : String(sp.date || '').slice(0, 10);
-      rows.push({ ...base, key: p.key, date: finalDate, alloc: q, done: q, cbm: total ? cbmT * q / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
+      const mk = (qq, dd) => rows.push({ ...base, key: p.key, date: dd, alloc: qq, done: qq, cbm: total ? cbmT * qq / total : 0, source: sp.supplier || '', link: sp.link || '', stDone: total > 0 && stg(w, type).done >= total });
+      if (PO) { const ps = PO[si]; if (ps && ps.length) ps.forEach(t => mk(t.q, t.date)); else mk(q, prDoneDate(w)); }
+      else mk(q, String(sp.date || '').slice(0, 10));
     });
   });
   return { reg, rows, unreg, type };
@@ -2897,11 +2971,12 @@ function prAgg(rows, factory) {
     if (!(r.done > 0)) return;
     o.qty += r.done; o.cbm += r.cbm; o.entries++;
     if (r.done > o.max) o.max = r.done;
-    if (prValid(r.date)) {
-      const d = o.days.get(r.date) || { date: r.date, qty: 0, cbm: 0, entries: 0 };
-      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(r.date, d);
-      if (!o.last || r.date > o.last) o.last = r.date;
-      if (!o.first || r.date < o.first) o.first = r.date;
+    const dd = prDt(r);
+    if (prValid(dd)) {
+      const d = o.days.get(dd) || { date: dd, qty: 0, cbm: 0, entries: 0 };
+      d.qty += r.done; d.cbm += r.cbm; d.entries++; o.days.set(dd, d);
+      if (!o.last || dd > o.last) o.last = dd;
+      if (!o.first || dd < o.first) o.first = dd;
     }
     if (!(factory && r.source === 'Stage 3 Balance')) { prBump(o.buyers, r.buyer, r.done, r.cbm); prBump(o.items, r.item, r.done, r.cbm); }
     if (r.source) prBump(o.sources, r.source, r.done, r.cbm);
@@ -2965,23 +3040,26 @@ function prBars(s, scope) {
 function prShift(n) {
   const R = prRange(), t = todayStr(); if (!R.finite) return;
   const base = R.from || R.to, len = prDiff(base, R.to) + 1;
-  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (to > t) to = t; if (f > to) f = to;
+  let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (PR.type !== 'woodSupplier') { if (to > t) to = t; if (f > to) f = to; }
   PR.mode = 'custom'; PR.from = f; PR.to = to; PR.dlim = 20; render();
 }
 function prControls(R, withSort) {
-  const chips = PR_PERIODS.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
-  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}" max="${todayStr()}" onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}" max="${todayStr()}" onchange="PR.to=this.value;render()"></div></div>` : '';
+  const WS = PR.type === 'woodSupplier', mx = WS ? '' : ` max="${todayStr()}"`;
+  const per = WS ? [...PR_PERIODS.slice(0, 3), ['next7', 'Next 7 Days'], ['next30', 'Next 30 Days'], ...PR_PERIODS.slice(3)] : PR_PERIODS;
+  const chips = per.map(([k, l]) => `<button class="chip ${PR.mode === k ? 'active' : ''}" onclick="PR.mode='${k}';PR.dlim=20;render()">${l}</button>`).join('');
+  const custom = PR.mode === 'custom' ? `<div class="row"><div class="field"><label>From</label><input type="date" value="${esc(PR.from)}"${mx} onchange="PR.from=this.value;render()"></div><div class="field"><label>To</label><input type="date" value="${esc(PR.to || todayStr())}"${mx} onchange="PR.to=this.value;render()"></div></div>` : '';
   let sort = '';
   if (withSort) {
     const opts = [['qty', 'Most Pieces'], ['cbm', 'Most CBM']]; if (PR.type !== 'woodSupplier') opts.push(['pending', 'Most Pending']);
     sort = `<div class="small muted" style="margin:2px 0 8px;font-weight:800">SORT RANKING BY</div><div class="stage-chips">${opts.map(([k, l]) => `<button class="chip ${PR.sort === k ? 'active' : ''}" onclick="PR.sort='${k}';render()">${l}</button>`).join('')}</div>`;
   }
-  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
-  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">PERIOD</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
+  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
+  return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">${PR.type === 'da' ? 'PERIOD' : 'PERIOD (BY ' + prDateNote(PR.type).toUpperCase() + ')'}</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
 }
 
 function prTypeChips(cur) {
-  return ['woodSupplier', 'sanding', 'polish', 'carpenter'].map(k => `<button class="chip ${k === cur ? 'active' : ''}" onclick="PR.type='${k}';PR.dlim=20;render()">${PR_ICON[k]} ${({ woodSupplier: 'Supplier', sanding: 'Sanding', polish: 'Polish', carpenter: 'Carpenter' })[k]}</button>`).join('') + `<button class="chip ${cur === 'da' ? 'active' : ''}" onclick="PR.type='da';render()">📈 Data Analysis</button>`;
+  const lim = !!window.__subMode;   // Admin accounts: no Supplier and no Data Analysis option in Overall
+  return ['woodSupplier', 'sanding', 'polish', 'carpenter'].filter(k => !(lim && k === 'woodSupplier')).map(k => `<button class="chip ${k === cur ? 'active' : ''}" onclick="PR.type='${k}';PR.dlim=20;render()">${PR_ICON[k]} ${({ woodSupplier: 'Supplier', sanding: 'Sanding', polish: 'Polish', carpenter: 'Carpenter' })[k]}</button>`).join('') + (lim ? '' : `<button class="chip ${cur === 'da' ? 'active' : ''}" onclick="PR.type='da';render()">📈 Data Analysis</button>`);
 }
 function productionPage() {
   if (PR.type === 'da') return card('▦ Overall', `<div class="stage-chips">${prTypeChips('da')}</div>`) + card('📈 Data Analysis', `<p class="small muted" style="margin-top:-6px">Tap a report to open it</p>` + ((window.THAR105 && THAR105.rows) ? THAR105.rows() : ''));
@@ -3031,10 +3109,11 @@ function productionPage() {
     <div class="stage-chips">${prTypeChips(type)}</div>
     ${prControls(R, true)}
     <div class="small muted" style="margin:4px 0 0">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)} (${esc(P.from)} to ${esc(P.to)})` : ''}</div>
+    <div class="small muted" style="margin:4px 0 0">Ranking is filtered by <b style="color:var(--text)">${prDateNote(type)}</b>.${prDt({ est: true, target: '' }) === '' && type === 'woodSupplier' ? ' Entries without a target date show only in All Time.' : ''}</div>
     ${kpis}
     <div class="actions" style="margin-top:14px"><button class="btn blue smallbtn" onclick="prPrintRanking()">🖨 Ranking Report PDF</button><button class="btn blue smallbtn" onclick="prPrintRanking(true)">🖼 Ranking PNG</button></div>
     ${prSec((wood ? 'Supplier Ranking' : 'Ranking'), 'Tap a name to open the full production profile', rankHtml)}
-    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month'), prBars(prSeries(all.days, R), 'all'))}
+    ${prSec('📈 Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(prSeries(all.days, R), 'all'))}
   `);
 }
 
@@ -3046,7 +3125,7 @@ function registerUnlisted(type, enc) {
 }
 
 function openPersonDetail(type, enc) {
-  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRF.lim = 30; PRF.dlim = 15;
+  PR.type = type; PR.person = prNorm(decodeURIComponent(enc)); PRF.q = ''; PRW.buyer = ''; PRW.tae = ''; PRW.item = ''; PRF.lim = 30; PRF.dlim = 15;
   tab = 'personDetail'; render(); window.scrollTo(0, 0);
 }
 function prHay(r) { return [r.tae, r.sub, r.item, r.itemName, r.size, r.buyer, r.source, r.via, r.link, r.date].join(' ').toLowerCase(); }
@@ -3081,13 +3160,14 @@ function prDetails(kind, enc, scope) {
   const val = decodeURIComponent(enc), A = getActiveDB(), R = prRange(), C = prData(A, PR.type), all = scope === 'all';
   const norm = s => String(s || '').trim() || 'Not specified';
   let rows = C.rows.filter(r => r.done > 0 && prIn(r, R) && (all || r.key === PR.person));
-  const titles = { buyer: 'Buyer', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
+  const titles = { buyer: 'Buyer', tae: 'TAE', item: 'Item Code', source: 'Source', month: 'Month', day: 'Date' };
   if (kind === 'buyer' || kind === 'item') {
     if (all) rows = rows.filter(r => r.source !== 'Stage 3 Balance');
     rows = rows.filter(r => norm(kind === 'buyer' ? r.buyer : r.item) === val);
-  } else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
-  else if (kind === 'month') rows = rows.filter(r => prValid(r.date) && r.date.slice(0, 7) === val);
-  else if (kind === 'day') rows = rows.filter(r => r.date === val);
+  } else if (kind === 'tae') rows = rows.filter(r => (String(r.tae || '').trim() || 'No TAE') === val);
+  else if (kind === 'source') rows = rows.filter(r => norm(r.source) === val);
+  else if (kind === 'month') rows = rows.filter(r => prValid(prDt(r)) && prDt(r).slice(0, 7) === val);
+  else if (kind === 'day') rows = rows.filter(r => prDt(r) === val);
   rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(a.tae).localeCompare(String(b.tae), undefined, { numeric: true }));
   const qty = rows.reduce((t, r) => t + r.done, 0), cbm = rows.reduce((t, r) => t + r.cbm, 0);
   const cards = rows.slice(0, 300).map(r => (all ? `<div class="small muted" style="margin:10px 0 4px">👤 ${esc((C.reg.get(r.key) || {}).name || '')}</div>` : '') + prEntryCard(r).replace(`onclick="viewWork('`, `onclick="prDetClose();viewWork('`)).join('') || '<div class="empty">No entries.</div>';
@@ -3115,6 +3195,30 @@ function daDetailPage() {
   if (!r) return card('📈 Data Analysis', back + '<div class="empty">This report is not available.</div>');
   return card('📈 ' + esc(r.title), back + `<p class="small muted" style="margin:8px 0 10px">${esc(r.sub || '')}</p>` + r.html);
 }
+var PRW = { buyer: '', tae: '', item: '' };
+function prWoodOrders(D) {
+  const e = esc, bv = r => String(r.buyer || '').trim() || 'Not specified', iv = r => String(r.item || '').trim() || 'Not specified', tv = r => String(r.tae || '').trim() || 'No TAE';
+  const base = D.me.cur.filter(r => r.done > 0);
+  const total = base.reduce((t, r) => t + r.done, 0);
+  /* one list: name -> pieces, high to low; tap a row to open the full list of its entries */
+  const list = (title, kind, fn, sub) => {
+    const m = new Map();
+    base.forEach(r => { const k = fn(r), o = m.get(k) || { k, q: 0, rs: [] }; o.q += r.done; o.rs.push(r); m.set(k, o); });
+    const arr = [...m.values()].sort((a, b) => b.q - a.q || a.k.localeCompare(b.k, undefined, { numeric: true }));
+    const body = arr.map((o, n) => {
+      const pct = total ? Math.round(100 * o.q / total) : 0;
+      return `<div class="item" role="button" tabindex="0" style="cursor:pointer" onclick="prDetails('${kind}','${prEnc(o.k)}','me')" onkeydown="if(event.key==='Enter')this.click()"><div style="min-width:0;flex:1"><strong>${n + 1}. ${e(o.k)}</strong><small>${sub(o.rs)}</small></div><div class="right"><strong>${prQ(o.q)} pcs</strong><small>${pct}% · tap for full list ›</small></div></div>`;
+    }).join('');
+    return `<div class="small muted" style="margin:16px 0 6px;font-weight:800">${title} · ${arr.length}</div>${body}`;
+  };
+  const cnt = (rs, f) => new Set(rs.map(f)).size, pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  const itemName = rs => { const x = rs.find(r => r.itemName); return x ? e(x.itemName) + ' · ' : ''; };
+  if (!base.length) return '<div class="empty">No entries in this period. Entries without a target date show only in All Time.</div>';
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:18px">${prQ(total)} pcs</b><span class="small muted">Tap any row to open its full list</span></div>` +
+    list('BUYER', 'buyer', bv, rs => pl(cnt(rs, tv), 'TAE') + ' · ' + pl(cnt(rs, iv), 'item code')) +
+    list('TAE', 'tae', tv, rs => e([...new Set(rs.map(bv))].join(', ')) + ' · ' + pl(cnt(rs, iv), 'item code')) +
+    list('ITEM CODE', 'item', iv, rs => itemName(rs) + pl(cnt(rs, tv), 'TAE'));
+}
 function personDetailPage() {
   const D = prProfileData(), type = PR.type, wood = type === 'woodSupplier';
   const back = `<button class="btn smallbtn" onclick="tab='production';render();window.scrollTo(0,0)">← Back to Ranking</button>`;
@@ -3140,8 +3244,8 @@ function personDetailPage() {
     <div class="small muted">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)}` : ''}</div>
     ${kpis}
     <div class="actions"><button class="btn blue smallbtn" onclick="prPrintProfile()">🖨 Profile Report PDF</button><button class="btn blue smallbtn" onclick="prPrintProfile(true)">🖼 Profile PNG</button></div>
-    ${prSec('⏳ Current Workload', 'Open entries where allocated pieces are not yet completed (all dates)', prMetrics([['Pending Pieces', prQ(pendPcs)], ['Open Entries', open.length], ['Overdue Entries', overdue], ['Completion Rate (allocated work)', rate + '%']]) + `<div style="margin-top:12px">${openHtml}</div>`)}
-    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month'), prBars(ser, 'me'))}
+    ${prSec('📋 Order Details', 'Buyer-wise · TAE-wise · item code-wise (by ' + esc(prDateNote(type).toLowerCase()) + ', ' + esc(R.label) + ')', prWoodOrders(D))}
+    ${prSec('📈 Production Trend', 'Pieces completed per ' + (ser.unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(ser, 'me'))}
   `);
 }
 
@@ -3393,7 +3497,7 @@ function homePage() {
   const dupAlert = (dc && !isEmployeeMode) ? `<div style="background:rgba(244,63,94,.15); border:1px solid rgba(244,63,94,.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>⚠ ${dc} duplicate code${dc === 1 ? '' : 's'} in Names &amp; Custom Codes (not valid until fixed)</span><button class="btn smallbtn danger" onclick="moreSub='peopleCodes';go('settings')">Fix now</button></div>` : '';
   let backupAlert = '';
   if (!isViewMode && !isEmployeeMode && !(Date.now() - new Date(db.lastBackup || 0).getTime() <= 5 * 86400000)) {
-    backupAlert = `<div style="background:rgba(244, 63, 94, 0.15); border:1px solid rgba(244,63,94,0.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center;"><span>⚠️ Backup Data Reminder!</span><button onclick="moreSub='backup';go('settings')" class="btn smallbtn danger">Backup Now</button></div>`;
+    backupAlert = `<div style="background:rgba(244, 63, 94, 0.15); border:1px solid rgba(244,63,94,0.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center;"><span>⚠️ Backup Data Reminder!</span><button onclick="moreSub='backupHub';go('settings')" class="btn smallbtn danger">Backup Now</button></div>`;
   }
   const fixAlert = (H.fixN && !isEmployeeMode) ? `<div style="background:rgba(244,63,94,.15); border:1px solid rgba(244,63,94,.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>⚠ ${H.fixN} work entr${H.fixN === 1 ? 'y has' : 'ies have'} a missing field, wrong Sub Order or unregistered name</span><button class="btn smallbtn danger" onclick="wl.st='fix';go('workList')">Fix now</button></div>` : '';
   const qtyAlert = (H.overQty && H.overQty.length && !isEmployeeMode) ? `<div style="background:rgba(244,63,94,.15); border:1px solid rgba(244,63,94,.4); color:var(--red); padding:12px; border-radius:12px; margin-bottom:16px; font-weight:800; display:flex; justify-content:space-between; align-items:center; gap:8px"><span>⚠ ${H.overQty.length} entr${H.overQty.length === 1 ? 'y has' : 'ies have'} stage quantities exceeding the Total Quantity.</span><button class="btn smallbtn danger" onclick="wl.st='overQty';go('workList')">Fix now</button></div>` : '';
@@ -3537,6 +3641,7 @@ function lhRefresh() {
   tg('wrapSanding', on('noSanding')); tg('wrapPolish', on('noPolish'));
   tg('wrapPacking', on('noPacking')); tg('packDateWrap', on('noPacking')); tg('qcWrap', on('noQC'));
   tg('balWrap', on('noBalance')); tg('hwWrap', on('noHardware'));
+  { const nb = on('noBalance'); tg('fitDateWrap', !nb); const fd = f.elements.fitDate; if (fd && nb && !fd.value) fd.value = todayStr(); }
   f.querySelectorAll('[data-skip]').forEach(e => e.classList.toggle('hidden', on(e.dataset.skip)));
   f.querySelectorAll('[data-dim]').forEach(e => e.classList.toggle('skipd', on(e.dataset.dim)));
   repSync();
@@ -3945,6 +4050,7 @@ function workPage() {
           </div>
           <div id="balWrap"><div id="splits-carpenter"></div>
           <div id="summary-carpenter" class="small muted" style="margin-bottom:16px;">Completed: 0 | Pending: 0</div></div>
+          <div id="fitDateWrap" class="field hidden"><label><span>📅 Fitting Date <small class="muted">(Sanding &amp; Polish will use this date)</small></span><button type="button" class="quick-link" onclick="this.closest('.field').querySelector('input').value=todayStr()">Today</button></label><input type="date" name="fitDate" onchange="this.classList.remove('inv')"></div>
           
           
           
@@ -4040,7 +4146,7 @@ function copyWork(idv) {
   const x = curDB().work.find(a => a.id === idv); if (!x) return;
   const c = JSON.parse(JSON.stringify(x));
   Object.assign(c, { subOrder: '', dupMark: '', date: '', workComplete: false, packingStatus: 'Pending', packingDate: '', packingSplits: [], needsRepair: false, qcV: 2 });
-  QCK.forEach(k => c[k] = false);
+  delete c.completedOn; QCK.forEach(k => c[k] = false);
   ['sanding', 'polish', 'carpenter'].forEach(k => (c[k + 'Splits'] || []).forEach(p => { p.done = 0; p.date = ''; }));
   editWork(null, c); toast('Cloned. Enter the new Sub Order and save.');
 }
@@ -4728,7 +4834,7 @@ function sharpPrint(name) {
   document.body.appendChild(st);
   const done = () => { st.remove(); window.__ocForce = null; window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);
-  toast("Print dialog mein 'Save as PDF' chuno (real text PDF banegi)");
+  toast("In the print dialog choose 'Save as PDF' (a real text PDF will be created)");
   setTimeout(() => { window.__ocForce = F; printNamed(name); }, 300);
 }
 async function emitReport(name, asPng) {
@@ -4942,10 +5048,11 @@ function settingsPage() {
   }
   let sub = window.moreSub || 'settings';
   if (sub === 'settings') {
-    return card('⚙️ Settings & Setup', `<div class="grid" style="margin-bottom:14px"><button class="btn" onclick="SS.sel=null;moreSub='dataAdmin';render()">Admin Data</button><button class="btn" onclick="SS.sel=null;moreSub='dataUser';render()">User Data</button><button class="btn" onclick="SS.sel=null;moreSub='dataEntry';render()">Entry Account Data</button><button class="btn" onclick="DIR.sel=null;DIR.q='';moreSub='directory';render()">People Directory</button></div><button class="btn" style="width:100%;margin-bottom:14px" onclick="moreSub='peopleCodes';render()">👥 Names & Codes</button><div class="grid"><button class="btn" onclick="moreSub='buyers';render()">🏷 Buyers</button><button class="btn" onclick="moreSub='workers';render()">👷 Workers (Attendance)</button><button class="btn" onclick="moreSub='backupHub';render()">💾 Backup</button><button class="btn" onclick="moreSub='profile';render()">👤 App Profile & PIN</button><button class="btn danger" onclick="moreSub='trash';render()">♻ Recycle Bin</button></div>`);
+    return card('⚙️ Settings & Setup', `<div class="grid" style="margin-bottom:14px"><button class="btn" onclick="SS.sel=null;moreSub='dataAdmin';render()">Admin Data</button><button class="btn" onclick="SS.sel=null;moreSub='dataUser';render()">User Data</button><button class="btn" onclick="SS.sel=null;moreSub='dataEntry';render()">Entry Account Data</button><button class="btn" onclick="DIR.sel=null;DIR.q='';moreSub='directory';render()">People Directory</button><button class="btn" onclick="YR.kind='';YR.year='';YR.month='';YR.tae='';YR.lim=40;moreSub='year';render()">📅 Year</button></div><button class="btn" style="width:100%;margin-bottom:14px" onclick="moreSub='peopleCodes';render()">👥 Names & Codes</button><div class="grid"><button class="btn" onclick="moreSub='buyers';render()">🏷 Buyers</button><button class="btn" onclick="moreSub='workers';render()">👷 Workers (Attendance)</button><button class="btn" onclick="moreSub='backupHub';render()">💾 Backup</button><button class="btn" onclick="moreSub='profile';render()">👤 App Profile & PIN</button><button class="btn danger" onclick="moreSub='trash';render()">♻ Recycle Bin</button></div>`);
   }
   if (sub === 'dataAdmin' || sub === 'dataUser' || sub === 'dataEntry') return sessPage(sub);
   if (sub === 'directory') return dirPage();
+  if (sub === 'year') return yearPage();
   if (sub === 'peopleCodes') return peopleCodePage();
   if (sub === 'workers') return masterPage('Workers', 'workers', [['name', 'Name'], ['type', 'Role'], ['rate', 'Daily Rate (₹)']]);
   if (sub === 'contractors') return masterPage('Contractors', 'contractors', [['name', 'Name'], ['phone', 'Phone']]);
@@ -5299,7 +5406,10 @@ function rsHead(title, dateTxt, tag, a, b, c, d, lab) {
 }
 const RS_LAB = '<tr class="o3"><td>SNo.</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>@DET@</td><td>Wood Supplier /<br>Vendor</td></tr>';
 var RS_PREPARED_BY = 'Pradeep Bishnoi';   /* name printed under "Prepared by" */
-function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>'; }
+var RS_APPROVED_BY = 'Mohit Ji';   /* name printed under "Approved by" */
+var RS_VERIFY_NOTE = 'Balance and Gap Verified by Supplier, Cross-Checked by Carpenter';   /* bold note under supplier name in Vendor column */
+function rsVend(v, show) { return esc(v) + (show && String(v || '').trim() ? '<br><b>(' + esc(RS_VERIFY_NOTE) + ')</b>' : ''); }
+function rsSig() { return '<tr class="oxsig"><td colspan="9"><div class="oxsgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + esc(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + esc(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>'; }
 function rsTotal(q, c) { return '<tr class="ot"><td colspan="4" class="oxr"><b>TOTAL</b></td><td><b>' + prQ(q) + '</b></td><td></td><td><b>' + prC(c) + '</b></td><td></td><td></td></tr>'; }
 function rsGroupRow(left, right) { return '<tr class="oxg"><td colspan="9"><div class="oxgd"><b>' + left + '</b><span>' + right + '</span></div></td></tr>'; }
 
@@ -5315,7 +5425,7 @@ function rsEntry(r, w, type, name, sn) {
     '<div class="oxb"><div class="oxh">Status<span>' + (r.complete ? 'COMPLETE' : 'Pending ' + prQ(pend) + ' of ' + prQ(tot) + ' pcs') + '</span></div>' + others +
     (r.target ? '<div class="oxl">Target Date : <b>' + e(osxDate(r.target)) + '</b></div>' : '') + '</div>';
   const vend = type === 'woodSupplier' ? String(w.woodSupplier || '').trim() : [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
-  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + e(vend) + '</td></tr>';
+  return '<tr><td>' + sn + '</td><td>' + wb(r.item || '') + (r.buyer ? '<br>' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td><td class="oxd"><b>' + e(r.itemName || '') + '</b>' + (r.size ? '<br><b>Size :</b>' + e(r.size) : '') + '</td><td><b>' + prQ(r.done) + '</b><br>Pcs</td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td><td class="oxdt">' + det + '</td><td>' + rsVend(vend, type === 'woodSupplier' ? r.source === 'Stage 3 Balance' : (type === 'carpenter' && String(r.source || '').trim() !== '')) + '</td></tr>';
 }
 
 /* ---------- RANKING report: one sheet per date (+ ranking summary for multi-day periods) ---------- */
@@ -5337,7 +5447,7 @@ function prCarpBuild(C, rowsIn, R, ranking, A, type) {
       rows.push(rsGroupRow((gi + 1) + '. ' + e(g.name), 'Total ' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM · ' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies')));
       g.list.sort((a, b) => b.done - a.done).forEach(r => rows.push(rsEntry(r, wk(r.workId), type, g.name, ++sn)));
     });
-    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), 'Period : ' + e(R.label) + (d ? ' &nbsp;(' + e(dayName(d)) + ')' : ''), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
+    const head = rsHead(title, 'Date : ' + (d ? e(osxDate(d)) : '—'), String(rs.length), (d && dayName(d) ? e(dayName(d)) : 'Period : ' + e(R.label)), 'Total Pieces : ' + prQ(tq) + ' &nbsp;·&nbsp; Total CBM : ' + prC(tc), RS_PLURAL[type] + ' : ' + people.length + ' &nbsp;·&nbsp; Entries : ' + rs.length, e(no.slice(-9)), lab);
     return { head, rows, tail: rsTotal(tq, tc) + rsSig(), hdr, raw: type === 'woodSupplier' ? null : { type, d, people, tq, tc, rs, label: R.label, day: dayName(d), no, wk, attOf: n => rscAtt(n, d), absent: type === 'carpenter' ? [...new Set([...C.reg.values()].map(p => p.name).filter(n => rscAtt(n, d) === 'Absent'))] : [] } };
   });
   if (dates.length > 1) {
@@ -5423,26 +5533,26 @@ function rscRow(it, first, span, raw) {
   const oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type).map(x => '<td>' + e(rsWho(w, x)) + '</td>').join('');
   const vend = [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
   return '<tr>' + (first ? '<td rowspan="' + span + '">' + it.sn + '</td>' : '') +
-    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br>' + prQ(g.qty) + ' pcs · ' + prC(g.cbm) + ' CBM<br>' + g.list.length + ' entr' + (g.list.length === 1 ? 'y' : 'ies') + '</td>' : '') +
+    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br><b>Total Pc : ' + prQ(g.qty) + '</b></td>' : '') +
     '<td>' + wb(r.item || '') + (r.buyer ? ' ' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td>' +
     '<td class="l"><b>' + e(r.itemName || '') + '</b>' + (r.size ? ' <span class="sz">· ' + e(r.size) + '</span>' : '') + '</td>' +
     '<td><b>' + prQ(r.done) + '</b></td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td>' +
     '<td><b>' + prQ(r.done) + '</b> of ' + prQ(tot) + (link ? '<br>from Polish <b>' + e(link) + '</b>' : '') + '</td>' + oth +
     '<td>' + (r.target ? '<b>' + e(osxDate(r.target)) + '</b>' : '-') + '</td>' +
-    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + e(vend) + '</td></tr>';
+    (type === 'carpenter' ? (first ? '<td rowspan="' + span + '"><b>' + e(rscTime(raw.attOf(g.name))) + '</b></td>' : '') : '<td>' + (r.complete ? '<b>COMPLETE</b>' : 'Pending <b>' + prQ(pend) + '</b> of ' + prQ(tot)) + '</td>') + '<td class="l">' + rsVend(vend, type === 'carpenter' && String(r.source || '').trim() !== '') + '</td></tr>';
 }
 
 function rscTable(raw, items, tail) {
   const e = esc, type = raw.type, oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type);
   const cols = '<colgroup>' + RSC_COLS.map(w => '<col style="width:' + w + '%">').join('') + '</colgroup>';
   const h = '<tr class="h1"><td colspan="3" class="l"><img src="' + OSX_LOGO + '" alt="THAR"></td><td colspan="3" class="l">UNIT-02 :G793, G793A,</td><td colspan="5"><b>' + RS_TITLES[type] + '</b></td><td colspan="3"><span class="sp"><b>Date : ' + (raw.d ? e(osxDate(raw.d)) : '—') + '</b><b>[' + raw.rs.length + ']</b></span></td></tr>' +
-    '<tr class="h2"><td colspan="4"><b>Period : ' + (raw.d && raw.day ? e(raw.day) : e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
+    '<tr class="h2"><td colspan="4"><b>' + (raw.d && raw.day ? e(raw.day) : 'Period : ' + e(raw.label)) + '</b></td><td colspan="5"><b>Total Pieces : ' + prQ(raw.tq) + ' · Total CBM : ' + prC(raw.tc) + '</b></td><td colspan="3"><b>' + RS_PLURAL[type] + ' : ' + raw.people.length + ' · Entries : ' + raw.rs.length + '</b></td><td colspan="2" class="l">' + (raw.absent.length ? '<b>Absent :</b> ' + e(raw.absent.join(', ')) : '') + '</td></tr>' +
     '<tr class="h3"><td>SNo.</td><td>' + PR_LABEL[type] + '</td><td>Alias Code /<br>Buyer Sku</td><td>Sub-Order No.</td><td>Description / Size</td><td>Qty<br>Done</td><td>CBM</td><td>Total<br>CBM</td><td>Done of<br>Order Qty</td><td>' + RS_STAGE[oth[0]] + '</td><td>' + RS_STAGE[oth[1]] + '</td><td>Target<br>Date</td><td>' + (type === 'carpenter' ? 'Time' : 'Status') + '</td><td>Wood Supplier /<br>Vendor</td></tr>';
   const cnt = new Map(); items.forEach(it => cnt.set(it.g, (cnt.get(it.g) || 0) + 1));
   const seen = new Set();
   const rows = items.map(it => { const first = !seen.has(it.g); seen.add(it.g); return rscRow(it, first, cnt.get(it.g), raw); }).join('');
   const tl = tail ? '<tr class="tt"><td colspan="5" style="text-align:right;padding-right:8px!important"><b>TOTAL</b></td><td><b>' + prQ(raw.tq) + '</b></td><td></td><td><b>' + prC(raw.tc) + '</b></td><td colspan="6"></td></tr>' +
-    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by</div></div></td></tr>' : '';
+    '<tr class="sg"><td colspan="14"><div class="sgd"><div>Prepared by' + (RS_PREPARED_BY ? '<br><b>' + e(RS_PREPARED_BY) + '</b>' : '') + '</div><div>Checked by</div><div>Approved by' + (RS_APPROVED_BY ? '<br><b>' + e(RS_APPROVED_BY) + '</b>' : '') + '</div></div></td></tr>' : '';
   return '<table class="rst">' + cols + h + rows + tl + '</table>';
 }
 
@@ -5492,7 +5602,7 @@ async function rsEmit(groups, name, asPng) {
 }
 async function prPrintCarpenterSheet(asPng) {
   const A = getActiveDB(), type = PR.type, R = prRange(), C = prData(A, type);
-  const rowsIn = C.rows.filter(r => prIn(r, R) && r.done > 0);
+  const rowsIn = C.rows.filter(r => prInP(r, R) && r.done > 0);
   if (!rowsIn.length) return toast('No production data in this period to print.');
   const ranking = prPeople(C, R, PR.sort).filter(p => p.qty > 0 || p.pendPcs > 0);
   const days = [...new Set(rowsIn.map(r => r.date || ''))];
@@ -5504,7 +5614,7 @@ async function prPrintProfileSheet(asPng) {
   const D = prProfileData(); if (!D) return toast('Profile not found.');
   const A = getActiveDB(), e = esc, type = D.type, R = D.R, me = D.me, a = D.a, no = rsNo();
   const rate = D.allocAll ? Math.round(100 * D.doneAll / D.allocAll) : 0, pend = D.open.reduce((s, r) => s + (r.alloc - r.done), 0);
-  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prIn(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
+  const rows0 = D.C.rows.filter(r => r.key === PR.person && r.done > 0 && prInP(r, R)).sort((x, y) => (y.date || '').localeCompare(x.date || '')).slice(0, 300);
   if (!rows0.length) return toast('No entries in this period to print.');
   const wk = id => A.work.find(w => w.id === id) || {}, dn = prDn(type, me.name, R, a.days.size);
   const by = new Map(); rows0.forEach(r => { const k = (r.date || '').slice(0, 7) || 'No date'; const g = by.get(k) || { k, qty: 0, cbm: 0, days: new Set(), list: [] }; g.qty += r.done; g.cbm += r.cbm; if (r.date) g.days.add(r.date); g.list.push(r); by.set(k, g); });
@@ -5637,6 +5747,7 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       
       let fd = new FormData(wf); let o = Object.fromEntries(fd);
       if (!validateWorkForm(wf, o)) return;
+      if (wf.elements.noBalance?.checked && !String(o.fitDate || '').trim()) { const fd = wf.elements.fitDate; if (fd) { fd.classList.add('inv'); fd.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return toast('Fitting Date is required when Balance is ticked'); }
       if (lhAllOn(wf) && wf.elements.allComplete) wf.elements.allComplete.checked = true;  
       o.woodSupplier = (wf.elements.woodSupplier?.value || '').trim(); if (wf.elements.fitRepairPolishContractor) o.fitRepairPolishContractor = wf.elements.fitRepairPolishContractor.value.trim();
       if (wf.elements.allComplete?.checked) { const ci = completeIssues(wf); if (ci.length) { showCompleteIssues(ci); document.getElementById('allCompleteError')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('All Complete not possible: ' + ci.length + ' item(s) missing'); } }
@@ -5650,11 +5761,14 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       if(itemDupFind(o.orderNo, o.itemCode, workEditId)) { checkItemCodeDuplicate(); return toast('This Item Code already exists in this TAE! The same Item Code cannot be used twice in one TAE.'); }
 
       ['sanding','polish','carpenter'].forEach(stage => { o[`${stage}Splits`] = getSplitsFromDOM(stage); });
+      const prevW = workEditId ? A.work.find(x => x.id === workEditId) : null;
+      fillBalDates(o, prevW && splitsOf(prevW, 'carpenter'));
       o.packingSplits = getPackFromDOM(); if (wf.elements.noPacking?.checked) o.packingSplits = [];
       if (o.packingSplits.reduce((t, p) => t + p.qty, 0) > Number(o.qty || 0)) return toast('Packing Hall pcs cannot exceed total quantity.');
       if (o.packingSplits.some(p => !p.date)) return toast('Packing Hall row needs a date.');
       if (o.packingSplits.length) { const pt = o.packingSplits.reduce((t, p) => t + p.qty, 0); o.packingDate = pt >= Number(o.qty || 0) ? o.packingSplits.map(p => p.date).sort().pop() : ''; }
       [...HWK, ...QCK, 'fitCustomHardwareEnabled'].forEach(k => o[k] = !!wf.elements[k]?.checked); o.qcV = 2; if (o.noBalance) o.carpenterSplits = [];
+      o.fitDate = o.noBalance ? String(o.fitDate || '').slice(0, 10) : '';
       if (o.noSanding) o.sandingSplits = []; if (o.noPolish) o.polishSplits = [];
       if (o.noQC) QC_ITEMS.forEach(([k]) => o[k] = true);
       Object.entries(QC_AUTO).forEach(([q, n]) => { if (o[n]) o[q] = true; });
@@ -5676,6 +5790,7 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       for (const k of ['sanding','polish','carpenter']) { const dn = o[`${k}Splits`].reduce((t, p) => t + p.done, 0); if (dn > Number(o.qty || 0)) return toast(`${k[0].toUpperCase() + k.slice(1)}: completed ${dn} is more than total ${o.qty}. Please correct the Done quantities.`); }
       if (['sanding','polish','carpenter'].some(k => o[`${k}Splits`].some(p => p.done > p.qty))) return toast('Done qty cannot exceed allocated qty.');
       const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending';
+      if (prevW && prevW.completedOn) o.completedOn = prevW.completedOn; else stampDone(o, !!(prevW && prevW.workComplete));
 
       if (!workEditId) o.id = id(); else o.id = workEditId;
 
@@ -6790,7 +6905,7 @@ function entrySubmit(idv) {
 const SS = { sel: null, ref: null, t: null, rows: [], unsub: null, tick: null };
 const ONL = 90000;
 function sessIdentity() {
-  if (!isEmployeeMode) return { role: 'admin', acc: 'admin', name: 'Admin' };
+  if (!isEmployeeMode) return window.__subMode && window.__subId ? { role: 'admin', acc: 'sub_' + window.__subId, name: 'Admin' } : { role: 'admin', acc: 'admin', name: 'Admin' };
   if (ENTRY) return { role: 'entry', acc: ENTRY.id, name: ENTRY.name };
   if (curUser && curUser.id) return { role: 'user', acc: curUser.id, name: curUser.name };
   return null;
@@ -6874,8 +6989,8 @@ function sessPage(sub) {
   sessListen();
   const back = `<button class="btn smallbtn" style="margin-bottom:12px" onclick="SS.sel=null;moreSub='settings';render()">← Back</button>`;
   if (sub === 'dataAdmin') {
-    const mine = db.work.filter(w => !w.enteredBy).length, ex = sdRow('Total entries by Admin (Work)', mine) + sdRow('Total Work Entries in app', db.work.length);
-    return sDetail('admin', 'admin', 'Admin Data', ex);
+    const mine = db.work.filter(w => !w.enteredBy).length, ex = (window.__subMode ? '' : sdRow('Total entries by Admin (Work)', mine)) + sdRow('Total Work Entries in app', db.work.length);
+    return sDetail('admin', window.__subMode && window.__subId ? 'sub_' + window.__subId : 'admin', 'Admin Data', ex);
   }
   if (sub === 'dataUser') {
     startAdminListen();
@@ -7857,7 +7972,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
     return new Promise(function(res){
       try{ var o=document.getElementById('mkAskBox'); if(o) o.remove(); }catch(e){}
       var m=document.createElement('div'); m.className='modal-backdrop'; m.id='mkAskBox'; m.style.zIndex='300';
-      m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>🔑 '+esc(title)+'</h3><p class="small muted">Select the master key file to confirm.</p><div class="actions"><button type="button" class="btn danger" style="flex:1" id="mkAskPick">Choose key file</button><button type="button" class="btn" style="flex:1" id="mkAskNo">Cancel</button></div></section>';
+      m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>🔑 '+esc(title)+'</h3><p class="small muted">Select the key file to confirm.</p><div class="actions"><button type="button" class="btn danger" style="flex:1" id="mkAskPick">Choose key file</button><button type="button" class="btn" style="flex:1" id="mkAskNo">Cancel</button></div></section>';
       document.body.appendChild(m);
       var fin=function(v){ try{ m.remove(); }catch(e){} res(v); };
       document.getElementById('mkAskNo').onclick=function(){ fin(false); };
@@ -7892,7 +8007,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
 <style id="subCSS">
 .sa-box{display:flex!important;justify-content:center;align-items:center;margin:0 auto 22px!important;width:92px;min-width:0!important;height:30px;padding:0 14px!important;font-size:12.5px;text-align:center;font-weight:700;letter-spacing:.3px}
 .sa-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:rgba(var(--blue-rgb),.14);border:1px solid rgba(var(--blue-rgb),.4);color:var(--blue);font-size:11px;font-weight:800}
-body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
+body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips [onclick^="PR.type='da'"]{display:none!important}
 </style>
 <script>
 (function () {
@@ -7956,20 +8071,17 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
     } catch (e) { authBusy(false); authErr(cloudErr(e)); }
   };
 
-  var BLOCKED_OFF = ['orders', 'attendance', 'production', 'personDetail'];
   function enterSub(a) {
-    SA = { id: a.id, name: a.name }; window.__subMode = true; window.__subLoginMode = false;
-    ['scheduleFlush', 'flushNow', 'doFlush', 'mirrorSoon', 'mirrorNow'].forEach(function (n) { window[n] = NOOP; });
-    BLOCKED_OFF.forEach(function (t) { var i = EMP_BLOCKED.indexOf(t); if (i > -1) EMP_BLOCKED.splice(i, 1); });
-    try { PEND = JSON.parse(localStorage.getItem(PKEY + SA.id) || 'null') || { orders: {}, att: {} }; } catch (e) { PEND = { orders: {}, att: {} }; }
-    curUser = null; window.__entering = true; document.body.classList.add('entry', 'sub');
-    try { ENTRY = { id: 'sa_' + a.id, name: a.name, sub: true }; enterApp('employee'); } finally { window.__entering = false; }
-    document.body.classList.add('sub');
-    PR.type = 'carpenter';
-    var pl = $('profileLine'); if (pl) pl.textContent = a.name + ' (Mini Admin)';
-    fixRole(); var ub = $('usersBtn'); if (ub) ub.classList.add('hidden');
-    subListen(); epRestore(); try { epResend(); } catch (e) { } subSend();
-    render(); toast('Mini Admin login · attendance and repairing controls enabled');
+    window.__subMode = true; window.__subId = a.id; window.__subLoginMode = false; window.__mkOk = true;
+    curUser = null; document.body.classList.add('sub');
+    try { enterApp('admin'); } catch (e) { console.error(e); }
+    try {
+      if (window.__subUn) { try { window.__subUn(); } catch (e) { } }
+      window.__subUn = cdb().collection(UCOL).doc('sa_' + a.id).onSnapshot(function (s) {
+        if (!s.exists && !s.metadata.fromCache && window.__subMode) { try { toast('Your Admin account was removed.'); } catch (e) { } doLogout(); }
+      }, function () { });
+    } catch (e) { }
+    toast('Admin login successful');
   }
 
   var subUns = [], saSeen = new Set(), saReady = false;
@@ -8117,12 +8229,12 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
     try { return _lists.apply(this, arguments); } finally { isEmployeeMode = e; }
   };
   var _prod = window.productionPage;
-  window.productionPage = function () { if (SA) PR.type = 'carpenter'; return _prod.apply(this, arguments); };
+  window.productionPage = function () { if (window.__subMode && ['sanding', 'polish', 'carpenter'].indexOf(PR.type) < 0) PR.type = 'carpenter'; return _prod.apply(this, arguments); };
 
   var _lo = window.doLogout;
   window.doLogout = async function () {
-    var was = !!SA, r = await _lo.apply(this, arguments);
-    if (was) { subStop(); SA = null; setTimeout(function () { location.reload(); }, 200); }    
+    var was = !!window.__subMode, r = await _lo.apply(this, arguments);
+    if (was) { try { if (window.__subUn) window.__subUn(); } catch (e) { } window.__subUn = null; window.__subMode = false; setTimeout(function () { location.reload(); }, 200); }
     return r;
   };
 
@@ -8195,7 +8307,7 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
 
   function subCard() {
     var L = SAL.slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
-    return card('🛡 Admin Accounts', '<p class="small muted" style="margin-top:-6px">Login with the <b>Admin</b> box on the first screen. They can approve entries, add Work Entry, Order Send, mark Attendance and see Carpenter ranking. Everything is applied on <b>this phone</b>, so keep it online. They never see settings, backups or other rankings.</p>' +
+    return card('🛡 Admin Accounts', '<p class="small muted" style="margin-top:-6px">Login with the <b>Admin</b> box on the first screen. Everything syncs through the cloud, so keep both phones online. Admin accounts get the same screens and controls as you. Only Supplier and Data Analysis are missing from Overall.</p>' +
       '<div class="field"><label>Name</label><input id="saName" type="text" autocomplete="off" placeholder="e.g. Suresh (Manager)"></div>' +
       '<div class="row"><div class="field"><label>Username</label><input id="saUser" type="text" autocomplete="off" autocapitalize="none"></div><div class="field"><label>Password</label><input id="saPass" type="text" autocomplete="off"></div></div>' +
       '<button class="btn primary" style="width:100%" onclick="subCreate()">＋ Create Admin Account</button>' +
@@ -8205,7 +8317,7 @@ body.sub .stage-chips [onclick^="PR.type="]{display:none!important}
       }).join('') + (L.length ? '' : '<div class="empty">No Admin accounts yet.</div>') + '</div>');
   }
   var _xc = window.xCard;
-  window.xCard = function () { return _xc.apply(this, arguments) + subCard(); };
+  window.xCard = function () { return _xc.apply(this, arguments) + (window.__subMode ? '' : subCard()); };
   window.subCreate = async function () {
     if (isEmployeeMode) return;
     var g = function (i) { return ($(i) && $(i).value || '').trim(); }, name = g('saName'), user = g('saUser'), pass = g('saPass');
@@ -9013,7 +9125,7 @@ function pickName(stage, x, text) {
 // ---------- COMMIT NEW ----------
 function mkWork(d) {
   const o = { id: id(), orderNo: d.orderNo, subOrder: cleanTae(d.subOrder), dupMark: '', itemCode: d.itemCode, buyer: d.buyer || '', itemName: d.itemName || '', size: d.size, sizeUnit: d.sizeUnit || 'Cm', qty: Number(d.qty), cbm: String(d.cbm), woodSupplier: d.woodSupplier, date: d.date || todayStr(), targetDate: d.targetDate || '', sandingSplits: [], polishSplits: [], carpenterSplits: [], packingSplits: [], qcV: 2 };
-  const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending'; return slim(o);
+  const st = statusOf(o); o.workComplete = st.complete; o.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(o, false); return slim(o);
 }
 function putWork(o) { A().work.push(o); touch('work', o); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(o.id); }
 function commitNew(d) {
@@ -9136,7 +9248,7 @@ function commitPlan(P) {
   const xs = new Map(); P.sim.forEach(v => xs.set(v.x.id, v.x)); const g = [], tips = [], chips = [{ l: '↩ Undo', send: 'undo' }];
   xs.forEach(x => g.push({ id: x.id, b: JSON.stringify(x) }));
   P.sim.forEach(v => { v.x[v.k + 'Splits'] = v.rows; if (NO_STAGE[v.k]) delete v.x[NO_STAGE[v.k]]; });
-  xs.forEach(x => { inval(x); const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; slim(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id); });
+  xs.forEach(x => { const gb = g.find(e => e.id === x.id), pv = gb ? JSON.parse(gb.b) : null; fillBalDates(x, pv && splitsOf(pv, 'carpenter')); inval(x); const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(x, !!(pv && pv.workComplete)); slim(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id); });
   save(); render(); g.forEach(e => { e.a = JSON.stringify(workOf(e.id)); }); pushU(g); S.lastItems = S.items; S.items = null;
   P.sim.forEach(v => { const x = v.x, tq = Number(x.qty || 0), nx = STORD[STORD.indexOf(v.k) + 1];
     if (tq > 0 && stg(x, v.k).done >= tq) { S.rl = 'win'; tips.push(short(x) + ': ' + STL[v.k] + ' is now 100%.' + (nx && !noSt(x, nx) && stg(x, nx).alloc < tq ? ' Want to allocate ' + STL[nx] + '?' : '')); if (nx && !noSt(x, nx) && stg(x, nx).alloc < tq && chips.length < 4) likely(nx, x).slice(0, 3).forEach(n => chips.push({ l: n + ' · ' + STL[nx], send: n + ' ' + nx + ' ' + tq + ' of 0' })); }
@@ -9680,7 +9792,7 @@ function commitEdit(P) {
   const x0 = workOf(P.id); if (!x0) return say('That entry is no longer there.');
   const b = JSON.stringify(x0); setWork(P.id, P.after);
   const x = workOf(P.id); inval(x);
-  if (P.recalc) { const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; }
+  if (P.recalc) { const st = statusOf(x); x.workComplete = st.complete; x.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(x, !!JSON.parse(b).workComplete); }
   slim(x); inval(x); touch('work', x); if (isEnt() && typeof entrySubmit === 'function') entrySubmit(x.id);
   save(); render(); pushU([{ id: P.id, b, a: JSON.stringify(x) }]); S.target = x.id;
   return say('✅ Updated ' + lbl(x) + ' (' + P.n + ' change' + (P.n > 1 ? 's' : '') + ').', { chips: [{ l: '↩ Undo', send: 'undo' }] });
@@ -11313,7 +11425,7 @@ function decide(pid, yes) {
       if (it.base) { const a = it.after, b = it.base; new Set(Object.keys(a).concat(Object.keys(b))).forEach(k => { if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) { if (a[k] === undefined) delete r[k]; else r[k] = clone(a[k]); } }); }
       else { Object.keys(r).forEach(k => delete r[k]); Object.assign(r, it.after); }
       inval(r);
-      if (it.store === 'work') { const st = statusOf(r); r.workComplete = st.complete; r.packingStatus = st.complete ? 'Send' : 'Pending'; }
+      if (it.store === 'work') { const st = statusOf(r); r.workComplete = st.complete; r.packingStatus = st.complete ? 'Send' : 'Pending'; stampDone(r, !!JSON.parse(before).workComplete); }
       slim(r); inval(r); touch(it.store, r); undo.push({ store: it.store, id: r.id, before });
     });
     if (!p.del) { save2(); }
@@ -11474,13 +11586,13 @@ function vRecStart() {
   r.onresult = e => { errN = 0; let all = ''; for (let i = 0; i < e.results.length; i++) all += ' ' + e.results[i][0].transcript; vSess = vsquash(all); vOnHear(); };
   r.onerror = e => {
     const er = e && e.error;
-    if (er === 'not-allowed' || er === 'service-not-allowed') { vStopAll(); note('Microphone permission block hai. Browser/app settings mein mic allow karo.'); }
-    else if (er === 'audio-capture') { vStopAll(); note('Mic nahi mil raha. Koi aur app use kar rahi ho to band karo.'); }
-    else if (er === 'network' && ++errN > 3) { vStopAll(); note('Voice service tak internet nahi pahunch raha. Net check karke dobara try karo.'); }
+    if (er === 'not-allowed' || er === 'service-not-allowed') { vStopAll(); note('Microphone permission is blocked. Allow the microphone in your browser or app settings.'); }
+    else if (er === 'audio-capture') { vStopAll(); note('Microphone not found. If another app is using it, close that app.'); }
+    else if (er === 'network' && ++errN > 3) { vStopAll(); note('Cannot reach the voice service. Check your internet and try again.'); }
   };
   r.onend = () => {
     if (rec !== r) return; rec = null; const t = vSess; vSess = ''; if (t) vBuf = vmerge(vBuf, t);
-    if (!t && Date.now() - vT0 < 500) { if (++vFast > 6) { vStopAll(); note('Mic start nahi ho pa raha. Page ko Chrome mein HTTPS par kholo aur mic permission check karo.'); return; } } else vFast = 0;
+    if (!t && Date.now() - vT0 < 500) { if (++vFast > 6) { vStopAll(); note('Microphone cannot start. Open the page in Chrome over HTTPS and check the microphone permission.'); return; } } else vFast = 0;
     vOnEnd(!!t);
   };
   try { r.start(); } catch (e) { rec = null; vRest = setTimeout(vRecStart, 600); }
@@ -11502,7 +11614,7 @@ function vOnEnd(had) {
 function vStopAll() { if (live) liveOff(); dictStop(); }
 /* ---- voice typing (mic button) ---- */
 function dictStart() {
-  if (!SR) { note('Voice typing ke liye Chrome/Edge/Safari (HTTPS) chahiye.'); return; }
+  if (!SR) { note('Voice typing needs Chrome, Edge or Safari (HTTPS).'); return; }
   if (live) liveOff(); const IN = $('#apIn');
   vDict = true; micOn = true; vMuted = false; vBuf = vnz(IN && IN.value); vSess = ''; vFast = 0; vRecStart(); head();
 }
@@ -11515,7 +11627,7 @@ function mic(on) { if (on) dictStart(); else { if (live) liveOff(); dictStop(); 
 const LV_END = /^\s*(bye|goodbye|stop( live| listening)?|end (live|call)|that'?s all|band kar(o| do)?|bas( karo| ho gaya)?|ruk ?jao|बंद करो|बस|रुक जाओ)\s*[.!]?\s*$/i;
 function lvDigits(t) { return t.replace(/[\u0966-\u096F]/g, d => d.charCodeAt(0) - 0x966); }
 function liveOn() {
-  if (!SR || !TS) { note('Live voice ke liye Chrome/Edge/Safari (HTTPS) chahiye.'); return; }
+  if (!SR || !TS) { note('Live voice needs Chrome, Edge or Safari (HTTPS).'); return; }
   if (!S) newChat(); dictStop(); lvBuild();
   live = true; vMuted = false; micOn = true; vBuf = ''; vSess = ''; vFast = 0; try { TS.cancel(); } catch (e) { } spk++; spkOn = false;
   lvShow(true); lvUser(''); lvBot(''); lvLang(); lvSet('listen');
@@ -11576,7 +11688,7 @@ function say(t, cb) {
 /* ---- Live full-screen UI ---- */
 function lvSet(st) {
   lvSt = st; lvT = Date.now(); if (!lvEl) return; lvEl.className = 'apLv st-' + st;
-  $('#apLvSt', lvEl).textContent = ({ listen: 'Sun raha hu… bolo', hear: 'Sun raha hu…', think: 'Soch raha hu…', speak: 'Bol raha hu · rokne ke liye orb dabao', muted: 'Mic mute hai · Unmute dabao' })[st] || '';
+  $('#apLvSt', lvEl).textContent = ({ listen: 'Listening… speak now', hear: 'Listening…', think: 'Thinking…', speak: 'Speaking · tap the orb to interrupt', muted: 'Mic is muted · tap to unmute' })[st] || '';
   const m = $('#apLvMute', lvEl); if (m) { m.querySelector('span').textContent = vMuted ? '🔇' : '🎙️'; m.querySelector('em').textContent = vMuted ? 'Unmute' : 'Mute'; }
 }
 const lvUser = t => { const e = lvEl && $('#apLvU', lvEl); if (e) e.textContent = t ? '🎙 ' + t : ''; };
@@ -11660,7 +11772,7 @@ function makeDoc(a) {
 function docHtml(d) { return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(d.title || d.name) + '</title><style>body{font-family:Arial,"Noto Sans Devanagari",sans-serif;font-size:12pt;line-height:1.5;padding:24px;color:#000}table{border-collapse:collapse;width:100%}td,th{border:1px solid #444;padding:5px 8px;text-align:left}h1,h2,h3{margin:14px 0 6px}</style></head><body>' + md(d.content) + '</body></html>'; }
 function dlDoc(i) {
   const m = S && S.messages[i]; if (!m || !m.doc) return; const d = m.doc;
-  if (d.fmt === 'pdf') { const w = window.open('', '_blank'); if (!w) { note('Popup block hai. Popups allow karke dobara dabao.'); return; } w.document.write(docHtml(d)); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) { } }, 400); return; }
+  if (d.fmt === 'pdf') { const w = window.open('', '_blank'); if (!w) { note('Popup is blocked. Allow popups and tap again.'); return; } w.document.write(docHtml(d)); w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) { } }, 400); return; }
   const blob = d.fmt === 'csv' ? new Blob(['\ufeff' + d.content], { type: 'text/csv;charset=utf-8' }) : d.fmt === 'txt' ? new Blob([d.content], { type: 'text/plain;charset=utf-8' }) : new Blob(['\ufeff' + docHtml(d)], { type: 'application/msword' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
@@ -11703,7 +11815,7 @@ function head() {
   const mb = $('#apMic', root); if (mb) { mb.classList.toggle('on', vDict && micOn); mb.setAttribute('aria-pressed', vDict ? 'true' : 'false'); } lvHead();
   const ls = $('#apLs', root);
   if (ls) {
-    const dict = vDict && micOn, x = dict ? '🎤 Voice typing ON · bolo, text box mein likha jayega, phir Send dabao (band karne ke liye mic dabao)' : (spkOn && !live ? '🔊 Bol raha hu… (speaker button se mute karo)' : '');
+    const dict = vDict && micOn, x = dict ? '🎤 Voice typing ON · speak, the text appears in the box, then tap Send (tap the mic to stop)' : (spkOn && !live ? '🔊 Speaking… (tap the speaker button to mute)' : '');
     ls.innerHTML = x ? (dict ? '<span class="eq"><i></i><i></i><i></i><i></i><i></i></span>' : '') + '<span>' + esc(x) + '</span>' : ''; ls.classList.toggle('on', !!x);
   }
 }
@@ -12146,7 +12258,7 @@ function build() {
   /* reuse the robot drawing of the ERP Assistant header (ids renamed so the gradients still render) */
   const lg = document.querySelector('#taeBox .taeLg'), RB = lg ? lg.innerHTML.replace(/\b(rb|rv)h\b/g, '$1apx') : '';
   root = document.createElement('div'); root.id = 'apRoot'; root.className = 'hidden no-print';
-  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: bolo, text box mein likha jayega">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
+  root.innerHTML = '<aside class="apSb"><div class="apAi" id="apAi"><div class="apSecH"><span>Model and API Keys</span><button class="apBk" id="apBk" aria-label="Close menu">Close</button></div><div class="apSeg"><button data-pv="gemini">Gemini</button><button data-pv="grok">Llama (Groq)</button></div><div class="apKm" id="apKeyMask"></div><div class="apKl" id="apKeyList"></div><button id="apKeyNew" class="apDb apPri">Add API key</button><div class="apAiMsg" id="apAiMsg"></div></div><div class="apNav"><button class="apDb" id="apTheme">Theme</button><button class="apDb" id="apSettings">Settings</button></div><div class="apSecH" style="padding:0 12px;margin-top:6px"><span>Entry and Contractor Tools</span></div><div class="apCls"><button class="apDb" data-cls="format">Entry format</button><button class="apDb" data-cls="help">Help</button><button class="apDb" data-cls="brief">Brief me</button><button class="apDb" data-cls="drafts">Drafts</button><button class="apDb" data-cls="undo">Undo</button><button class="apDb" data-cls="redo">Redo</button></div><div class="apHist"><div class="apSecH"><span>Chat History</span><button class="apNew">New chat</button></div><input class="apSrch" placeholder="Search chats"><div class="apList"></div></div><div class="apFoot">Pinned chats are kept forever. Other chats auto-delete after 6 months.<br><a href="#" id="apMemB" style="color:var(--blue)">Memory</a></div></aside><div class="apBd"></div><section class="apMain"><header><button id="apMenu" aria-label="Chat history">☰</button><div class="taeCaps" id="apCaps">'+(window.__taeCap&&window.__taeCap.CAPS||['TAE','ITEM CODE','BUYER','ITEM NAME','SIZE','QUANTITY','CBM','SUPPLIER CODE / NAME','TARGET DISPATCH DATE']).map(function(c,i){return '<span class="taeCp" data-i="'+i+'">'+c+'</span>'}).join('')+'</div><button id="apX">✕</button></header><div class="apLog"></div><div class="apLs" id="apLs"></div><div class="apAtt" id="apAtt" hidden></div><div class="apF"><button type="button" class="att" id="apClr" aria-label="Clear" title="Clear">'+X_ICO+'</button><textarea id="apIn" rows="1" placeholder="Ask anything…"></textarea><button type="button" class="att" id="apDoc" aria-label="Attach PDF or photo" title="Attach PDF or photo">'+EN_CLIP+'</button><button type="button" class="att" id="apCam" aria-label="Camera: scan order sheet" title="Camera: scan order sheet">'+EN_LENS+'</button><button class="mic" id="apMic" aria-label="Voice typing" title="Voice typing: speak and the text appears in the box">'+MIC+'</button><button type="button" class="lv" id="apLive" aria-label="Live voice conversation" title="Live voice chat: Gemini Live jaisa baat-cheet"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="3" height="6" rx="1.5"/><rect x="8" y="5" width="3" height="14" rx="1.5"/><rect x="13" y="8" width="3" height="8" rx="1.5"/><rect x="18" y="4" width="3" height="16" rx="1.5"/></svg></button><button class="go" id="apGo" aria-label="Send">'+SEND+'</button></div><input type="file" id="apFileCam" accept="image/*" capture="environment" style="display:none"><input type="file" id="apFileDoc" accept="application/pdf,image/*" multiple style="display:none"></section>';
   root.insertAdjacentHTML('beforeend', MEMP); root.insertAdjacentHTML('beforeend', KMOD); document.body.appendChild(root); try { lvBuild(); } catch (e) { console.error('live voice ui', e); }
   try { const A = window.TAE_ASSISTANT; if (A && !A.__apSay) { const o = A.say; A.say = function (t) { eSay(t); return true; }; A.__apSay = 1; }
     if (A && A.log && !A.log.__ap) { const op = A.log.push; A.log.push = function (m) { const r = op.apply(this, arguments); try { if (m && m.who === 'b') eSay(m.text || '', { html: m.html, cc: m.chips }); } catch (e) { } return r; }; A.log.__ap = 1; } } catch (e) { }
@@ -14055,6 +14167,458 @@ body.light .ax-link{color:var(--ax-acc)!important}
 body.light .field input,body.light .field select,body.light .field textarea,body.light .search{border:1px solid #a9b6c6!important;background:#fff!important;color:var(--text)!important}
 body.light .field input:focus,body.light .field select:focus,body.light .field textarea:focus,body.light .search:focus{border-color:var(--blue)!important}
 body.light .card{border:1px solid #cbd5e1}
+body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
 </style>
+
+<script>
+/* V1.0.127: Assistant button next to Backup (floating icon hidden), Fitting Date when Balance is ticked.
+   V1.0.124: Sanding/Polish mix-up fix card on Home, handles mixed entry formats.
+   V1.0.123: Admin phone first-load names fix, Admin Data per admin, Sanding/Polish + suggested-name repair tools (Home > Unregistered Names).
+   V1.0.122: two-way sync between Master and Admin phones (newest edit wins, per record) */
+(function () {
+  'use strict';
+  var DEV; try { DEV = localStorage.getItem('thar_dev_id'); if (!DEV) { DEV = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('thar_dev_id', DEV); } } catch (e) { DEV = 'd' + Math.random().toString(36).slice(2, 10); }
+  window.__DEVID = DEV;
+  var unsubs = [], seenU = { work: new Map(), orders: new Map(), repairs: new Map() }, ready = { work: false, orders: false, repairs: false, meta: false }, first = { work: true, orders: true, repairs: true }, firstMeta = true, rt = null;
+  window.__cloudSeenU = seenU;
+  function allReady() { return ready.work && ready.orders && ready.repairs && ready.meta; }
+  window.__syncBlocked = function () { return unsubs.length > 0 && !allReady(); };
+  function scheduleRender() {
+    clearTimeout(rt);
+    rt = setTimeout(function () {
+      var a = document.activeElement;
+      if ((a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || document.querySelector('.modal-backdrop:not(.closing)')) return scheduleRender();
+      try { render(); } catch (e) { }
+    }, 700);
+  }
+  function kick() { if (allReady()) { window.__syncWait = 0; try { doPushCloud(); } catch (e) { } } }
+
+  function mergeCol(col, snap) {
+    var arr = db[col]; if (!Array.isArray(arr)) arr = db[col] = [];
+    var idx = new Map(); arr.forEach(function (x) { if (x && x.id != null) idx.set(String(x.id), x); });
+    var changed = false, sub = !!window.__subMode, wipe = first[col] && sub && !snap.metadata.fromCache;
+    window.__merging = true;
+    try {
+      if (wipe) {   // Admin phone, first real load: make this phone an exact copy of the cloud
+        var ids = new Set(snap.docs.map(function (d) { return d.id; }));
+        idx.forEach(function (o, id) { if (!ids.has(id)) { var i = arr.indexOf(o); if (i >= 0) arr.splice(i, 1); try { untouch(col, id); } catch (e) { } idx.delete(id); changed = true; } });
+      }
+      var changes = wipe ? snap.docs.map(function (d) { return { type: 'added', doc: d }; }) : snap.docChanges();
+      changes.forEach(function (ch) {
+        var id = ch.doc.id;
+        if (ch.type === 'removed') {
+          seenU[col].delete(id);
+          var o = idx.get(id);
+          if (o && cloudSig[col].has(id)) { var i2 = arr.indexOf(o); if (i2 >= 0) arr.splice(i2, 1); try { untouch(col, id); } catch (e) { } idx.delete(id); cloudSig[col].delete(id); changed = true; }
+          return;
+        }
+        var d = ch.doc.data(); if (d.id == null) d.id = id;
+        seenU[col].set(id, d._u || 0);
+        var loc = idx.get(id);
+        if (!loc) {
+          if (db.deleted && db.deleted[id]) return;
+          /* FIX: never import leftover TEST DATA / old un-stamped cloud docs into the Master phone */
+          if (window.tfIsJunk && window.tfIsJunk(d, col)) return;
+          if (!sub && !d._u) return;
+          arr.push(d); idx.set(id, d); cloudSig[col].set(id, cloudHash(JSON.stringify(d))); touch(col, d); changed = true; return;
+        }
+        var hd = cloudHash(JSON.stringify(d));
+        if ((d._u || 0) > (loc._u || 0) || (wipe && cloudHash(JSON.stringify(loc)) !== hd)) {
+          Object.keys(loc).forEach(function (k) { delete loc[k]; }); Object.assign(loc, d);
+          cloudSig[col].set(id, cloudHash(JSON.stringify(loc))); touch(col, loc); changed = true;
+        }
+      });
+    } finally { window.__merging = false; }
+    if (!snap.metadata.fromCache) first[col] = false;
+    if (changed) { try { dataVer++; } catch (e) { } scheduleRender(); }
+  }
+
+  function metaTs() { try { return Number(localStorage.getItem('thar_meta_ts') || 0); } catch (e) { return 0; } }
+  function mergeMeta(doc) {
+    if (!doc.exists) return;
+    var d = doc.data() || {}, lu = d.lastUpdated || 0;
+    // Admin phone, first real cloud load: always take the cloud copy of names/buyers/attendance (same as work/orders/repairs do), so names never look "unregistered" because of stale local data
+    var force = firstMeta && !!window.__subMode && !doc.metadata.fromCache;
+    if (!doc.metadata.fromCache) firstMeta = false;
+    if (!force) {
+      if (d.by === DEV) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
+      if (!d.by && !window.__subMode) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
+      if (lu <= metaTs()) return;
+    }
+    window.__merging = true;
+    try {
+      /* FIX: merge (union) instead of replace, so a stale cloud copy can never drop registered suppliers / names (the "Needs fix" bug) */
+      if (Array.isArray(d.buyers)) db.buyers = Array.from(new Set((db.buyers || []).concat(d.buyers)));
+      if (Array.isArray(d.peopleCodes)) {
+        var have = new Set((db.peopleCodes || []).map(function (p) { return [p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|'); }));
+        var add = d.peopleCodes.filter(function (p) { return p && !have.has([p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|')); });
+        db.peopleCodes = (db.peopleCodes || []).concat(add);
+        window.__nr = null;
+      }
+      if (d.attendance && typeof d.attendance === 'object') db.attendance = force ? Object.assign({}, d.attendance) : Object.assign({}, db.attendance || {}, d.attendance);
+      if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
+    } finally { window.__merging = false; }
+    try {
+      cloudSig.meta = cloudHash(JSON.stringify({ company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '', buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, schema: 2 }));
+      localStorage.setItem('thar_meta_ts', String(lu));
+    } catch (e) { }
+    try { dataVer++; metaDirty = true; mir.meta = true; scheduleFlush(); } catch (e) { }
+    scheduleRender();
+  }
+
+  function start() {
+    if (unsubs.length || !window.cloudDb || isEmployeeMode || isViewMode) return;
+    CLOUD_COLS.forEach(function (col) {
+      unsubs.push(cloudColRef(col).onSnapshot(function (snap) {
+        if (isEmployeeMode) return;
+        try { mergeCol(col, snap); } catch (e) { console.error('sync merge', e); }
+        if (!snap.metadata.fromCache) { ready[col] = true; kick(); }
+      }, function (e) { console.error('sync', e); }));
+    });
+    if (window.__subMode) unsubs.push(window.cloudDb.collection('thar_factory').doc('sub_state').onSnapshot(function (s) {
+      var d = s.exists && s.data(); if (!d || !Array.isArray(d.workers) || !d.workers.length) return;
+      var cur = db.workers || [], byId = new Map(cur.map(function (w) { return [String(w.id), w]; })), out = d.workers.map(function (w) { var o = byId.get(String(w.id)); return o ? Object.assign({}, o, { name: w.name }) : { id: w.id, name: w.name }; });
+      if (JSON.stringify(out) === JSON.stringify(cur)) return;
+      db.workers = out; try { dataVer++; metaDirty = true; mir.meta = true; scheduleFlush(); } catch (e) { } scheduleRender();
+    }, function (e) { console.error('sync workers', e); }));
+    unsubs.push(window.cloudDb.collection('thar_factory').doc('meta_info').onSnapshot(function (doc) {
+      if (isEmployeeMode) return;
+      try { mergeMeta(doc); } catch (e) { console.error('sync meta', e); }
+      if (!doc.metadata.fromCache) { ready.meta = true; kick(); }
+    }, function (e) { console.error('sync meta', e); }));
+  }
+  function stop() {
+    unsubs.forEach(function (u) { try { u(); } catch (e) { } }); unsubs = [];
+    ready = { work: false, orders: false, repairs: false, meta: false }; first = { work: true, orders: true, repairs: true }; firstMeta = true;
+    CLOUD_COLS.forEach(function (c) { seenU[c].clear(); });
+  }
+  var _sa = window.startAdminListen; window.startAdminListen = function () { var r = _sa.apply(this, arguments); try { start(); } catch (e) { console.error(e); } return r; };
+  var _xa = window.stopAdminListen; window.stopAdminListen = function () { try { stop(); } catch (e) { } return _xa.apply(this, arguments); };
+  var _dp = window.doPushCloud;
+  window.doPushCloud = function () {
+    if (window.__syncBlocked()) { window.__syncWait = (window.__syncWait || 0) + 1; if (window.__syncWait < 40) setTimeout(function () { window.doPushCloud(); }, 1500); return Promise.resolve(); }
+    return _dp.apply(this, arguments);
+  };
+})();
+</script>
+<script>
+/* One-tap repair tools inside Home > Unregistered Names:
+   1) Sanding/Polish mix-up  2) apply "Did you mean" names.  Both show a preview first and can be undone. */
+(function () {
+  'use strict';
+  window.tfOpenAst = function () { var f = document.getElementById('taeFab'); if (f) f.click(); else if (window.toast) toast('Assistant not ready'); };
+  setInterval(function () { var b = document.getElementById('astBtn'), f = document.getElementById('taeFab'); if (b) b.classList.toggle('hidden', !f || f.classList.contains('hidden')); }, 700);
+  var UKEY = 'thar_namefix_undo_v1';
+  function nm(w, k) { return splitsOf(w, k).map(function (p) { return String(p.name || '').trim(); }).filter(Boolean); }
+  function hasArr(w, k) { return Array.isArray(w[k + 'Splits']) && w[k + 'Splits'].length > 0; }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function polishBad(w, R) { var p = nm(w, 'polish'); return p.length > 0 && p.every(function (n) { return !regLookup('polish', n, R) && regLookup('sanding', n, R); }); }
+  function swapCands() {
+    var R = nameReg(), out = [];
+    (db.work || []).forEach(function (w) {
+      if (!w || !polishBad(w, R)) return;
+      var s = nm(w, 'sanding');
+      if (s.length && s.every(function (n) { return regLookup('polish', n, R); })) out.push(w);
+    });
+    return out;
+  }
+  function swapLeft() {   /* Polish has a Sanding-only name but the entry is not a clean swap: must be fixed by hand */
+    var R = nameReg(), c = new Set(swapCands().map(function (w) { return w.id; }));
+    return (db.work || []).filter(function (w) { return w && !c.has(w.id) && nm(w, 'polish').some(function (n) { return !regLookup('polish', n, R) && regLookup('sanding', n, R); }); }).length;
+  }
+  function doSwap(w) {
+    var a = clone(splitsOf(w, 'sanding')), b = clone(splitsOf(w, 'polish'));
+    if (a.length === b.length) { for (var i = 0; i < a.length; i++) { var t0 = a[i].name; a[i].name = b[i].name; b[i].name = t0; } w.sandingSplits = a; w.polishSplits = b; }
+    else { w.sandingSplits = b; w.polishSplits = a; }
+    var sn = w.sandingName, pn = w.polishName;
+    if (sn !== undefined || pn !== undefined) { w.sandingName = pn; w.polishName = sn; if (w.sandingName === undefined) delete w.sandingName; if (w.polishName === undefined) delete w.polishName; }
+  }
+  function sugGroups() {
+    fixSet(db); var out = [];
+    window.__fx.names.forEach(function (g) { var sg = nameSuggest(g.type, g.name); if (sg && prNorm(sg) !== prNorm(g.name)) out.push({ g: g, sg: sg }); });
+    return out;
+  }
+  function applySug(w, map) {
+    var ch = false, f = function (type, v) { var r = map[type + '|' + prNorm(v)]; return r || v; };
+    NAME_STAGES.forEach(function (st) {
+      var k = st[0], lg = k === 'carpenter' ? 'carpenterName' : k + 'Name';
+      if (w[lg]) { var n = f(k, w[lg]); if (n !== w[lg]) { w[lg] = n; ch = true; } }
+      if (Array.isArray(w[k + 'Splits'])) w[k + 'Splits'].forEach(function (sp) {
+        var n2 = f(k, sp.name); if (n2 !== sp.name) { sp.name = n2; ch = true; }
+        if (k === 'carpenter' && sp.supplier) { var s2 = f('woodSupplier', sp.supplier); if (s2 !== sp.supplier) { sp.supplier = s2; ch = true; } }
+      });
+    });
+    if (w.woodSupplier) { var n3 = f('woodSupplier', w.woodSupplier); if (n3 !== w.woodSupplier) { w.woodSupplier = n3; ch = true; } }
+    return ch;
+  }
+  function commit(list, fn, label) {
+    var snap = list.map(function (w) { return JSON.parse(JSON.stringify(w)); });
+    try { localStorage.setItem(UKEY, JSON.stringify({ at: Date.now(), label: label, items: snap })); } catch (e) { }
+    window.__nr = null;
+    list.forEach(function (w) { fn(w); try { touch('work', w); } catch (e) { } });
+    try { dataVer++; } catch (e) { } save(); render();
+    toast('✔ ' + list.length + ' entries fixed. You can Undo from the same panel.');
+  }
+  window.tfSwapFix = function () {
+    var c = swapCands(); if (!c.length) return toast('Nothing to fix');
+    var ex = c.slice(0, 8).map(function (w) { return '• ' + (w.subOrder || w.orderNo) + ': Sanding ' + nm(w, 'sanding').join('/') + ' | Polish ' + nm(w, 'polish').join('/') + '  →  Sanding ' + nm(w, 'polish').join('/') + ' | Polish ' + nm(w, 'sanding').join('/'); }).join('\n');
+    if (!confirm('Swap Sanding and Polish names in ' + c.length + ' entries?\n\n' + ex + (c.length > 8 ? '\n…and ' + (c.length - 8) + ' more' : ''))) return;
+    commit(c, doSwap, 'swap');
+  };
+  window.tfApplySug = function () {
+    var gs = sugGroups(); if (!gs.length) return toast('No suggestions');
+    var ex = gs.slice(0, 15).map(function (x) { return '• ' + x.g.name + '  →  ' + x.sg + '  (' + NAME_LBL[x.g.type] + ', ' + x.g.ids.size + ')'; }).join('\n');
+    if (!confirm('Replace these names with the registered ones?\n\n' + ex + (gs.length > 15 ? '\n…and ' + (gs.length - 15) + ' more' : ''))) return;
+    var map = {}, ids = new Set();
+    gs.forEach(function (x) { map[x.g.type + '|' + prNorm(x.g.name)] = x.sg; x.g.ids.forEach(function (i) { ids.add(i); }); });
+    var list = db.work.filter(function (w) { return ids.has(w.id); });
+    commit(list, function (w) { applySug(w, map); }, 'names');
+  };
+  window.tfUndo = function () {
+    var u; try { u = JSON.parse(localStorage.getItem(UKEY) || 'null'); } catch (e) { }
+    if (!u || !u.items || !u.items.length) return toast('Nothing to undo');
+    if (!confirm('Undo the last fix (' + u.items.length + ' entries)?')) return;
+    u.items.forEach(function (s) {
+      var w = db.work.find(function (x) { return x.id === s.id; }); if (!w) return;
+      Object.keys(w).forEach(function (k) { delete w[k]; }); Object.assign(w, s); try { touch('work', w); } catch (e) { }
+    });
+    try { localStorage.removeItem(UKEY); } catch (e) { }
+    window.__nr = null; try { dataVer++; } catch (e) { } save(); render(); toast('Undone');
+  };
+  /* ---- Test-data guard ---- */
+  window.tfIsJunk = function (w, col) {
+    if (!w || col !== 'work') return false;
+    return String(w.notes || '').trim().toUpperCase() === 'TEST DATA';
+  };
+  function junkList() { return (db.work || []).filter(function (w) { return window.tfIsJunk(w, 'work'); }); }
+  window.tfPurgeTest = function () {
+    var j = junkList(); if (!j.length) return toast('No test entries');
+    var ex = j.slice(0, 8).map(function (w) { return '• ' + (w.subOrder || w.orderNo) + '  (' + (w.date || '') + ')'; }).join('\n');
+    if (!confirm('Delete ' + j.length + ' TEST DATA entries (also from cloud)?\n\n' + ex + (j.length > 8 ? '\n…and ' + (j.length - 8) + ' more' : ''))) return;
+    var ids = new Set(j.map(function (w) { return w.id; }));
+    j.forEach(function (w) { db.deleted = db.deleted || {}; db.deleted[w.id] = Date.now(); try { untouch('work', w.id); } catch (e) { } });
+    db.work = db.work.filter(function (w) { return !ids.has(w.id); });
+    try { dataVer++; } catch (e) { } save(); render(); toast('✔ ' + j.length + ' test entries deleted');
+  };
+  var _hp = window.homePage;
+  window.homePage = function () {
+    var h = _hp.apply(this, arguments);
+    try {
+      if (isEmployeeMode || isViewMode) return h;
+      var jn = junkList().length;
+      if (jn) {
+        var cj = '<section class="card" style="border-left:4px solid var(--red)"><h3>🧹 Test entries (' + jn + ')</h3><p class="small muted" style="margin-top:-6px">Entries marked TEST DATA were found. Tap to delete them from this phone and the cloud.</p><div class="actions"><button class="btn danger" style="flex:1" onclick="tfPurgeTest()">Delete ' + jn + ' test entries</button></div></section>';
+        var re0 = /(<section class="card">\s*<h3>🔎 Global Search)/;
+        h = re0.test(h) ? h.replace(re0, cj + '$1') : cj + h;
+      }
+      var sw = swapCands().length, left = sw ? swapLeft() : 0, un = false; try { un = !!localStorage.getItem(UKEY); } catch (e) { }
+      if (sw || un) {
+        var card1 = '<section class="card" style="border-left:4px solid var(--amber)"><h3>🔁 Sanding / Polish mix-up</h3>' +
+          (sw ? '<p class="small muted" style="margin-top:-6px"><b>' + sw + '</b> entries have a Sanding-only name (e.g. Pradeep) in Polish. Tap to swap Sanding and Polish names back. You see a preview first.' + (left ? ' <b>' + left + '</b> more need a manual fix.' : '') + '</p><div class="actions"><button class="btn amber" style="flex:1" onclick="tfSwapFix()">Fix ' + sw + ' entries</button></div>' : '') +
+          (un ? '<div class="actions" style="margin-top:8px"><button class="btn smallbtn" style="flex:1" onclick="tfUndo()">↩ Undo last fix</button></div>' : '') + '</section>';
+        var re = /(<section class="card">\s*<h3>🔎 Global Search)/;
+        h = re.test(h) ? h.replace(re, card1 + '$1') : card1 + h;
+      }
+      var tag = 'enter the registered name or its code.</p>', i = h.indexOf(tag), sg = i < 0 ? 0 : sugGroups().length;
+      if (sg) h = h.slice(0, i + tag.length) + '<div class="actions" style="margin:10px 0"><button class="btn smallbtn blue" style="flex:1 1 100%" onclick="tfApplySug()">✔ Use suggested names (' + sg + ')</button></div>' + h.slice(i + tag.length);
+    } catch (e) { }
+    return h;
+  };
+})();
+</script>
+
+<script>
+/* ===== V1.0.128 =====
+   1) Only TWO backup systems: Google Drive and Backup & Restore. Both write the same single complete file "Thar ERP Backup.json"
+      (Work, Orders, Repairs, Names & Codes, Workers, Attendance, Buyers, Settings, Admin / User / Entry accounts and login history).
+      Every backup MERGES the older copy in first (nothing is ever deleted) and then overwrites Drive. The header Backup button does both.
+   2) Settings > Year > Work / Order > year > month. */
+(function () {
+  'use strict';
+  var FILE = 'Thar ERP Backup.json', OLDNAMES = ['Thar-Full-Backup.json'], busy = false;
+
+  /* ---- last-backup copy kept inside this phone, so a download can also merge the previous backup ---- */
+  function kvOpen() { return new Promise(function (res, rej) { var r = indexedDB.open('thar_bk_snap', 1); r.onupgradeneeded = function () { r.result.createObjectStore('kv'); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }); }
+  async function snapGet() { try { var d = await kvOpen(); var v = await new Promise(function (res, rej) { var q = d.transaction('kv').objectStore('kv').get('last'); q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); }; }); d.close(); return v || null; } catch (e) { return null; } }
+  async function snapPut(blob) { try { var d = await kvOpen(); await new Promise(function (res, rej) { var tx = d.transaction('kv', 'readwrite'); tx.objectStore('kv').put(blob, 'last'); tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); d.close(); } catch (e) { } }
+
+  /* ---- Google Drive helpers ---- */
+  async function driveFind() {
+    var t = await driveAuth();
+    for (var i = 0; i < [FILE].concat(OLDNAMES).length; i++) {
+      var nm = [FILE].concat(OLDNAMES)[i];
+      var r = await fetch('https://www.googleapis.com/drive/v3/files?pageSize=1&orderBy=' + encodeURIComponent('modifiedTime desc') + '&fields=' + encodeURIComponent('files(id,name,size)') + '&q=' + encodeURIComponent("trashed=false and name='" + nm + "'"), { headers: { Authorization: 'Bearer ' + t } });
+      if (!r.ok) throw new Error('Drive search failed (' + r.status + ')');
+      var f = ((await r.json()).files || [])[0];
+      if (f) return { id: f.id, name: f.name, size: Number(f.size || 0) };
+    }
+    return null;
+  }
+
+  /* ---- Admin / User / Entry accounts + login history: fetched live, merged into db.accounts (never removed) ---- */
+  async function refreshAccounts() {
+    if (!window.cloudDb || typeof UCOL === 'undefined') return;
+    var kinds = { users: 'user', entryUsers: 'xuser', subAdmins: 'subadmin', subOps: 'subop', sessions: 'sess' };
+    if (!db.accounts || typeof db.accounts !== 'object') db.accounts = {};
+    await Promise.all(Object.keys(kinds).map(async function (k) {
+      try {
+        var s = await window.cloudDb.collection(UCOL).where('kind', '==', kinds[k]).get();
+        var cur = Array.isArray(db.accounts[k]) ? db.accounts[k] : [], pos = new Map(cur.map(function (x, i) { return [x.id, i]; }));
+        s.docs.forEach(function (d) { var o = Object.assign({}, d.data(), { id: d.id }); if (pos.has(d.id)) cur[pos.get(d.id)] = o; else { cur.push(o); pos.set(d.id, cur.length - 1); } });
+        db.accounts[k] = cur;
+      } catch (e) { /* offline / no permission: keep what we already have */ }
+    }));
+  }
+
+  /* ---- build ONE complete payload: live data + every older copy merged in ---- */
+  async function build(sources) {
+    await refreshAccounts();
+    var stores = { work: db.work.slice(), orders: db.orders.slice(), repairs: db.repairs.slice() };
+    var meta = JSON.parse(JSON.stringify(metaOf(db)));
+    for (var i = 0; i < sources.length; i++) {
+      try {
+        var sr = sources[i], rd = await readBackup(sr.stream, { size: sr.size });
+        if (rd.header && rd.header.kind === 'full') {
+          ['work', 'orders', 'repairs'].forEach(function (k) { var have = new Set(stores[k].map(function (x) { return x && x.id; })); ((rd.out && rd.out[k]) || []).forEach(function (x) { if (x && x.id && !have.has(x.id)) { stores[k].push(x); have.add(x.id); } }); });
+          addMissingMeta(meta, rd.meta);
+        }
+      } catch (e) { /* unreadable old copy: skip, never block the backup */ }
+    }
+    return { stores: stores, meta: meta };
+  }
+
+  async function run(opt) {   // opt: { drive, local }
+    if (busy) { toast('Backup already running…'); return { driveOk: false, why: 'busy' }; }
+    if (typeof isEmployeeMode !== 'undefined' && isEmployeeMode) return { driveOk: false, why: '' };
+    if (isViewMode) { toast('Exit the old backup view first'); return { driveOk: false, why: '' }; }
+    busy = true; var res = { driveOk: false, why: '', local: false }, prog = null;
+    try {
+      var drv = null;
+      if (opt.drive) {
+        if (!db.settings.driveClientId) res.why = 'Google Drive is not connected (Client ID missing).';
+        else { try { await driveAuth(); } catch (e) { res.why = e.message || 'Google sign-in failed.'; } }   // sign-in must start from the tap
+      }
+      prog = progressUI('Backup…');
+      var src = [], snap = await snapGet();
+      if (snap) src.push({ stream: snap.stream(), size: snap.size });
+      if (opt.drive && !res.why) {
+        try { drv = await driveFind(); if (drv) { var t = await driveAuth(), r = await fetch('https://www.googleapis.com/drive/v3/files/' + drv.id + '?alt=media', { headers: { Authorization: 'Bearer ' + t } }); if (r.ok) src.push({ stream: r.body, size: drv.size }); } }
+        catch (e) { res.why = e.message; }
+      }
+      db.lastBackup = new Date().toISOString(); save();
+      var P = await build(src), o = await produceFile('full', function (w) { return dumpDB(w, { kind: 'full', meta: P.meta, stores: P.stores }); });
+      var copy = new Blob([await o.file.arrayBuffer()], { type: 'application/json' });
+      if (opt.drive && !res.why) {
+        try { await driveUpload(copy, FILE, drv && drv.id); res.driveOk = true; } catch (e) { res.why = e.message || 'Drive upload failed.'; }
+      }
+      if (opt.local) { downloadFile(copy, FILE); res.local = true; }
+      await snapPut(copy); setTimeout(function () { try { o.drop(); } catch (e) { } }, 60000);
+    } catch (e) { alert('Backup failed: ' + e.message); res.why = res.why || e.message; }
+    finally { busy = false; if (prog) prog.close(); }
+    return res;
+  }
+
+  function report(r, opt) {
+    var ok = [];
+    if (opt.drive && r.driveOk) ok.push('☁ Google Drive (overwritten)');
+    if (opt.local && r.local) ok.push('⬇ Downloaded');
+    if (opt.drive && !r.driveOk && r.why && r.why !== 'busy') alert('Google Drive backup did not finish:\n' + r.why + (ok.length ? '\n\nThe download part is done.' : ''));
+    if (ok.length) toast('✅ Thar ERP Backup · ' + ok.join(' · '));
+  }
+
+  /* ---- public functions (replace the old backup system) ---- */
+  window.backupAll = async function () { var o = { drive: true, local: true }; report(await run(o), o); try { render(); } catch (e) { } };
+  window.backupFullDB = async function () { var o = { drive: false, local: true }; report(await run(o), o); try { render(); } catch (e) { } };
+  window.driveBackupUp = async function (quiet) {
+    var o = { drive: true, local: false }, r = await run(o);
+    window.driveBackupUp.err = r.why || '';
+    if (!quiet) report(r, o); else if (r.driveOk) toast('☁ Drive backup updated (overwritten)');
+    return !!r.driveOk;
+  };
+  window.backupHubPage = function () {
+    return card('💾 Backup', '<button class="btn smallbtn" style="margin-bottom:10px" onclick="moreSub=\'settings\';render()">← Back</button>' +
+      '<p class="small muted" style="margin-top:-5px">One complete file: <b>Thar ERP Backup</b> (Work, Orders, Repairs, Names &amp; Codes, Workers, Attendance, Buyers, Settings, Admin / User / Entry accounts and login history). Every backup merges the old copy in first, so nothing is ever deleted. The <b>Backup</b> button at the top does Drive and download together.</p>' +
+      '<div class="grid"><button class="btn" onclick="moreSub=\'drive\';render()">☁ Google Drive</button><button class="btn" onclick="moreSub=\'fullBackup\';render()">💾 Backup &amp; Restore</button></div>');
+  };
+  window.fullBackupPage = function () {
+    return card('💾 Backup & Restore', '<button class="btn smallbtn" style="margin-bottom:10px" onclick="moreSub=\'backupHub\';render()">← Back</button>' +
+      '<p class="small muted" style="margin-top:-5px"><b>Backup</b> downloads <b>Thar ERP Backup.json</b> with everything. The last backup is merged in first — nothing is deleted.<br><b>Restore</b> reads a backup file and adds whatever is missing. Existing data is never deleted.</p>' +
+      '<div class="actions"><button class="btn blue" style="flex:1" onclick="backupFullDB()">⬇ Backup</button><button class="btn primary" style="flex:1" onclick="document.getElementById(\'restoreFile\').click()">⬆ Restore</button></div>');
+  };
+  var oldDrivePage = window.drivePage;
+  window.drivePage = function () {
+    var cid = esc(db.settings.driveClientId || '');
+    return card('☁ Google Drive', '<button class="btn smallbtn" style="margin-bottom:10px" onclick="moreSub=\'backupHub\';render()">← Back</button>' +
+      '<p class="small muted" style="margin-top:-5px">Saves <b>Thar ERP Backup.json</b> in your Google Drive. The same file is overwritten every time, after merging the old copy in (nothing deleted). Needs your Google OAuth Client ID (type "Web") and internet.</p>' +
+      '<div class="field"><label>Google OAuth Client ID</label><input type="text" value="' + cid + '" onchange="db.settings.driveClientId=this.value.trim();save()"></div>' +
+      '<div class="actions"><button class="btn amber" style="flex:1" onclick="driveBackupUp()">☁ Backup to Drive</button><button class="btn primary" style="flex:1" onclick="tfDriveRestore()">⬇ Restore from Drive</button></div>' +
+      '<details style="margin-top:12px"><summary class="small muted">Browse other files in Drive (view only)</summary><div class="field"><label>File name contains (optional)</label><input id="drvQ" type="text"></div><div class="actions"><button class="btn blue smallbtn" onclick="driveShow()">☁ List .json files</button></div><div id="drvList" style="margin-top:12px"></div></details>');
+  };
+  window.tfDriveRestore = async function () {
+    var prog = null;
+    try {
+      await driveAuth(); var f = await driveFind(); if (!f) return alert('No "Thar ERP Backup.json" found in your Google Drive yet.');
+      if (!confirm('Restore from Drive file "' + f.name + '"?\n• Entries in the file replace the same entries in the app.\n• Missing entries are added.\n• Nothing in the app is deleted.')) return;
+      prog = progressUI('Reading ' + f.name);
+      var rd = await readBackup(await driveStream(f.id), { size: f.size, onProg: function (b, l) { prog.set(fmtB(b) + ' · ' + l.toLocaleString() + ' records', null); } });
+      prog.close(); prog = null;
+      try { await preRestoreSnapshot(); } catch (e) { }
+      var n = mergeRD(rd); try { await flushNow(); } catch (e) { }
+      if (n) { alert('✅ Restore complete: ' + n + ' items'); location.reload(); } else toast('Already identical. Nothing to restore.');
+    } catch (e) { if (prog) prog.close(); alert(e.message); }
+  };
+
+  /* ---- Settings > Year ---- */
+  window.YR = { kind: '', year: '', month: '', tae: '', lim: 40 };
+  var MN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function dOf(kind, x) { var d = String(kind === 'order' ? (x.orderDate || x.date || '') : (x.targetDate || '')).slice(0, 10);   /* Work = Target Dispatch Date */ return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''; }
+  function listOf(kind) { return (kind === 'order' ? db.orders : db.work) || []; }
+  function taeKey(x) { var t = String(x.orderNo || '').trim(); return (typeof normT === 'function' ? normT(t) : t.toUpperCase()) || 'NO TAE'; }
+  function uniq(arr, kind) { var m = {}; arr.forEach(function (x) { m[taeKey(x)] = 1; }); return Object.keys(m).length; }
+  function enc(k) { return encodeURIComponent(k).replace(/'/g, '%27'); }
+  window.yearPage = function () {
+    var Y = window.YR; if (Y.tae === undefined) Y.tae = '';
+    var back = function (to, label) { return '<button class="btn smallbtn" style="margin-bottom:12px" onclick="' + to + ';render();window.scrollTo(0,0)">← ' + (label || 'Back') + '</button>'; };
+    if (!Y.kind) {
+      return card('📅 Year', back("moreSub='settings'") + '<div class="grid"><button class="btn primary" onclick="YR.kind=\'work\';render()">⚒ Work<br><small>' + uniq(db.work) + ' TAE</small></button><button class="btn amber" onclick="YR.kind=\'order\';render()">📦 Order<br><small>' + uniq(db.orders) + ' TAE</small></button></div>');
+    }
+    var kind = Y.kind, ttl = kind === 'order' ? '📦 Order' : '⚒ Work', all = listOf(kind), byY = {};
+    all.forEach(function (x) { var d = dOf(kind, x); if (d) (byY[d.slice(0, 4)] = byY[d.slice(0, 4)] || []).push(x); });
+    var noD = all.filter(function (x) { return !dOf(kind, x); }).length, basis = kind === 'order' ? 'Order Date' : 'Target Dispatch Date';
+    var note = '<div class="small muted" style="margin:0 0 10px">By <b>' + basis + '</b>' + (noD ? ' · ' + noD + ' without a date (not listed)' : '') + '</div>';
+    if (!Y.year) {
+      var ys = Object.keys(byY).sort().reverse();
+      return card(ttl + ' · Year', back("YR.kind=''") + note + (ys.length ? '<div class="grid">' + ys.map(function (y) { return '<button class="btn" onclick="YR.year=\'' + y + '\';render();window.scrollTo(0,0)">' + y + '<br><small>' + uniq(byY[y]) + ' TAE</small></button>'; }).join('') + '</div>' : '<div class="empty">No Entry</div>'));
+    }
+    var inY = byY[Y.year] || [], byM = {};
+    inY.forEach(function (x) { var m = dOf(kind, x).slice(5, 7); (byM[m] = byM[m] || []).push(x); });
+    if (!Y.month) {
+      return card(ttl + ' · ' + esc(Y.year), back("YR.year=''") + note + '<div class="grid">' + MN.map(function (n, i) {
+        var m = String(i + 1).padStart(2, '0'), c = byM[m] ? uniq(byM[m]) : 0;
+        return '<button class="btn" style="' + (c ? '' : 'opacity:.4') + '" onclick="YR.month=\'' + m + '\';YR.tae=\'\';YR.lim=40;render();window.scrollTo(0,0)">' + n + '<br><small>' + (c ? c + ' TAE' : '—') + '</small></button>';
+      }).join('') + '</div>');
+    }
+    var rows = (byM[Y.month] || []), mTitle = ttl + ' · ' + MN[Number(Y.month) - 1] + ' ' + esc(Y.year);
+    if (!rows.length) return card(mTitle, back("YR.month=''") + '<div class="empty">No Entry</div>');
+    /* level: one TAE -> its entries */
+    if (Y.tae) {
+      var one = rows.filter(function (x) { return taeKey(x) === Y.tae; }).sort(function (a, b) { return String(a.subOrder || '').localeCompare(String(b.subOrder || ''), undefined, { numeric: true }); });
+      var nm = one.length ? (one[0].orderNo || Y.tae) : Y.tae;
+      var hd = card(mTitle + ' · ' + esc(nm), back("YR.tae=''") + '<div class="small muted">' + one.length + ' ' + (kind === 'order' ? 'orders' : 'entries') + '</div>' + (one.length ? '' : '<div class="empty">No Entry</div>'));
+      var sh = one.slice(0, Y.lim);
+      return hd + sh.map(function (x) { return kind === 'order' ? orderCard(x) : workCard(x); }).join('') + (one.length > sh.length ? '<button class="btn" style="width:100%;margin:10px 0" onclick="YR.lim+=40;render()">Show more (' + (one.length - sh.length) + ' left)</button>' : '');
+    }
+    /* level: TAE list with buyer */
+    var g = {};
+    rows.forEach(function (x) { var k = taeKey(x), o = g[k] || (g[k] = { key: k, name: x.orderNo || k, buyers: [], n: 0 }); o.n++; var b = String(x.buyer || '').trim(); if (b && o.buyers.indexOf(b) < 0) o.buyers.push(b); });
+    var list = Object.keys(g).map(function (k) { return g[k]; }).sort(function (a, b) { return String(b.name).localeCompare(String(a.name), undefined, { numeric: true }); });
+    var shown = list.slice(0, Y.lim * 2);
+    return card(mTitle, back("YR.month=''") + '<div class="small muted" style="margin-bottom:10px"><b>' + list.length + ' TAE</b> · ' + rows.length + ' ' + (kind === 'order' ? 'orders' : 'entries') + '</div>' +
+      shown.map(function (o) {
+        return '<div class="item" style="cursor:pointer" onclick="YR.tae=decodeURIComponent(\'' + enc(o.key) + '\');YR.lim=40;render();window.scrollTo(0,0)"><div style="min-width:0"><strong>' + esc(o.name) + '</strong><small>' + (o.buyers.length ? esc(o.buyers.join(', ')) + ' · ' : '') + o.n + ' ' + (kind === 'order' ? 'orders' : 'entries') + '</small></div><span class="pill blue">Open</span></div>';
+      }).join('') + (list.length > shown.length ? '<button class="btn" style="width:100%;margin-top:10px" onclick="YR.lim+=40;render()">Show more (' + (list.length - shown.length) + ' left)</button>' : ''));
+  };
+})();
+</script>
 </body>
 </html>
