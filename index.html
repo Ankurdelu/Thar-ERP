@@ -306,13 +306,15 @@ body.light #clkTime { color: #ffffff; }
 .bigbtn { flex-direction: column; min-height: 120px; font-size: 17px; gap: 8px; }
 .mrow { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
 @media print {
-  #printContainer .nb { font-family: 'Patrick Hand','Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive; color: #111827; font-size: 24px; line-height: 42px; padding: 0 8px; break-after: page; }
+  #printContainer .nb { font-family: 'Patrick Hand','Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive; color: #1a237e; font-size: 24px; line-height: 42px; padding: 0 8px; break-after: page; }
   #printContainer .nb:last-child { break-after: auto; }
   #printContainer .nbt { text-align: center; font-size: 34px; line-height: 70px; font-weight: 700; text-decoration: underline; margin-bottom: 10px; }
   #printContainer .nbg { break-inside: avoid; }
   #printContainer .nbh { font-weight: 700; font-size: 26px; }
   #printContainer .nbi { padding-left: 18px; margin-bottom: 8px; }
   #printContainer .nbm { padding-left: 8px; }
+  #printContainer .nbd, #printContainer .nbr { color: #d32f2f; }
+  #printContainer .nbr { padding-left: 8px; }
   #printContainer .nbs { height: 30px; }
 }
 mark.hl { background: rgba(255,255,255,.22); color: #111; border-radius: 4px; padding: 0 3px; font-weight: 800; }
@@ -1766,7 +1768,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.115';
+const APP_VER = 'V1.0.116';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -4216,7 +4218,7 @@ function matRowHtml(l) {
       <div class="field"><label>Unit</label><select class="ol-unit"><option value="Inch" ${l.unit !== 'Cm' ? 'selected' : ''}>Inch</option><option value="Cm" ${l.unit === 'Cm' ? 'selected' : ''}>Cm</option></select></div>
     </div>
     <div class="row">
-      <div class="field"><label>Quantity (pc)</label><input class="ol-qty" type="number" min="1" step="any" value="${esc(l.qty || '')}"></div>
+      <div class="field"><label>Quantity (pc)</label><input class="ol-qty" type="number" min="1" step="any" value="${esc(l.qty || '')}" placeholder="not needed if Damage filled"></div>
       <div class="field"><label>Damage / Broken Qty</label><input class="ol-dmg" type="number" min="0" step="any" value="${Number(l.damaged) > 0 ? esc(l.damaged) : ''}" placeholder="0"></div>
     </div>
     <div class="field"><label>Remark (optional)</label><input class="ol-rem" type="text" value="${esc(l.remark || '')}" placeholder="e.g. Size as per Farma"></div>
@@ -4375,15 +4377,19 @@ function printOrders(ids) {
     const body = hd.map((h, i) => `<div class="nbg"><div class="nbh">${multi ? circ(i + 1) + ' ' : ''}${e(h.buyer || '')}&nbsp;&nbsp;${e(dash(h.key))}</div>` +
       h.items.map(it => `<div class="nbi">Item Code = ${e(it.code || '')}</div>` + it.rows.map((l, ri) => {
         const sz = l.size ? ` = ${e(l.size)}${l.unit === 'Cm' ? ' cm' : ''}` : '';
-        const rm = l.remark ? ` &nbsp;⇒ ${e(l.remark)}` : '';
-        const dm = Number(l.damaged) > 0 ? ` &nbsp;⇒ Damage (${e(l.damaged)} pc)` : '';
+        const remDmg = /^\s*damage\s*$/i.test(l.remark || ''), dq = Number(l.damaged) || 0;
+        const dmTxt = (remDmg || dq > 0) ? (dq > 0 && dq < Number(l.qty) ? '(Damage ' + e(dq) + ' pc)' : '(Damage)') : '';
+        const rmTxt = l.remark && !remDmg ? e(l.remark) : '';
         const nm = it.rows.length > 1 ? '(' + roman(ri + 1) + ') ' : '';
-        return `<div class="nbm">${nm}${e(l.material || '')}${sz} = ${e(l.qty)} pc${rm}${dm}</div>`;
+        return `<div class="nbm">${nm}${e(l.material || '')}${sz} = ${e(l.qty)} pc${dmTxt ? ` <span class="nbd">${dmTxt}</span>` : ''}</div>` + (rmTxt ? `<div class="nbr">${rmTxt}</div>` : '');
       }).join('')).join('') + '<div class="nbs"></div></div>').join('');
     return `<div class="nb"><div class="nbt">${e(sup)}</div>${body}</div>`;
   }).join('');
   document.getElementById('printContainer').innerHTML = html;
-  toast("In the print dialog, choose 'Save as PDF'."); setTimeout(() => printNamed(orderFileName(list)), 400);
+  toast("In the print dialog, choose 'Save as PDF'."); window.__ocForce = Object.assign({}, OSX_FORCE, { or: 'p', mg: 14, pad: 0 });   /* order slip: A4 portrait, plain white, no lines, Customize not applied */
+  const clr = () => { window.__ocForce = null; window.removeEventListener('afterprint', clr); };
+  window.addEventListener('afterprint', clr);
+  setTimeout(() => printNamed(orderFileName(list)), 400);
 }
 
 var HAND_FONT = "'Patrick Hand','Kalam','Segoe Print','Bradley Hand','Comic Sans MS',cursive";
@@ -4426,14 +4432,18 @@ async function renderOrderCanvas(list) {
       ops.push({ t: 'head', text: (multi ? circ(i + 1) + '  ' : '') + (h.buyer || '') + '   ' + dash(h.key), x: M, y: y + LH }); y += LH;
       h.items.forEach(it => {
         ops.push({ t: 'text', text: 'Item Code = ' + (it.code || ''), x: M + 50, y: y + LH }); y += LH + 16;
-        const rows = it.rows.map((l, ri) => ({ a: (it.rows.length > 1 ? '(' + roman(ri + 1) + ') ' : '') + (l.material || ''), b: l.size ? l.size + (l.unit === 'Cm' ? ' cm' : '') : '', c: l.qty + ' pc' + (l.remark ? '  ⇒ ' + l.remark : '') + (Number(l.damaged) > 0 ? '  ⇒ Damage (' + l.damaged + ' pc)' : '') }));
+        const rows = it.rows.map((l, ri) => { const remDmg = /^\s*damage\s*$/i.test(l.remark || ''), dq = Number(l.damaged) || 0;
+          return { a: (it.rows.length > 1 ? '(' + roman(ri + 1) + ') ' : '') + (l.material || ''), b: l.size ? l.size + (l.unit === 'Cm' ? ' cm' : '') : '', c: l.qty + ' pc',
+            dm: (remDmg || dq > 0) ? (dq > 0 && dq < Number(l.qty) ? '(Damage ' + dq + ' pc)' : '(Damage)') : '', rm: l.remark && !remDmg ? l.remark : '' }; });
         const hasSize = rows.some(r => r.b), gap = 18, eq = mc.measureText('=').width;
         const w1 = Math.max(...rows.map(r => mc.measureText(r.a).width)), w2 = hasSize ? Math.max(...rows.map(r => mc.measureText(r.b).width)) : 0;
         rows.forEach(r => {
           const x1 = M + 24, xe1 = x1 + w1 + gap, x2 = xe1 + eq + gap, xe2 = x2 + w2 + gap, x3 = hasSize ? xe2 + eq + gap : x2;
-          const endx = x3 + mc.measureText(r.c).width;
+          const endx = x3 + mc.measureText(r.c + (r.dm ? ' ' + r.dm : '')).width;
           if (endx <= W - M) { ops.push({ t: 'row', r, hasSize, x1, xe1, x2, xe2, x3, y: y + LH }); y += LH; }
-          else { wrap([r.a, r.b, r.c].filter(Boolean).join(' = '), W - 2 * M - 24).forEach(line => { ops.push({ t: 'text', text: line, x: x1, y: y + LH }); y += LH; }); }
+          else { wrap([r.a, r.b, r.c].filter(Boolean).join(' = '), W - 2 * M - 24).forEach(line => { ops.push({ t: 'text', text: line, x: x1, y: y + LH }); y += LH; });
+            if (r.dm) { ops.push({ t: 'red', text: r.dm, x: x1, y: y + LH }); y += LH; } }
+          if (r.rm) wrap(r.rm, W - 2 * M - 24).forEach(line => { ops.push({ t: 'red', text: line, x: x1, y: y + LH }); y += LH; });
         });
         y += 26;
       });
@@ -4442,8 +4452,8 @@ async function renderOrderCanvas(list) {
   });
   const H = y + M;
   const cv = document.createElement('canvas'); cv.width = W * S; cv.height = Math.ceil(H * S);
-  const c = cv.getContext('2d'); c.scale(S, S); OC.cvbg(c, W, H);
-  OC.cvink(c); c.textBaseline = 'alphabetic';
+  const c = cv.getContext('2d'); c.scale(S, S); c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H);
+  c.fillStyle = c.strokeStyle = '#1a237e'; c.textBaseline = 'alphabetic';
   ops.forEach(o => {
     if (o.t === 'title') { c.font = `64px ${HAND_FONT}`; c.textAlign = 'center'; c.fillText(o.text, W / 2, o.y); const w = c.measureText(o.text).width; c.lineWidth = 3; c.beginPath(); c.moveTo(W / 2 - w / 2, o.y + 10); c.lineTo(W / 2 + w / 2, o.y + 10); c.stroke(); c.textAlign = 'left'; }
     else if (o.t === 'head') { c.font = `${FS + 6}px ${HAND_FONT}`; c.textAlign = 'left'; c.lineWidth = 1; c.fillText(o.text, o.x, o.y); c.strokeText(o.text, o.x, o.y); }
@@ -4453,7 +4463,9 @@ async function renderOrderCanvas(list) {
       c.fillText(o.r.a, o.x1, o.y); c.fillText('=', o.xe1, o.y);
       if (o.hasSize) { c.fillText(o.r.b, o.x2, o.y); c.fillText('=', o.xe2, o.y); }
       c.fillText(o.r.c, o.x3, o.y);
+      if (o.r.dm) { const w = c.measureText(o.r.c + ' ').width; c.fillStyle = '#d32f2f'; c.fillText(o.r.dm, o.x3 + w, o.y); c.fillStyle = '#1a237e'; }
     }
+    else if (o.t === 'red') { c.font = `${FS}px ${HAND_FONT}`; c.textAlign = 'left'; c.fillStyle = '#d32f2f'; c.fillText(o.text, o.x, o.y); c.fillStyle = '#1a237e'; }
   });
   return cv;
 }
@@ -5273,7 +5285,7 @@ async function osxHtml(data, A) {
    Covers: Ranking reports (Carpenter, Polish, Sanding, Wood Supplier), Profile report,
    Order List (PDF + PNG) and Repair PNG.  Set a flag below to false -> old style comes back.
    ====================================================================== */
-var ORDER_SLIP_HANDWRITTEN = false;   /* true = old handwritten order slip */
+var ORDER_SLIP_HANDWRITTEN = true;   /* true = old handwritten order slip */
 var REPAIR_OLD_STYLE = false;         /* true = old repair card */
 const RS_TITLES = { carpenter: 'CARPENTER REPORT', polish: 'POLISH REPORT', sanding: 'SANDING REPORT', woodSupplier: 'WOOD SUPPLIER REPORT' };
 const RS_PLURAL = { carpenter: 'Carpenters', polish: 'Contractors', sanding: 'Contractors', woodSupplier: 'Suppliers' };
@@ -5718,11 +5730,12 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
         blk.querySelectorAll('.mrow').forEach(r => {
           const v = c => (r.querySelector(c)?.value || '').trim();
           const l = { sub, itemCode, material: v('.ol-mat'), size: v('.ol-size'), unit: v('.ol-unit') || 'Inch', qty: Number(v('.ol-qty') || 0), damaged: Number(v('.ol-dmg') || 0), remark: v('.ol-rem') };
+          if (!(l.qty > 0) && l.damaged > 0) l.qty = l.damaged;   /* Damage qty entered: Quantity not needed */
           if (l.itemCode || l.material || l.qty) lines.push(l);
         });
       });
       if (!lines.length) return toast('Add at least one order line.');
-      if (lines.some(l => !l.itemCode || !l.material || !(l.qty > 0))) return toast('Each line needs Item Code, Material and Quantity.');
+      if (lines.some(l => !l.itemCode || !l.material || !(l.qty > 0))) return toast('Each line needs Item Code, Material and Quantity (or Damage qty).');
       if (lines.some(l => l.damaged > l.qty)) return toast('Damage qty cannot exceed ordered qty.');
       const o = { supplier: g('supplier'), buyer: g('buyer'), orderNo: g('orderNo'), orderDate: g('orderDate'), estDate: g('estDate'), receivedDate: g('receivedDate'), notes: g('notes'), lines };
       if (orderEditId) { const i = A.orders.findIndex(x => x.id === orderEditId); if (i >= 0) { o.id = orderEditId; A.orders[i] = { ...A.orders[i], ...o }; } }
