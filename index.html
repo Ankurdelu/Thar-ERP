@@ -6891,7 +6891,7 @@ function entrySubmit(idv) {
 const SS = { sel: null, ref: null, t: null, rows: [], unsub: null, tick: null };
 const ONL = 90000;
 function sessIdentity() {
-  if (!isEmployeeMode) return window.__subMode && window.__subId ? { role: 'admin', acc: 'sub_' + window.__subId, name: 'Admin' } : { role: 'admin', acc: 'admin', name: 'Admin' };
+  if (!isEmployeeMode) return { role: 'admin', acc: 'admin', name: 'Admin' };
   if (ENTRY) return { role: 'entry', acc: ENTRY.id, name: ENTRY.name };
   if (curUser && curUser.id) return { role: 'user', acc: curUser.id, name: curUser.name };
   return null;
@@ -6975,8 +6975,8 @@ function sessPage(sub) {
   sessListen();
   const back = `<button class="btn smallbtn" style="margin-bottom:12px" onclick="SS.sel=null;moreSub='settings';render()">← Back</button>`;
   if (sub === 'dataAdmin') {
-    const mine = db.work.filter(w => !w.enteredBy).length, ex = (window.__subMode ? '' : sdRow('Total entries by Admin (Work)', mine)) + sdRow('Total Work Entries in app', db.work.length);
-    return sDetail('admin', window.__subMode && window.__subId ? 'sub_' + window.__subId : 'admin', 'Admin Data', ex);
+    const mine = db.work.filter(w => !w.enteredBy).length, ex = sdRow('Total entries by Admin (Work)', mine) + sdRow('Total Work Entries in app', db.work.length);
+    return sDetail('admin', 'admin', 'Admin Data', ex);
   }
   if (sub === 'dataUser') {
     startAdminListen();
@@ -8058,7 +8058,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
   };
 
   function enterSub(a) {
-    window.__subMode = true; window.__subId = a.id; window.__subLoginMode = false; window.__mkOk = true;
+    window.__subMode = true; window.__subLoginMode = false; window.__mkOk = true;
     curUser = null; document.body.classList.add('sub');
     try { enterApp('admin'); } catch (e) { console.error(e); }
     try {
@@ -8303,7 +8303,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
       }).join('') + (L.length ? '' : '<div class="empty">No Admin accounts yet.</div>') + '</div>');
   }
   var _xc = window.xCard;
-  window.xCard = function () { return _xc.apply(this, arguments) + (window.__subMode ? '' : subCard()); };
+  window.xCard = function () { return _xc.apply(this, arguments) + subCard(); };
   window.subCreate = async function () {
     if (isEmployeeMode) return;
     var g = function (i) { return ($(i) && $(i).value || '').trim(); }, name = g('saName'), user = g('saUser'), pass = g('saPass');
@@ -14161,7 +14161,7 @@ body.light .card{border:1px solid #cbd5e1}
   'use strict';
   var DEV; try { DEV = localStorage.getItem('thar_dev_id'); if (!DEV) { DEV = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); localStorage.setItem('thar_dev_id', DEV); } } catch (e) { DEV = 'd' + Math.random().toString(36).slice(2, 10); }
   window.__DEVID = DEV;
-  var unsubs = [], seenU = { work: new Map(), orders: new Map(), repairs: new Map() }, ready = { work: false, orders: false, repairs: false, meta: false }, first = { work: true, orders: true, repairs: true }, firstMeta = true, rt = null;
+  var unsubs = [], seenU = { work: new Map(), orders: new Map(), repairs: new Map() }, ready = { work: false, orders: false, repairs: false, meta: false }, first = { work: true, orders: true, repairs: true }, rt = null;
   window.__cloudSeenU = seenU;
   function allReady() { return ready.work && ready.orders && ready.repairs && ready.meta; }
   window.__syncBlocked = function () { return unsubs.length > 0 && !allReady(); };
@@ -14216,19 +14216,14 @@ body.light .card{border:1px solid #cbd5e1}
   function mergeMeta(doc) {
     if (!doc.exists) return;
     var d = doc.data() || {}, lu = d.lastUpdated || 0;
-    // Admin phone, first real cloud load: always take the cloud copy of names/buyers/attendance (same as work/orders/repairs do), so names never look "unregistered" because of stale local data
-    var force = firstMeta && !!window.__subMode && !doc.metadata.fromCache;
-    if (!doc.metadata.fromCache) firstMeta = false;
-    if (!force) {
-      if (d.by === DEV) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
-      if (!d.by && !window.__subMode) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
-      if (lu <= metaTs()) return;
-    }
+    if (d.by === DEV) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
+    if (!d.by && !window.__subMode) { try { localStorage.setItem('thar_meta_ts', String(lu)); } catch (e) { } return; }
+    if (lu <= metaTs()) return;
     window.__merging = true;
     try {
       if (Array.isArray(d.buyers)) db.buyers = d.buyers;
       if (Array.isArray(d.peopleCodes)) db.peopleCodes = d.peopleCodes;
-      if (d.attendance && typeof d.attendance === 'object') db.attendance = force ? Object.assign({}, d.attendance) : Object.assign({}, db.attendance || {}, d.attendance);
+      if (d.attendance && typeof d.attendance === 'object') db.attendance = Object.assign({}, db.attendance || {}, d.attendance);
       if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
     } finally { window.__merging = false; }
     try {
@@ -14248,12 +14243,6 @@ body.light .card{border:1px solid #cbd5e1}
         if (!snap.metadata.fromCache) { ready[col] = true; kick(); }
       }, function (e) { console.error('sync', e); }));
     });
-    if (window.__subMode) unsubs.push(window.cloudDb.collection('thar_factory').doc('sub_state').onSnapshot(function (s) {
-      var d = s.exists && s.data(); if (!d || !Array.isArray(d.workers) || !d.workers.length) return;
-      var cur = db.workers || [], byId = new Map(cur.map(function (w) { return [String(w.id), w]; })), out = d.workers.map(function (w) { var o = byId.get(String(w.id)); return o ? Object.assign({}, o, { name: w.name }) : { id: w.id, name: w.name }; });
-      if (JSON.stringify(out) === JSON.stringify(cur)) return;
-      db.workers = out; try { dataVer++; metaDirty = true; mir.meta = true; scheduleFlush(); } catch (e) { } scheduleRender();
-    }, function (e) { console.error('sync workers', e); }));
     unsubs.push(window.cloudDb.collection('thar_factory').doc('meta_info').onSnapshot(function (doc) {
       if (isEmployeeMode) return;
       try { mergeMeta(doc); } catch (e) { console.error('sync meta', e); }
@@ -14262,7 +14251,7 @@ body.light .card{border:1px solid #cbd5e1}
   }
   function stop() {
     unsubs.forEach(function (u) { try { u(); } catch (e) { } }); unsubs = [];
-    ready = { work: false, orders: false, repairs: false, meta: false }; first = { work: true, orders: true, repairs: true }; firstMeta = true;
+    ready = { work: false, orders: false, repairs: false, meta: false }; first = { work: true, orders: true, repairs: true };
     CLOUD_COLS.forEach(function (c) { seenU[c].clear(); });
   }
   var _sa = window.startAdminListen; window.startAdminListen = function () { var r = _sa.apply(this, arguments); try { start(); } catch (e) { console.error(e); } return r; };
