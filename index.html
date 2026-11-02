@@ -1780,7 +1780,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.130';
+const APP_VER = 'V1.0.132';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2870,6 +2870,26 @@ function stampDone(x, wasComplete) {   // first-time "done" date: set once, neve
   if (x.workComplete && !wasComplete) x.completedOn = todayStr();
   return x;
 }
+
+/* V1.0.131: more pcs added to the same Carpenter row with a NEW date -> the earlier pcs stay on their old date,
+   only the extra pcs get the new date (so an already submitted day report never changes). */
+function carpDateSplit(x, prev) {
+  const pc = (Array.isArray(prev) ? prev : []).filter(p => Number(p.done) > 0 && p.date);
+  if (!pc.length) return x;
+  const key = p => prNorm(p.name) + '|' + (p.link || '') + '|' + prNorm(p.supplier || ''), used = new Set(), out = []; let n = 0;
+  (x.carpenterSplits || []).forEach(sp => {
+    const i = pc.findIndex((p, j) => !used.has(j) && key(p) === key(sp));
+    if (i < 0) { out.push(sp); return; }
+    used.add(i); const p = pc[i], od = Number(p.done), nd = Number(sp.done);
+    if (nd > od && sp.date && String(sp.date).slice(0, 10) !== String(p.date).slice(0, 10)) {
+      out.push(Object.assign({}, p, { qty: od, done: od }));
+      out.push(Object.assign({}, sp, { qty: nd - od, done: nd - od })); n++;
+    } else out.push(sp);
+  });
+  x.carpenterSplits = out;
+  if (n) setTimeout(() => toast('Earlier pcs kept on their old date · new pcs added on the new date'), 400);
+  return x;
+}
 function fillBalDates(x, prev) {       // carpenter balance rows with pcs but no date: keep the old date, else stamp today
   const pc = Array.isArray(prev) ? prev : [];
   (x.carpenterSplits || []).forEach(s => {
@@ -3599,7 +3619,7 @@ function splitRowHtml(stage, name = '', qty = '', done = '0', date = '', link = 
       ${linkHtml}
       <div class="field"><label><span>Quantity (Done)</span><button type="button" class="quick-link" onclick="const r=this.closest('.split-row');r.querySelector('.split-done').value=document.querySelector('#workForm [name=qty]').value;updateSplitSummary('${stage}');qcChanged()">All</button></label><input type="number" class="split-done" min="0" step="any" value="${Number(done) > 0 ? esc(done) : ''}" placeholder="Done" oninput="updateSplitSummary('${stage}')"></div>
       <input type="hidden" class="split-qty" value="${Number(qty) > 0 ? esc(qty) : ''}">
-      ${stage === 'carpenter' ? `<div class="field"><label>Date</label><input type="date" class="split-date" value="${esc(date || '')}"></div>` : `<input type="hidden" class="split-date" value="">`}
+      ${stage === 'carpenter' ? `<div class="field"><label><span>Date</span><button type="button" class="quick-link" style="font-size:24px;line-height:1;padding:0 10px" title="More pcs on another date" onclick="addCarpBatch(this)">＋</button></label><input type="date" class="split-date" value="${esc(date || '')}"></div>` : `<input type="hidden" class="split-date" value="">`}
       <button type="button" class="btn smallbtn danger" style="margin-bottom:12px; height: 42px; width:auto; justify-self:end; padding:0 18px" onclick="this.closest('.split-row').remove(); updateSplitSummary('${stage}'); qcChanged()">×</button>
     </div>
   `;
@@ -5763,6 +5783,7 @@ const orderInput = document.querySelector('#workForm [name="orderNo"]');
       ['sanding','polish','carpenter'].forEach(stage => { o[`${stage}Splits`] = getSplitsFromDOM(stage); });
       const prevW = workEditId ? A.work.find(x => x.id === workEditId) : null;
       fillBalDates(o, prevW && splitsOf(prevW, 'carpenter'));
+      carpDateSplit(o, prevW && splitsOf(prevW, 'carpenter'));
       o.packingSplits = getPackFromDOM(); if (wf.elements.noPacking?.checked) o.packingSplits = [];
       if (o.packingSplits.reduce((t, p) => t + p.qty, 0) > Number(o.qty || 0)) return toast('Packing Hall pcs cannot exceed total quantity.');
       if (o.packingSplits.some(p => !p.date)) return toast('Packing Hall row needs a date.');
@@ -14618,6 +14639,48 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
         return '<div class="item" style="cursor:pointer" onclick="YR.tae=decodeURIComponent(\'' + enc(o.key) + '\');YR.lim=40;render();window.scrollTo(0,0)"><div style="min-width:0"><strong>' + esc(o.name) + '</strong><small>' + (o.buyers.length ? esc(o.buyers.join(', ')) + ' · ' : '') + o.n + ' ' + (kind === 'order' ? 'orders' : 'entries') + '</small></div><span class="pill blue">Open</span></div>';
       }).join('') + (list.length > shown.length ? '<button class="btn" style="width:100%;margin-top:10px" onclick="YR.lim+=40;render()">Show more (' + (list.length - shown.length) + ' left)</button>' : ''));
   };
+})();
+</script>
+<script>
+/* V1.0.132: "＋" beside Carpenter Date -> extra batch (From Polish, Quantity, Date) for the SAME carpenter, each with its own date */
+(function () {
+  'use strict';
+  function isSub(r) { return r && r.classList.contains('split-sub'); }
+  function mainOf(r) { while (r && isSub(r)) r = r.previousElementSibling; return r; }
+  function syncSubs() {
+    var box = document.getElementById('splits-carpenter'); if (!box) return;
+    var cur = null;
+    Array.prototype.forEach.call(box.querySelectorAll('.split-row'), function (r) {
+      if (!isSub(r)) { cur = r; return; }
+      if (!cur) return;
+      var n = (cur.querySelector('.split-name') || {}).value || '', sp = (cur.querySelector('.split-supplier') || {}).value || '';
+      r.querySelector('.split-name').value = n; r.querySelector('.split-supplier').value = sp;
+      var t = r.querySelector('.sub-title'); if (t) t.textContent = '➕ More pcs · ' + (n || 'Carpenter');
+    });
+  }
+  window.addCarpBatch = function (btn) {
+    var row = btn.closest('.split-row'); if (!row) return;
+    var main = mainOf(row), name = (main.querySelector('.split-name') || {}).value || '';
+    if (!name.trim()) return toast('Write the Carpenter name first');
+    var pNames = getSplitsFromDOM('polish').map(function (s) { return s.name; }).filter(Boolean), link = (main.querySelector('.split-link') || {}).value || '';
+    var opts = pNames.map(function (n) { return '<option value="' + esc(n) + '"' + (n === link ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
+    var html = '<div class="split-row split-sub" data-stage="carpenter" style="margin-left:12px;padding-left:10px;border-left:3px solid var(--blue,#4aa3ff)">' +
+      '<input type="hidden" class="split-name" value="' + esc(name) + '"><input type="hidden" class="split-supplier" value=""><input type="hidden" class="split-qty" value="">' +
+      '<div class="small sub-title" style="grid-column:1/-1;font-weight:800">➕ More pcs · ' + esc(name) + '</div>' +
+      '<div class="field" style="grid-column:1/-1"><label>From Polish</label><select class="split-link"><option value="">Any/None</option>' + opts + '</select></div>' +
+      '<div class="field"><label>Quantity</label><input type="number" class="split-done" min="0" step="any" placeholder="Done" oninput="updateSplitSummary(\'carpenter\');qcChanged()"></div>' +
+      '<div class="field"><label>Date</label><input type="date" class="split-date" value="' + todayStr() + '"></div>' +
+      '<button type="button" class="btn smallbtn danger" style="height:42px;justify-self:end;padding:0 18px" onclick="this.closest(\'.split-row\').remove();updateSplitSummary(\'carpenter\');qcChanged()">×</button></div>';
+    var after = row; while (after.nextElementSibling && isSub(after.nextElementSibling)) after = after.nextElementSibling;
+    after.insertAdjacentHTML('afterend', html);
+    var nr = after.nextElementSibling; syncSubs(); updateSplitSummary('carpenter');
+    var q = nr.querySelector('.split-done'); if (q) { q.focus(); q.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  };
+  document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('#splits-carpenter .split-name, #splits-carpenter .split-supplier')) syncSubs(); });
+  document.addEventListener('change', function (e) { if (e.target.matches && e.target.matches('#splits-carpenter .split-samesup')) syncSubs(); });
+  /* always copy the carpenter's name / supplier into its extra batches before the rows are read or saved */
+  var _g = window.getSplitsFromDOM;
+  window.getSplitsFromDOM = function (stage) { if (stage === 'carpenter') syncSubs(); return _g.apply(this, arguments); };
 })();
 </script>
 </body>
