@@ -1207,11 +1207,12 @@ function roleSwitch() {
     enterApp('admin');
   });
 }
-async function doLogout() { window.__mkOk = false;
+async function doLogout() { window.__mkOk = false; const _wasAdmin = !isEmployeeMode;
   if (VIEWAS) restoreViewAs();
   ENTRY = null; document.body.classList.remove('entry'); try { entryStop(); } catch (e) {}
   if (isEmployeeMode) await endSession('Logged out'); else { stopAdminListen(); isViewMode = false; viewData = null; view = null; }
   stopCloudListen(); curUser = null; authDone = false; isEmployeeMode = true; appUnlocked = false;
+  if (_wasAdmin) await vaultLock();
   tab = 'home'; viewWorkId = null; viewOrderId = null; window.moreSub = ''; U.sel = null;
   document.querySelectorAll('.modal-backdrop').forEach(m => m.remove());
   authShow('choose');
@@ -1780,7 +1781,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.133';
+const APP_VER = 'V1.0.134';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -1788,7 +1789,61 @@ function mirHas() { return mir.meta || ['work', 'orders', 'repairs'].some(s => m
 function curDB() { return isViewMode ? viewData : db; }
 function stripFit(x) { if (x && typeof x === 'object') { delete x.fittingSplits; delete x.fittingName; delete x.fittingDate; delete x.noFitting; delete x.qcFitting; } return x; }
 function slim(x) { stripFit(x); if (x && typeof x === 'object') for (const k in x) { const v = x[k]; if (v === false || v == null) delete x[k]; } return x; }
-function metaOf(A) { const m = {}; Object.keys(A).forEach(k => { if (k !== 'work' && k !== 'orders' && k !== 'repairs') m[k] = A[k]; }); return m; }
+function metaOf(A) { const m = {}; Object.keys(A).forEach(k => { if (k !== 'work' && k !== 'orders' && k !== 'repairs') m[k] = A[k]; }); if (A.__vault) VAULT_F.forEach(k => { delete m[k]; }); return m; }
+/* ===== MASTER VAULT: admin-only data is stored AES-256-GCM encrypted. No key hash lives in this HTML. ===== */
+const VAULT_F = ['workers', 'contractors', 'advances', 'trash'];
+const VS = { key: null, blob: null, hash: '' };
+const VSEAL = {"s":"NMAgos/r2hfodMHze0d8dA==","i":"JTUZWiVswU2POuEa","c":"uE5Nj6Ec/pyZiHJGmVkWYAxWN0OTYnsu0gwUOUQ=","t":"THAR-ADMIN-OK"};
+function b64e(u) { let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(s); }
+function b64d(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+async function vDerive(secret, salt) {
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function vEnc(key, text) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text)));
+  return 'v1.' + b64e(iv) + '.' + b64e(ct);
+}
+async function vDec(key, blob) {
+  const p = String(blob).split('.'); if (p[0] !== 'v1' || p.length !== 3) throw new Error('bad vault');
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(p[1]) }, key, b64d(p[2])));
+}
+/* Opens a key file's text. Returns the AES key only if the file is the real key (decrypts the lock-check), else null. */
+async function mkOpen(txt) {
+  try {
+    if (!(window.crypto && crypto.subtle)) return null;
+    const x = /id="kf"[^>]*>([\s\S]*?)<\/script>/.exec(txt); if (!x) return null;
+    const o = JSON.parse(x[1]); if (o.v !== 2 || typeof o.m !== 'string' || o.m.length < 20000) return null;
+    const k = await vDerive(o.m, b64d(VSEAL.s));
+    return (await vDec(k, 'v1.' + VSEAL.i + '.' + VSEAL.c)) === VSEAL.t ? k : null;
+  } catch (e) { return null; }
+}
+function vPriv() { const o = {}; VAULT_F.forEach(k => { o[k] = db[k]; }); return JSON.stringify(o); }
+function vApply(json) { const o = JSON.parse(json); VAULT_F.forEach(k => { db[k] = Array.isArray(o[k]) ? o[k] : []; }); }
+async function vaultSeal() {
+  if (!VS.key || window.__loadFailed) return;
+  if (db.__vault && db.__vault !== VS.blob) {   /* db was replaced (restore etc.) with another sealed copy: read it, never overwrite it */
+    try { vApply(await vDec(VS.key, db.__vault)); VS.blob = db.__vault; VS.hash = cloudHash(vPriv()); } catch (e) { console.error('Vault: different key, left untouched', e); }
+    return;
+  }
+  const j = vPriv(), hh = cloudHash(j);
+  if (db.__vault && hh === VS.hash) return;
+  db.__vault = await vEnc(VS.key, j); VS.blob = db.__vault; VS.hash = hh; metaDirty = true;
+  if (idbOK) { try { localStorage.removeItem(KEY); } catch (e) {} }   /* drop the old unencrypted legacy copy */
+}
+async function vaultUnlock(key) {
+  if (db.__vault) {
+    try { vApply(await vDec(key, db.__vault)); } catch (e) { return false; }   /* wrong key for this device's data: refuse */
+    VS.key = key; VS.blob = db.__vault; VS.hash = cloudHash(vPriv()); return true;
+  }
+  VS.key = key; VS.blob = null; VS.hash = ''; metaDirty = true; scheduleFlush(); return true;   /* first time: encrypt existing data */
+}
+async function vaultLock() {
+  try { await vaultSeal(); await flushNow(); } catch (e) { console.error(e); }
+  VS.key = null; VS.blob = null; VS.hash = '';
+  if (db.__vault) VAULT_F.forEach(k => { db[k] = []; });
+}
 function taeNum(s) { const m = String(s || '').match(/\d+/); return m ? Number(m[0]) : NaN; }
 function fmtB(n) { n = Number(n) || 0; return n > 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : (n / 1e3).toFixed(0) + ' KB'; }
 function armFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); }
@@ -1838,7 +1893,13 @@ async function peek(stream) {
   });
   return { head: new TextDecoder().decode(first.slice(0, 64)), stream: s2 };
 }
-async function readBackup(stream, o) {
+async function vaultOpenMeta(meta) {
+  if (!meta || !meta.__vault || !VS.key) return;
+  try { const o = JSON.parse(await vDec(VS.key, meta.__vault)); VAULT_F.forEach(k => { meta[k] = Array.isArray(o[k]) ? o[k] : []; }); delete meta.__vault; }
+  catch (e) { console.warn('Backup is sealed with a different key; private part skipped'); }
+}
+async function readBackup(stream, o) { const rd = await readBackup0(stream, o); if (!(o && o.keepVault)) await vaultOpenMeta(rd && rd.meta); return rd; }
+async function readBackup0(stream, o) {
   o = o || {};
   const pk = await peek(stream), out = { work: [], orders: [], repairs: [] };
   let meta = null, header = null, filtered = false, ver = { state: 'legacy', msg: 'Old format (no checksum)' };
@@ -1901,7 +1962,7 @@ async function makeSink(name) {
   const parts = [];
   return { w: { write: async u => { parts.push(u); } }, async finish() { return { file: new Blob(parts, { type: 'application/json' }), async drop() {} }; }, async abort() {} };
 }
-async function produceFile(name, producer) { const s = await makeSink(name); try { await producer(s.w); return await s.finish(); } catch (e) { await s.abort(); throw e; } }
+async function produceFile(name, producer) { await vaultSeal(); const s = await makeSink(name); try { await producer(s.w); return await s.finish(); } catch (e) { await s.abort(); throw e; } }
 function downloadFile(file, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 120000); }
 async function dumpDB(w, o) {
   const nw = new NdWriter(w);
@@ -1970,6 +2031,7 @@ function mirrorSoon() {
   clearTimeout(mirrorT); mirrorT = setTimeout(() => mirrorNow(), 15000);
 }
 async function writeSnapshot() {
+  await vaultSeal();
   const epoch = Date.now();
   db.settings.mirrorEpoch = epoch; db.settings.mirrorStale = false; metaDirty = true; mirClear();
   try { await safeWrite('Data/live-data.json', w => dumpDB(w, { kind: 'live', header: { epoch }, meta: metaOf(db), stores: { work: db.work, orders: db.orders, repairs: db.repairs } })); }
@@ -1977,6 +2039,7 @@ async function writeSnapshot() {
   snapInfo = { epoch, t: Date.now() }; jSize = 0; lastMirror = Date.now(); armFlush();
 }
 async function appendJournal() {
+  await vaultSeal();
   const S = ['work', 'orders', 'repairs'];
   const P = { gone: {} }; S.forEach(s => { P[s] = new Map(mir[s]); P.gone[s] = new Set(mir.gone[s]); }); P.meta = mir.meta; mirClear();
   const lines = [];
@@ -2080,6 +2143,7 @@ async function verifyFolder() {
 }
 async function preRestoreSnapshot() {
   if (!rootDir || !folderPerm) return;
+  await vaultSeal();
   try { await safeWrite('Data/Pre-Restore-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json', w => dumpDB(w, { kind: 'full', meta: metaOf(db), stores: { work: db.work, orders: db.orders, repairs: db.repairs } })); toast('Safety copy of current data saved'); } catch (e) { console.warn(e); }
 }
 
@@ -2106,7 +2170,7 @@ async function openView(src, kind) {
   if (src.size > 40e6) { const r = await askRange(src); if (r === false) return; if (r) flt = d => { const n = taeNum(d.orderNo); return n >= r.from && n <= r.to; }; }
   const prog = progressUI('Opening ' + src.name);
   try {
-    const rd = await readBackup(await src.open(), { size: src.size, filter: flt, onProg: (b, l) => prog.set(fmtB(b) + ' / ' + fmtB(src.size) + ' · ' + l.toLocaleString() + ' records', src.size ? b / src.size * 100 : 0) });
+    const rd = await readBackup(await src.open(), { keepVault: true, size: src.size, filter: flt, onProg: (b, l) => prog.set(fmtB(b) + ' / ' + fmtB(src.size) + ' · ' + l.toLocaleString() + ' records', src.size ? b / src.size * 100 : 0) });
     if ((rd.ver.state === 'bad' || rd.ver.state === 'nofooter') && !confirm('⚠ ' + rd.ver.msg + '\nOpen anyway?')) { prog.close(); return; }
     const vd = normalizeDB(Object.assign({}, rd.meta || {}, { work: rd.out.work, orders: rd.out.orders, repairs: rd.out.repairs }));
     if (!(kind === 'order' ? vd.orders.length : vd.work.length)) { prog.close(); return alert(flt ? 'No records in that TAE range.' : kind === 'order' ? 'This file has no Order data. Choose "Work View" for work backups.' : 'This file has no Work data. Choose "Order View" for order backups.'); }
@@ -2331,7 +2395,8 @@ function flushNow() {
   flushing = flushing.then(doFlush).catch(e => { console.error(e); toast('⚠ Save failed: ' + ((e && e.message) || e)); });
   return flushing;
 }
-function doFlush() {
+function doFlush() { return vaultSeal().then(doFlush0); }
+function doFlush0() {
   if (window.__loadFailed) return Promise.resolve();
   const S = ['work', 'orders', 'repairs'];
   const full = fullRewrite, md = metaDirty || full;
@@ -2339,7 +2404,7 @@ function doFlush() {
   if (!any) return Promise.resolve();
   if (!idbOK) {
     S.forEach(s => { dirty[s].clear(); gone[s].clear(); }); fullRewrite = false; metaDirty = false;
-    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast('⚠ Storage full! Take a backup now.'); }
+    try { localStorage.setItem(KEY, JSON.stringify(Object.assign(metaOf(db), { work: db.work, orders: db.orders, repairs: db.repairs }))); } catch (e) { toast('⚠ Storage full! Take a backup now.'); }
     return Promise.resolve();
   }
   if (full) { S.forEach(s => { dirty[s].clear(); gone[s].clear(); }); fullRewrite = false; metaDirty = false; return fullFlush(); }
@@ -2355,6 +2420,13 @@ function doFlush() {
   return new Promise((res, rej) => { tx.oncomplete = () => res(); tx.onerror = tx.onabort = () => rej(tx.error || new Error('write failed')); });
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { flushNow(); mirrorNow(); } });
+/* Auto-lock: if the Master Admin leaves the app for longer than AUTO_LOCK_MS, the key is dropped and private data is wiped from memory */
+const AUTO_LOCK_MS = 30000; let _hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (VS.key) _hiddenAt = Date.now(); return; }
+  const away = _hiddenAt ? Date.now() - _hiddenAt : 0; _hiddenAt = 0;
+  if (VS.key && !isEmployeeMode && !window.__subMode && away > AUTO_LOCK_MS) { try { toast('🔒 Locked – use the key file again'); } catch (e) {} doLogout(); }
+});
 window.addEventListener('pagehide', () => flushNow());
 async function needPin(title, okLabel) {
   const p = await pinPrompt(title, okLabel);
@@ -5174,7 +5246,7 @@ function fullBackupPage() {
       <button class="btn primary" style="flex:1" onclick="document.getElementById('restoreFile').click()">⬆ Restore</button>
     </div>`);
 }
-const MERGE_SKIP = new Set(['work', 'orders', 'repairs', 'settings', 'profile', 'deleted', 'trash', 'lastBackup', 'epoch', 'pin']);
+const MERGE_SKIP = new Set(['__vault', 'work', 'orders', 'repairs', 'settings', 'profile', 'deleted', 'trash', 'lastBackup', 'epoch', 'pin']);
 function addMissing(dst, src, depth, wins) {
   let n = 0; depth = depth || 0;
   const key = x => (x && typeof x === 'object' && x.id != null) ? 'id:' + x.id : JSON.stringify(x);
@@ -5204,7 +5276,7 @@ function addMissingMeta(dstMeta, srcMeta, wins) {
   return n;
 }
 async function backupFullDB() {
-  db.lastBackup = new Date().toISOString(); save();
+  db.lastBackup = new Date().toISOString(); save(); await vaultSeal();
   const prog = progressUI('Backup…');
   try {
     const stores = { work: db.work.slice(), orders: db.orders.slice(), repairs: db.repairs.slice() };
@@ -7969,11 +8041,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
 
 <script>
 (function(){
-  var MK='h1:4dff4de2bcc3852ee41e3534884e8bdc02065ab6b900c81096c4bf9889138c95', n=0, t=null, inp=null;
-  function valid(txt){
-    var x=/id="kf"[^>]*>([\s\S]*?)<\/script>/.exec(txt); if(!x) return false;
-    try{ var o=JSON.parse(x[1]); return typeof o.m==='string' && pwH(o.m)===MK; }catch(e){ return false; }
-  }
+  var n=0, t=null, inp=null;
   window.mkPick=function(){
     try{ var old=document.getElementById('mkf'); if(old) old.remove(); }catch(e){}
     var inp=document.createElement('input'); inp.type='file'; inp.id='mkf';
@@ -7981,14 +8049,14 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
     inp.onchange=function(){
       var f=inp.files&&inp.files[0]; try{ inp.remove(); }catch(e){} if(!f) return;
       var rd=new FileReader();
-      rd.onload=function(){ if(valid(String(rd.result))){ window.__mkOk=true; enterApp('admin'); } else { toast('Invalid file'); } };
+      rd.onload=function(){ mkOpen(String(rd.result)).then(function(k){ if(!k){ toast(window.crypto&&crypto.subtle?'Invalid file':'Secure (https) connection needed'); return; } return vaultUnlock(k).then(function(ok){ if(!ok){ toast('This key does not match the data on this device'); return; } window.__mkOk=true; enterApp('admin'); }); }); };
       rd.onerror=function(){ toast('Invalid file'); };
       rd.readAsText(f);
     };
     document.body.appendChild(inp);
     inp.click();
   };
-  window.mkValid=valid;
+  window.mkValid=function(t){ return mkOpen(t).then(Boolean); };
   window.mkAsk=function(title){
     return new Promise(function(res){
       try{ var o=document.getElementById('mkAskBox'); if(o) o.remove(); }catch(e){}
@@ -8003,7 +8071,7 @@ body.th-soft #authOverlay{--ax-bg:#f4efe6;--ax-surface:#fcf9f3;--ax-field:#fffdf
         inp.onchange=function(){
           var f=inp.files&&inp.files[0]; try{ inp.remove(); }catch(e){} if(!f) return;
           var rd=new FileReader();
-          rd.onload=function(){ if(valid(String(rd.result))){ fin(true); } else { toast('Invalid key file. Nothing changed.'); fin(false); } };
+          rd.onload=function(){ mkOpen(String(rd.result)).then(function(k){ if(k){ fin(true); } else { toast('Invalid key file. Nothing changed.'); fin(false); } }); };
           rd.onerror=function(){ toast('Invalid key file. Nothing changed.'); fin(false); };
           rd.readAsText(f);
         };
@@ -14493,7 +14561,7 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
 
   /* ---- build ONE complete payload: live data + every older copy merged in ---- */
   async function build(sources) {
-    await refreshAccounts();
+    await refreshAccounts(); await vaultSeal();
     var stores = { work: db.work.slice(), orders: db.orders.slice(), repairs: db.repairs.slice() };
     var meta = JSON.parse(JSON.stringify(metaOf(db)));
     for (var i = 0; i < sources.length; i++) {
@@ -14504,6 +14572,14 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
           addMissingMeta(meta, rd.meta);
         }
       } catch (e) { /* unreadable old copy: skip, never block the backup */ }
+    }
+    if (VS.key) {   /* merge private data found in older copies into the current one, then seal it all */
+      var priv = {}; VAULT_F.forEach(function (k) {
+        var base = (db[k] || []).slice(), ids = new Set(base.map(function (x) { return x && x.id; })), seen = new Set(base.map(function (x) { return JSON.stringify(x); }));
+        ((meta[k]) || []).forEach(function (x) { if (x && x.id != null ? !ids.has(x.id) : !seen.has(JSON.stringify(x))) base.push(x); });
+        priv[k] = base; delete meta[k];
+      });
+      meta.__vault = await vEnc(VS.key, JSON.stringify(priv));
     }
     return { stores: stores, meta: meta };
   }
