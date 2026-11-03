@@ -1644,9 +1644,10 @@ async function cloudPushOnce() {
   }
 
   // metadata (attendance is dropped from the write only if it alone would blow the 1 MB limit)
+  try { if (window.__attTrack) window.__attTrack(); } catch (e) { }
   const meta = {
     company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '',
-    buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, schema: 2
+    buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, attDel: db.attDel || {}, schema: 2
   };
   let metaJson = JSON.stringify(meta);
   if (metaJson.length > 300000 && new Blob([metaJson]).size > 950000) {
@@ -1661,7 +1662,7 @@ async function cloudPushOnce() {
     await Promise.race([b.commit(), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
     chunk.forEach(o => { if (o.t === 's') cloudSig[o.col].set(o.idv, o.sig); else cloudSig[o.col].delete(o.idv); });
   }
-  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: (window.__metaNow = Date.now()), by: window.__DEVID || '' }), { merge: true }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
+  await Promise.race([window.cloudDb.collection('thar_factory').doc('meta_info').set(Object.assign(meta, { lastUpdated: (window.__metaNow = Date.now()), by: window.__DEVID || '' }), { mergeFields: Object.keys(meta) }), new Promise((_, rj) => setTimeout(() => rj(new Error('Cloud timeout - will retry')), 60000))]);
   cloudSig.meta = metaSig; try { localStorage.setItem('thar_meta_ts', String(window.__metaNow)); } catch (e) {}
 }
 
@@ -1782,7 +1783,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.141';
+const APP_VER = 'V1.0.143';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2838,7 +2839,7 @@ function render() {
   try { trackScreen(); } catch (e) {}
 }
 
-const PR = { type: 'carpenter', mode: 'all', from: '', to: '', sort: 'qty', person: '', dlim: 20 };
+const PR = { type: 'carpenter', mode: 'all', from: '', to: '', day: '', sort: 'qty', person: '', dlim: 20 };
 
 /* ===== V1.0.96: progressive chunk renderer (IntersectionObserver sentinel + rAF fallback) =====
    ckList(name, items, fn, opts) -> HTML of the first chunk (+ a sentinel). The rest is appended
@@ -2880,7 +2881,7 @@ const PRF = { q: '', lim: 30, dlim: 15 };
 let prfT = null;
 const PR_LABEL = { carpenter: 'Carpenter', polish: 'Polish Contractor', sanding: 'Sanding Contractor', woodSupplier: 'Wood Supplier' };
 const PR_ICON = { carpenter: '🪚', polish: '🎨', sanding: '🛠️', woodSupplier: '🪵' };
-const PR_PERIODS = [['all', 'All Time'], ['today', 'Today'], ['yest', 'Yesterday'], ['7', 'Last 7 Days'], ['30', 'Last 30 Days'], ['month', 'This Month'], ['lastmonth', 'Last Month'], ['custom', 'Custom']];
+const PR_PERIODS = [['all', 'All Time'], ['today', 'Today'], ['yest', 'Yesterday'], ['day', '📅 Pick Date'], ['7', 'Last 7 Days'], ['30', 'Last 30 Days'], ['month', 'This Month'], ['lastmonth', 'Last Month'], ['custom', 'Custom']];
 
 function prNorm(n) { return String(n || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
 function prNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/,/g, '').replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; }
@@ -2902,6 +2903,11 @@ function prRange() {
   if (W && m === 'next7') return mk(t, prAdd(t, 6), 'Next 7 Days');
   if (W && m === 'next30') return mk(t, prAdd(t, 29), 'Next 30 Days');
   if (W && m === 'month') { const nx = prAdd(t.slice(0, 8) + '01', 32).slice(0, 8) + '01'; return mk(t.slice(0, 8) + '01', prAdd(nx, -1), 'This Month'); }
+  if (m === 'day') {
+    let d = prValid(PR.day) ? PR.day : t; if (!W && d > t) d = t;   /* supplier: future estimate dates allowed */
+    const nm = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return mk(d, d, d.slice(8) + ' ' + nm[+d.slice(5, 7) - 1] + ' ' + d.slice(0, 4) + (d === t ? ' (Today)' : ''));
+  }
   if (m === 'today') return mk(t, t, 'Today');
   if (m === 'yest') { const y = prAdd(t, -1); return mk(y, y, 'Yesterday'); }
   if (m === '7') return mk(prAdd(t, -6), t, 'Last 7 Days');
@@ -3132,6 +3138,7 @@ function prBars(s, scope) {
 }
 function prShift(n) {
   const R = prRange(), t = todayStr(); if (!R.finite) return;
+  if (PR.mode === 'day') { let d = prAdd(R.from, n); if (PR.type !== 'woodSupplier' && d > t) d = t; PR.day = d; PR.dlim = 20; render(); return; }
   const base = R.from || R.to, len = prDiff(base, R.to) + 1;
   let f = prAdd(base, n * len), to = prAdd(R.to, n * len); if (PR.type !== 'woodSupplier') { if (to > t) to = t; if (f > to) f = to; }
   PR.mode = 'custom'; PR.from = f; PR.to = to; PR.dlim = 20; render();
@@ -3146,7 +3153,8 @@ function prControls(R, withSort) {
     const opts = [['qty', 'Most Pieces'], ['cbm', 'Most CBM']]; if (PR.type !== 'woodSupplier') opts.push(['pending', 'Most Pending']);
     sort = `<div class="small muted" style="margin:2px 0 8px;font-weight:800">SORT RANKING BY</div><div class="stage-chips">${opts.map(([k, l]) => `<button class="chip ${PR.sort === k ? 'active' : ''}" onclick="PR.sort='${k}';render()">${l}</button>`).join('')}</div>`;
   }
-  const nav = PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
+  const dayNav = `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Previous</button><input type="date" value="${esc(R.from)}"${mx} onchange="PR.day=this.value;PR.dlim=20;render()" style="flex:1;min-width:0;min-height:44px;text-align:center;font-weight:800;font-size:14px;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:14px;padding:6px 8px"><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
+  const nav = PR.mode === 'day' ? dayNav : PR.mode === 'all' ? '' : `<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px"><button class="btn smallbtn" onclick="prShift(-1)">‹ Prev</button><b style="flex:1;text-align:center;font-size:13px">${esc(R.label)}</b><button class="btn smallbtn" ${!WS && R.to >= todayStr() ? 'disabled' : ''} onclick="prShift(1)">Next ›</button></div>`;
   return `<div class="small muted" style="margin:2px 0 8px;font-weight:800">${PR.type === 'da' ? 'PERIOD' : 'PERIOD (BY ' + prDateNote(PR.type).toUpperCase() + ')'}</div><div class="stage-chips">${chips}</div>${nav}${custom}${sort}`;
 }
 
@@ -3454,7 +3462,7 @@ function homeStats() {
     }
   });
   const late = A.orders.filter(o => orderStatus(o).late).sort((a, b) => orderStatus(b).daysLate - orderStatus(a).daysLate);
-  const tcA = topCarp(A), top3 = tcA.list.slice(0, 7), topCbm = tcA.cbm;
+  const tcA = topCarp(A, '7'), top3 = tcA.list.slice(0, 7), topCbm = tcA.cbm;
   pdL.sort((a, b) => b.q - a.q);
   const overQty = [];
   A.work.forEach(x => {
@@ -3509,8 +3517,17 @@ function msResults() {
 
 
 let stK = '', stQ = '', stLim = 40;
-function topCarp(A) {
-  const t = todayStr(), f = prAdd(t, -6), m = new Map(), rows = []; let cbm = 0;
+/* ===== Period filter (Last 7 days / 1 month / 6 months / 1 year / All time) - shared by Home stat + Data Analysis ===== */
+var DA_PERIODS = [['7', 'Last 7 days', 7, '7d'], ['30', 'Last 1 month', 30, '1m'], ['180', 'Last 6 months', 180, '6m'], ['365', 'Last 1 year', 365, '1y'], ['all', 'All time', 0, 'All']];
+function daPerObj(v) { v = v || daPer(); return DA_PERIODS.filter(function (x) { return x[0] === v; })[0] || DA_PERIODS[0]; }
+function daPer() { try { var v = localStorage.getItem('thar_da_period'); if (DA_PERIODS.some(function (x) { return x[0] === v; })) return v; } catch (e) { } return '7'; }
+function daSetPer(v) { try { localStorage.setItem('thar_da_period', v); } catch (e) { } }
+function daPerLabel(v) { return daPerObj(v)[1]; }
+function daPerShort(v) { return daPerObj(v)[3]; }
+function daFrom(v, t) { var o = daPerObj(v); return o[2] ? prAdd(t, -(o[2] - 1)) : '0000-00-00'; }
+function daChips(cur, js) { return '<div class="da-per">' + DA_PERIODS.map(function (x) { return '<button type="button" data-per="' + x[0] + '" class="' + (x[0] === cur ? 'on' : '') + '"' + (js ? ' onclick="' + js + '"' : '') + '>' + x[1] + '</button>'; }).join('') + '</div>'; }
+function topCarp(A, per) {
+  const t = todayStr(), f = daFrom(per, t), m = new Map(), rows = []; let cbm = 0;
   A.work.forEach(x => {
     if (x.noBalance) return;
     splitsOf(x, 'carpenter').forEach(p => {
@@ -3527,7 +3544,7 @@ function topCarp(A) {
 function balOn(x, d) { return x.noBalance ? 0 : splitsOf(x, 'carpenter').filter(p => p.date === d).reduce((t, p) => t + Number(p.done || 0), 0); }
 function packedOn(x, d) { const pk = Array.isArray(x.packingSplits) ? x.packingSplits : []; return pk.length ? pk.filter(p => p.date === d).reduce((t, p) => t + Number(p.qty || 0), 0) : (x.packingDate === d ? Number(x.qty || 0) : 0); }
 function statClose() { document.getElementById('statModal')?.remove(); refreshTerms(); }
-const STAT_T = { today: ['📦 Today Output', 'Pieces sent to Packing Hall today'], pending: ['⏳ Pending Pieces', 'All entries that are not complete yet'], qc: ['✅ QC Pending', 'All pieces fitted, only QC / All Complete is left'], topcarp: ['🏆 Top Carpenter · Last 7 Days', 'Carpenters ranked by Stage 3 pcs completed in the last 7 days, only on entries where QC "Balance OK" is ticked'], balance: ['🪚 Balance OK Today', 'Stage 3 balance / gap pieces marked OK by carpenters today'], repairs: ['🛠 Open Repairs', 'Parts sent for repairing and not received back'] };
+const STAT_T = { today: ['📦 Today Output', 'Pieces sent to Packing Hall today'], pending: ['⏳ Pending Pieces', 'All entries that are not complete yet'], qc: ['✅ QC Pending', 'All pieces fitted, only QC / All Complete is left'], topcarp: ['🏆 Top Carpenter', 'Carpenters ranked by Stage 3 pcs completed in the selected period, only on entries where QC "Balance OK" is ticked'], balance: ['🪚 Balance OK Today', 'Stage 3 balance / gap pieces marked OK by carpenters today'], repairs: ['🛠 Open Repairs', 'Parts sent for repairing and not received back'] };
 function statRows() {
   const A = getActiveDB(), today = todayStr(), lc = v => String(v || '').trim().toLowerCase(), tn = x => { const m = String(x.orderNo || '').match(/\d+/); return m ? Number(m[0]) : Infinity; };
   const sn = x => { const m = String(x.subOrder || '').trim().match(/\/(\d+)$/); return m ? Number(m[1]) : Infinity; };
@@ -3563,11 +3580,11 @@ function statHtml() {
   let rows = statRows(); const terms = termList(stQ);
   if (terms.length) rows = rows.filter(r => terms.every(t => r.hay.includes(t)));
   const tot = rows.reduce((t, r) => t + r.n, 0);
-  const lbl = { today: 'SENT TODAY', pending: 'PENDING PCS', qc: 'TOTAL PCS', topcarp: 'BALANCE OK PCS (7 DAYS)', balance: 'BALANCE OK TODAY', repairs: 'REPAIR PCS' }[stK];
-  const head = `<div class="kpis" style="grid-template-columns:repeat(2,1fr)"><div><small>ENTRIES</small><b>${rows.length}</b></div><div><small>${lbl}</small><b>${prQ(tot)}</b></div></div>`;
+  const lbl = { today: 'SENT TODAY', pending: 'PENDING PCS', qc: 'TOTAL PCS', topcarp: 'BALANCE OK PCS (' + daPerLabel().toUpperCase() + ')', balance: 'BALANCE OK TODAY', repairs: 'REPAIR PCS' }[stK];
+  const head = (stK === 'topcarp' ? daChips(daPer(), "daSetPer(this.dataset.per);statRender()") : '') + `<div class="kpis" style="grid-template-columns:repeat(2,1fr)"><div><small>ENTRIES</small><b>${rows.length}</b></div><div><small>${lbl}</small><b>${prQ(tot)}</b></div></div>`;
   if (!rows.length) return head + '<div class="empty">Nothing here.</div>';
   const TC = stK === 'topcarp' ? topCarp(getActiveDB()).list : [], medals = [];
-  const rankBox = stK === 'topcarp' && TC.length ? `<div class="dsec" style="margin:0 0 12px"><h4>Ranking · last 7 days</h4>${TC.slice(0, 10).map((c, i) => `<div class="tl-r"><span><b>${medals[i] || (i + 1) + '.'} ${esc(c.name)}</b><br><small class="muted">${c.n} entr${c.n === 1 ? 'y' : 'ies'}</small></span><b style="color:var(--green2)">${prQ(c.qty)} pcs</b></div>`).join('')}</div>` : '';
+  const rankBox = stK === 'topcarp' && TC.length ? `<div class="dsec" style="margin:0 0 12px"><h4>Ranking · ${daPerLabel().toLowerCase()}</h4>${TC.slice(0, 10).map((c, i) => `<div class="tl-r"><span><b>${medals[i] || (i + 1) + '.'} ${esc(c.name)}</b><br><small class="muted">${c.n} entr${c.n === 1 ? 'y' : 'ies'}</small></span><b style="color:var(--green2)">${prQ(c.qty)} pcs</b></div>`).join('')}</div>` : '';
   const chip = r => stK === 'topcarp' ? (() => { const i = TC.findIndex(c => c.k === r.k), c = TC[i]; return `<div class="small" style="margin:0;color:var(--green2);font-weight:800">${medals[i] || (i + 1) + '.'} ${esc(r.p.name)} — total ${prQ(c.qty)} pcs · this entry: ${prQ(r.n)} / ${prQ(r.p.qty)} pcs on ${esc(r.p.date)}${r.p.supplier ? ' · Supplier: ' + esc(r.p.supplier) : ''}${r.p.link ? ' · from Polish ' + esc(r.p.link) : ''}</div>`; })() : stK === 'today' ? `<div class="small" style="margin:0;color:var(--green2);font-weight:800">📦 Sent to Packing Hall today: ${prQ(r.n)} pcs</div>` : stK === 'pending' ? `<div class="small" style="margin:0;color:var(--amber);font-weight:800">⏳ Pending: ${prQ(r.n)} pcs</div>` : stK === 'balance' ? `<div class="small" style="margin:0;color:var(--green2);font-weight:800">🪚 Balance OK today: ${prQ(r.n)} pcs<br>${splitsOf(r.x, 'carpenter').filter(p => p.date === todayStr() && Number(p.done) > 0).map(p => esc(p.name) + ' — ' + prQ(p.done) + ' / ' + prQ(p.qty) + ' pcs' + (p.supplier ? ' · Supplier: ' + esc(p.supplier) : '') + (p.link ? ' · from Polish ' + esc(p.link) : '')).join('<br>')}</div>` : '';
   const k = stK, list = ckList('statList', rows, r => k === 'repairs' ? repairStatCard(r) : workCard(r.x, { top: chip(r), click: `statClose();viewWork('${r.x.id}')` }), { first: 20 });
   return head + rankBox + list;
@@ -8506,7 +8523,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
   let rvT = [];
   function schedule(el) {
     rvT.forEach(clearTimeout);
-    rvT = [0, 150, 400, 800, 1300].map(ms => setTimeout(() => reveal(el, false), ms));
+    rvT = [220, 650].map(ms => setTimeout(() => reveal(el, false), ms));
   }
   /* The app's own Enter/Next code calls scrollIntoView({block:'center'}) which ignores the
      sticky header and the bottom nav. Route those calls through reveal() instead. */
@@ -8514,7 +8531,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
   Element.prototype.scrollIntoView = function (o) {
     try {
       if (o && typeof o === 'object' && o.block === 'center' && !this.closest('.modal-backdrop,#authOverlay,.ut-ov') && (isField(this) || this.closest('#workForm,#app'))) {
-        reveal(this, true); schedule(this); return;
+        reveal(this, false); return;
       }
     } catch (e) {}
     return _sib.apply(this, arguments);
@@ -8642,7 +8659,7 @@ body.sub .stage-chips [onclick^="PR.type='woodSupplier'"],body.sub .stage-chips 
   };
 
   const css = document.createElement('style');
-  css.textContent = '@media (max-width:899px){nav.nav{transition:transform .32s cubic-bezier(.4,0,.2,1),opacity .25s ease,filter .25s ease;will-change:transform,opacity}body.typing nav.nav{transform:translateY(135%);opacity:0;filter:blur(3px);pointer-events:none}}@media (prefers-reduced-motion:reduce){nav.nav{transition:none!important}}.draft-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.14)!important;border:1px solid rgba(255,255,255,.35)!important;color:#ffffff!important;font-weight:800;white-space:nowrap}body.light .draft-btn{color:#ffffff!important}.draft-btn .ubadge{background:rgba(255,255,255,.22);color:#111;box-shadow:none}.draft-btn .ubadge.zero{background:#64748b;color:#fff;box-shadow:none}.draft-row{display:flex;gap:10px;align-items:center;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:14px;cursor:pointer}.draft-row:active{opacity:.7}';
+  css.textContent = '@media (max-width:899px){nav.nav{transition:none!important}body.typing nav.nav{visibility:hidden;pointer-events:none}}@media (prefers-reduced-motion:reduce){nav.nav{transition:none!important}}.draft-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.14)!important;border:1px solid rgba(255,255,255,.35)!important;color:#ffffff!important;font-weight:800;white-space:nowrap}body.light .draft-btn{color:#ffffff!important}.draft-btn .ubadge{background:rgba(255,255,255,.22);color:#111;box-shadow:none}.draft-btn .ubadge.zero{background:#64748b;color:#fff;box-shadow:none}.draft-row{display:flex;gap:10px;align-items:center;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:14px;cursor:pointer}.draft-row:active{opacity:.7}';
   document.head.appendChild(css);
   badge(); setTimeout(badge, 800);
 })();
@@ -10519,7 +10536,7 @@ showDraft();return {drafted:true,pending_fields_for_this_record:change.fields||c
 function langKind(t){t=String(t||'');if(/[\u0900-\u097F]/.test(t))return 'hi';const w=t.toLowerCase().match(/[a-z]+/g)||[];if(!w.length)return 'en';
 const H=/^(kar|karo|kardo|karna|karke|hai|hain|hoga|hua|nahi|nahin|kya|kyun|kaise|kitna|kitne|kitni|mujhe|mera|meri|mere|aap|aapka|aaj|kal|abhi|dikhao|dikha|batao|bata|bhejo|chahiye|wala|wali|wale|ka|ki|ke|ko|se|mein|aur|bhi|toh|haan|ji|theek|thik|sabhi|pura|poora|bacha|baaki|diya|liya|gaya|gayi|mila|aaya|wapas|naya|nayi|jaldi|zara|bhai|accha|achha|samjha|samajh|rehne|dena|dedo|bol|bolo|likh|likho|hata|hatao|badal|badlo|nikalo|dekho|dikhana|lagao|rakho|chalu)$/;
 let n=0;w.forEach(x=>{if(H.test(x))n++});return n>=1&&n/w.length>=0.3?'hing':'en'}
-function langRule(text){const k=langKind(text);return 'REPLY LANGUAGE: ALWAYS reply in plain English only, even if the user writes Hindi or Hinglish (understand it, answer in English). Never use Devanagari or Hinglish in a reply. Detected for this message: '+(k==='hi'?'Hindi (Devanagari)':k==='hing'?'Hinglish (Roman Hindi)':'English')+'. If the user switches language, switch with them. VOICE: the speech recognizer may write spoken English in Devanagari letters (for example the words how many pending orders written in Devanagari). If a Devanagari message is really English words, treat it as English and reply in English; if it is real Hindi, reply in Hindi (Devanagari); if it is Hinglish, reply in Hinglish (Roman letters). Never ask which language to use. Translate fixed phrases such as "Not saved yet" and "Say save to confirm" into the reply language. Keep TAE numbers, item codes, names, field labels and numbers exactly as they are. ';}
+function langRule(text){const k=langKind(text);return 'REPLY LANGUAGE: ALWAYS reply in plain English only, even if the user writes Hindi or Hinglish (understand it, answer in English). Never use Devanagari or Hinglish in a reply. Detected for this message: '+(k==='hi'?'Hindi (Devanagari)':k==='hing'?'Hinglish (Roman Hindi)':'English')+'. Never switch the reply language. VOICE: the speech recognizer may write spoken English in Devanagari letters (for example the words how many pending orders written in Devanagari). If a Devanagari message is really English words, treat it as English and reply in English; if it is real Hindi or Hinglish, still reply in English only. Never ask which language to use. Keep fixed phrases such as "Not saved yet" and "Say save to confirm" in English. Keep TAE numbers, item codes, names, field labels and numbers exactly as they are. ';}
 async function ai(text){const c=cfg();if(!c)return null;const tools=toolDefs(),sys=speechRules(text)+DRAFT_RULES+(window.TAE_FMT||'')+'You are an AI assistant for a furniture factory ERP. '+(LIVE.on?LIVE_RULES:langRule(text)+'Keep replies short. ')+'Formatting rules for every field you stage: buyer uses a hyphen instead of a space (M 2 = M-2); size uses the × sign between numbers (140×45×75); supplier is the registered supplier name (a supplier code means that registered name); item code has no spaces around - or /. Spoken numbers/dimensions must be converted to digits (e.g. do sau bai sau = 200 x 200). Field names: item description/item name/naam/vivaran = itemName; size/dimension/naap = size; item code = itemCode; quantity/qty = qty; buyer = buyer. You have read-only search and proposal tools. Never claim a change was saved. All edits/additions/splits must be proposed with tools and shown for explicit human confirmation. Keep sequential context: when the user says “also change…” or gives a second instruction, update the existing provisional draft, preserving prior changes unless corrected. Search before editing when identity is ambiguous. Never invent fields, dimensions, quantities, TAE numbers, or contractors. Use search_records for lookups; propose_update for edits; propose_split for carpenter/craft allocation; propose_add for new records. If multiple records match, ask the user to disambiguate. When asked to open a TAE/sub-order, call open_record and report the actual stored record before proposing changes. Keep an opened record and pending draft across turns. Each new requested field update must merge into the same pending update, not erase prior fields. Workflow: 1) open_record by TAE (and sub-order) 2) show the stored record and confirm it with the user 3) apply each requested change with propose_update, one after another, merging into the same draft 4) after each change say what is staged and that it is NOT saved yet. You cannot save. Saving happens only when the user taps Confirm & save or types an explicit save command (save / save karo / सेव करो); remind them of this. Never write to Firestore or local persistence yourself. If an API model is configured, use it for every message; on API failure show an error and do not fall back to offline canned responses. Pending draft state: '+JSON.stringify(TX.draft||null)+'; opened record: '+JSON.stringify(TX.opened||null)+'. Data lists you can use (param store): work (TAE production records), orders ('+store('orders').length+' rows), repairs ('+store('repairs').length+' rows). Create and modify only through propose_* tools; there is no delete. Never ask for or reveal user PINs or passwords: you have no access to them. Live work records (one per line, fields separated by |, includes every stage contractor, wood supplier, size, cbm and dates):\n'+((window.__tharDigest&&window.__tharDigest())||JSON.stringify(findRecords({query:''}).slice(0,150).map(x=>x.record)));
 let messages=[{role:'system',content:sys},...TX.turns.slice(-10),{role:'user',content:text}];
 for(let step=0;step<5;step++){
@@ -11080,6 +11097,7 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.142: keyboard/scroll glitch fix (fewer scrolls, no nav slide/blur animation, Enter/Next no forced smooth-center).
   V1.0.103-live: AI Pro is now a full Gemini-style assistant on Gemini and Llama: any topic, no rule-bot hijacking, PDF/photo follow-ups, make_document (Word/PDF/CSV download), text-only models handled.
   V1.0.102-live: voice rebuilt. Mic = voice typing (no duplicate text on Android, no auto-send); Wave button = full-screen Live chat (animated orb, Hinglish Gemini-style replies, mute / interrupt / language toggle).
   V1.0.101-live: non-blocking chat (message queue, background PDF/photo scans, live-updating edit cards, 90 s watchdog, Send never turns into Stop while typing).
@@ -11567,7 +11585,7 @@ function sys0() {
   const d = DB(), reg = (d.peopleCodes || []).filter(p => p.name).map(p => p.type + ':' + p.name).join(', '), WK = (d.workers || []).map(w => w.name).filter(Boolean).slice(0, 80).join(', '),
     now = new Date(), yd = new Date(now.getTime() - 864e5), dn = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()],
     mem = MEM.notes.map((n, i) => (i + 1) + '. ' + n.t).join('\n');
-  return `You are "AI Pro": a full general-purpose AI assistant exactly like Gemini, that also lives inside the THAR furniture-factory ERP. Talk like Gemini: warm, natural, helpful. YOU CAN TALK ABOUT ANY TOPIC, not only the factory: general knowledge, advice, studies, career, health basics, money, tech, coding, maths, translation, writing and rewriting (letters, messages, quotations, reports), summaries, jokes, small talk. Never say you can only help with factory work and never steer the user back to the factory. Use the ERP tools ONLY when the question is about ERP data. You can read all ERP data through the tools and change data through the edit_* / delete_record tools whenever the user asks (always as a preview the user confirms). If the user asks for a change that no tool covers, say plainly what is not possible yet instead of pretending. ATTACHED FILES (PDF, photo): read them fully and answer anything about them (summary, translation, extraction, comparison, corrections). DOCUMENTS: when the user wants a document created, rewritten, translated, corrected or converted (letter, quotation, report, list, table, Excel/CSV, Word, PDF), write the COMPLETE final content and call make_document so the user gets a download button; do not paste long documents into the chat. LANGUAGE OVERRIDE: ALWAYS reply in plain English only, even if the user writes or speaks Hindi or Hinglish (understand it, answer in English; never use Devanagari or Hinglish in replies). The language-matching rules that follow are disabled. (disabled) AUTOMATIC LANGUAGE DETECTION: detect the language of the user's latest message and reply in it - Hindi (Devanagari) in -> reply in Hindi; English in -> reply in English; Hinglish in -> reply in natural, fluent Hinglish (Roman script, the way people really talk); if the user switches language, switch with them. Never ask which language to use. VOICE: the speech recognizer may write spoken English in Devanagari letters (for example the words how many pending orders written in Devanagari). If a Devanagari message is really English words, treat it as English and reply in English; if it is real Hindi, reply in Hindi (Devanagari); if it is Hinglish, reply in Hinglish (Roman letters). Never ask which language to use. Voice input has recognition errors: keep numbers digit-for-digit, match names phonetically to the registered lists.
+  return `You are "AI Pro": a full general-purpose AI assistant exactly like Gemini, that also lives inside the THAR furniture-factory ERP. Talk like Gemini: warm, natural, helpful. YOU CAN TALK ABOUT ANY TOPIC, not only the factory: general knowledge, advice, studies, career, health basics, money, tech, coding, maths, translation, writing and rewriting (letters, messages, quotations, reports), summaries, jokes, small talk. Never say you can only help with factory work and never steer the user back to the factory. Use the ERP tools ONLY when the question is about ERP data. You can read all ERP data through the tools and change data through the edit_* / delete_record tools whenever the user asks (always as a preview the user confirms). If the user asks for a change that no tool covers, say plainly what is not possible yet instead of pretending. ATTACHED FILES (PDF, photo): read them fully and answer anything about them (summary, translation, extraction, comparison, corrections). DOCUMENTS: when the user wants a document created, rewritten, translated, corrected or converted (letter, quotation, report, list, table, Excel/CSV, Word, PDF), write the COMPLETE final content and call make_document so the user gets a download button; do not paste long documents into the chat. LANGUAGE OVERRIDE: ALWAYS reply in plain English only, even if the user writes or speaks Hindi or Hinglish (understand it, answer in English; never use Devanagari or Hinglish in replies). VOICE: the speech recognizer may write spoken English in Devanagari letters (for example the words how many pending orders written in Devanagari). If a Devanagari message is really English words, treat it as English and reply in English; if it is real Hindi or Hinglish, still reply in English only. Never ask which language to use. Voice input has recognition errors: keep numbers digit-for-digit, match names phonetically to the registered lists.
 HINGLISH: "qty 12 kar do" = set quantity 12; "carpenter ka naam Chunaram kar do" = rename the carpenter row; "repair wapas aa gaya aaj" = repair receive date today; "kitna balance/gap bacha" = carpenter allocated minus done; "polish pending dikhao" = list; "kitna CBM complete hua" = sum_work. Number words: ek 1, do 2, teen 3, char 4, paanch 5, chhe 6, saat 7, aath 8, nau 9, das 10, gyarah 11, barah 12, bees 20, pachaas 50, sau 100, sau pachaas 250, hazaar 1000, dedh 1.5, dhai 2.5. Dates: aaj = today, kal = tomorrow if future tense (hoga, aayega) else yesterday (aaya, gaya, hua), parso = day after tomorrow / before yesterday. ALWAYS send dates to tools as YYYY-MM-DD.
 FACTORY JARGON: TAE no = order number (TAE/2849); Sub order = TAE/2849/1; stages: Sanding, Polish, Carpenter (the Gap / Balance stage); Wood Supplier; Repairing = parts returned for repair (send date, receive/return date; entry is not complete until the repair is received); Packing Hall = completed entries go to packing (status Send); CBM = cubic metres = L x W x H in metres (cm: product / 1,000,000; inch x 0.0254; ft x 0.3048) times qty; Work entry = production record; Order = wood/material order to a supplier; Attendance = daily status per worker (P, P+½OT, P+FOT, P+2OT, Half Day, Absent, Holiday, Weekly Off, HOL+P...).
 TOOLS: find_records, sum_work, find_attendance, calc_cbm (read, instant); edit_work, edit_repair, edit_order, edit_attendance, delete_record (only build a PREVIEW card); remember / forget_memory.
@@ -11763,7 +11781,7 @@ function liveOn() {
 }
 function liveOff(spoken) {
   live = false; if (!vDict) micOn = false; vMuted = false; clearTimeout(silT); clearTimeout(vHear); clearInterval(lvTick); vRecStop(); vBuf = ''; vSess = '';
-  try { TS && TS.cancel(); } catch (e) { } clearTimeout(vSpkWd); spk++; spkOn = false; lvShow(false); head(); lvHead(); if (spoken) note('Live voice khatam.');
+  try { TS && TS.cancel(); } catch (e) { } clearTimeout(vSpkWd); spk++; spkOn = false; lvShow(false); head(); lvHead(); if (spoken) note('Live voice ended.');
 }
 function lvHead() { const b = root && $('#apLive', root); if (b) b.classList.toggle('on', live); }
 function liveFlush() {
@@ -11796,7 +11814,7 @@ function say(t, cb) {
   const id = ++spk; spkOn = true; if (live) { lvBot(c); lvSet('speak'); } head();
   const dev = /[\u0900-\u097F]/.test(c), v = vPick(dev), raw = c.match(/[^.!?।]+[.!?।]?/g) || [c]; let parts = [], cur = '';
   raw.forEach(x => { x = x.trim(); if (!x) return; if (cur && (cur + ' ' + x).length > 140) { parts.push(cur); cur = x; } else cur = (cur + ' ' + x).trim(); }); if (cur) parts.push(cur);
-  if (live && parts.length > 4) parts = parts.slice(0, 4).concat(['Baaki details screen par dekh lo.']);
+  if (live && parts.length > 4) parts = parts.slice(0, 4).concat(['See the remaining details on screen.']);
   let i = 0;
   const fin = () => { spkOn = false; head(); if (live) liveResume(); else if (wasDict) { micOn = true; vRest = setTimeout(vRecStart, 300); } };
   const nx = () => {
@@ -13109,21 +13127,63 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
   function top(map, n, key) { return Object.keys(map).map(function (k) { return { l: k, v: key ? map[k][key] : map[k], o: map[k] }; }).sort(function (a, b) { return b.v - a.v; }).slice(0, n); }
   function pct(a, b) { return b > 0 ? Math.round(a * 100 / b) : 0; }
 
+  /* ---------------- period buckets (day / week / month / year) ---------------- */
+  var MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function monthStart(d) { return d.slice(0, 7) + '-01'; }
+  function monthEnd(d) { return new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7), 0)).toISOString().slice(0, 10); }
+  function addMonths(d, n) { return new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1 + n, 1)).toISOString().slice(0, 10); }
+  function perBar(cur) { return daChips(cur, ''); }
+  function buildBuckets(per, today, W) {
+    var bk = [], unit = 'day', i, a, b, n;
+    if (per === '7' || per === '30') { n = per === '7' ? 7 : 30; for (i = n - 1; i >= 0; i--) { a = prAdd(today, -i); bk.push({ a: a, b: a, lab: a.slice(5) }); } }
+    else if (per === '180') { unit = 'week'; for (i = 25; i >= 0; i--) { b = prAdd(today, -7 * i); bk.push({ a: prAdd(b, -6), b: b, lab: b.slice(5) }); } }
+    else {
+      var first = monthStart(today);
+      if (per === '365') first = addMonths(first, -11);
+      else W.forEach(function (x) {
+        try {
+          var ds = [x.date, x.packingDate]; (Array.isArray(x.packingSplits) ? x.packingSplits : []).forEach(function (p) { ds.push(p.date); }); splitsOf(x, 'carpenter').forEach(function (p) { ds.push(p.date); });
+          ds.forEach(function (d) { d = String(d || '').slice(0, 10); if (prValid(d) && d >= '2000-01-01' && d <= today && d < first) first = monthStart(d); });
+        } catch (e) { }
+      });
+      var months = []; for (a = first; a <= today; a = addMonths(a, 1)) months.push(a);
+      if (per === 'all' && months.length > 24) { unit = 'year'; for (i = +first.slice(0, 4); i <= +today.slice(0, 4); i++) bk.push({ a: i + '-01-01', b: i + '-12-31', lab: String(i) }); }
+      else { unit = 'month'; months.forEach(function (m, k) { var mm = +m.slice(5, 7) - 1; bk.push({ a: m, b: monthEnd(m), lab: MON3[mm] + (mm === 0 || k === 0 ? ' ' + m.slice(2, 4) : '') }); }); }
+    }
+    n = bk.length;
+    var B = { bk: bk, unit: unit, lab: bk.map(function (x) { return x.lab; }), sent: [], bal: [], ent: [], days: Math.max(prDiff(bk[0].a, today) + 1, 1) };
+    for (i = 0; i < n; i++) { B.sent.push(0); B.bal.push(0); B.ent.push(0); }
+    function idx(d) { d = String(d || '').slice(0, 10); if (!prValid(d) || d > today || d < bk[0].a) return -1; for (var j = n - 1; j >= 0; j--) if (d >= bk[j].a) return d <= bk[j].b ? j : -1; return -1; }
+    W.forEach(function (x) {
+      try {
+        var pk = Array.isArray(x.packingSplits) ? x.packingSplits : [], j;
+        if (pk.length) pk.forEach(function (p) { j = idx(p.date); if (j >= 0) B.sent[j] += Number(p.qty || 0); });
+        else { j = idx(x.packingDate); if (j >= 0) B.sent[j] += Number(x.qty || 0); }
+        if (!x.noBalance) splitsOf(x, 'carpenter').forEach(function (p) { j = idx(p.date); if (j >= 0) B.bal[j] += Number(p.done || 0); });
+        j = idx(x.date); if (j >= 0) B.ent[j]++;
+      } catch (e) { }
+    });
+    return B;
+  }
+
   /* ---------------- data ---------------- */
   function calc() {
     var A = getActiveDB(), today = todayStr(), W = A.work || [], O = A.orders || [], R = A.repairs || [];
     var WK = (typeof db !== 'undefined' && db && db.workers) || [];
     var D = { today: today, days: [], lab: [], sent: [], bal: [], ent: [], W: W, O: O, R: R, WK: WK };
     for (var i = 6; i >= 0; i--) { var d = prAdd(today, -i); D.days.push(d); D.lab.push(d.slice(5)); D.sent.push(0); D.bal.push(0); D.ent.push(0); (D.tEnt = D.tEnt || []).push(0); (D.tPend = D.tPend || []).push(0); }
+    D.per = daPer(); D.from = daFrom(D.per, today);
     D.H = {}; try { D.H = homeStats(); } catch (e) { D.H = { actN: 0, delayed: [], late: [], qty: 0, pendPcs: 0, qcPend: 0, nToday: 0, balQty: 0, balN: 0 }; }
     D.stage = { sanding: { t: 0, d: 0 }, polish: { t: 0, d: 0 }, carpenter: { t: 0, d: 0 } };
-    D.buyer = {}; D.wood = {}; D.done = 0; D.active = 0; D.cbmDone = 0; D.cbmAll = 0; D.pcsAll = 0; D.pcsPend = 0; D.delayed = [];
+    D.buyer = {}; D.buyerAll = {}; D.wood = {}; D.done = 0; D.active = 0; D.cbmDone = 0; D.cbmAll = 0; D.pcsAll = 0; D.pcsPend = 0; D.delayed = [];
     W.forEach(function (x) {
       try {
         var s = statusOf(x), q = Number(x.qty || 0);
         D.days.forEach(function (dd, i) { D.sent[i] += packedOn(x, dd); D.bal[i] += balOn(x, dd); if (x.date === dd) D.ent[i]++; });
         ['sanding', 'polish', 'carpenter'].forEach(function (k) { if (q <= 0 || noSt(x, k)) return; D.stage[k].t += q; D.stage[k].d += Math.min(q, stg(x, k).done); });
         D.cbmAll += num(x.cbm); D.pcsAll += q;
+        var xd0 = String(x.date || '').slice(0, 10), inPer = D.per === 'all' || (prValid(xd0) && xd0 >= D.from), tbn = String(x.buyer || '').trim() || 'N/A', tbk = tbn.toUpperCase(), tb = inPer ? (D.buyerAll[tbk] || (D.buyerAll[tbk] = { name: tbn, n: 0, pcs: 0, cbm: 0 })) : null;
+        if (tb) { tb.n++; tb.pcs += q; tb.cbm += num(x.cbm); }
         var tix = D.days.indexOf(String(x.date || '').slice(0, 10)); if (tix >= 0) { D.tEnt[tix] += q; D.tPend[tix] += (window.TharAI && TharAI.balanceOf ? TharAI.balanceOf(x) : s.pend); }
         var wn = String(x.woodSupplier || '').trim() || 'N/A', w = D.wood[wn] || (D.wood[wn] = { n: 0, qty: 0, pend: 0 });
         w.n++; w.qty += q;
@@ -13139,6 +13199,7 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
         }
       } catch (e) { }
     });
+    D.B = buildBuckets(D.per, today, W);
     D.delayed.sort(function (a, b) { return b.late - a.late; });
     D.dBk = [0, 0, 0, 0]; D.delayed.forEach(function (r) { D.dBk[r.late <= 3 ? 0 : r.late <= 7 ? 1 : r.late <= 14 ? 2 : 3]++; });
     // orders
@@ -13204,9 +13265,9 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
       if (k === 0) h += '<path class="f105-ar2" d="' + d + ' L' + xs(n - 1) + ' ' + (H - B) + ' L' + xs(0) + ' ' + (H - B) + ' Z" fill="url(#' + id + k + ')"/>';
       if (s.dash) h += '<path class="f105-ar2" d="' + d + '" fill="none" stroke="' + s.c + '" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4"/>';
       else h += '<path class="f105-ln" pathLength="1" d="' + d + '" fill="none" stroke="' + s.c + '" stroke-width="2.4" stroke-linecap="round"/>';
-      if (!o.plain && !s.dash) p.forEach(function (q) { h += '<circle class="f105-pt" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="3" fill="' + s.c + '"/>'; });
+      if (!o.plain && !s.dash) p.forEach(function (q) { h += '<circle class="f105-pt" cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="' + (n > 14 ? 1.8 : 3) + '" fill="' + s.c + '"/>'; });
     });
-    lab.forEach(function (l, i) { if (n <= 8 || i % 2 === 0) h += '<text class="f105-lt" x="' + xs(i).toFixed(1) + '" y="' + (H - 6) + '">' + esc(l) + '</text>'; });
+    var stp = n <= 8 ? 1 : Math.ceil(n / 7); lab.forEach(function (l, i) { if (i % stp === 0) h += '<text class="f105-lt" x="' + xs(i).toFixed(1) + '" y="' + (H - 6) + '">' + esc(l) + '</text>'; });
     if (!o.plain) h += '<line class="f105-guide" y1="' + T + '" y2="' + (H - B) + '"/>';
     var cw = n > 1 ? (W - L - R) / (n - 1) : W;
     if (!o.plain) lab.forEach(function (l, i) {
@@ -13218,9 +13279,9 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
   }
   function cols(lab, vals, c) {
     var mx = Math.max.apply(null, vals.concat([1]));
-    return '<div class="f105-cols">' + vals.map(function (v, i) {
+    return '<div class="f105-cols' + (vals.length > 12 ? ' dense' : '') + '">' + vals.map(function (v, i) {
       var p = v > 0 ? Math.max(v / mx * 100, 4) : 0;
-      return '<div class="f105-col"><em>' + N(v) + '</em><div class="f105-cb"><i style="height:' + p + '%;--d:' + (i * 70) + ';background:linear-gradient(to top,' + (Array.isArray(c) ? c[i] : c) + ',color-mix(in srgb,' + (Array.isArray(c) ? c[i] : c) + ' 55%,#fff))"></i></div><span>' + esc(lab[i]) + '</span></div>';
+      return '<div class="f105-col"><em>' + N(v) + '</em><div class="f105-cb"><i style="height:' + p + '%;--d:' + (i * 70) + ';background:linear-gradient(to top,' + (Array.isArray(c) ? c[i] : c) + ',color-mix(in srgb,' + (Array.isArray(c) ? c[i] : c) + ' 55%,#fff))"></i></div><span>' + (vals.length > 12 && i % Math.ceil(vals.length / 6) !== 0 ? '\u00a0' : esc(lab[i])) + '</span></div>';
     }).join('') + '</div>';
   }
   function hbar(items, o) {
@@ -13262,14 +13323,15 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
     { id: 'prod', ic: '🏭', t: 'Production Pulse', c: COL.green,
       card: function (D) { return { big: N(D.H.qty), u: 'pcs', lb: 'sent today · ' + D.H.nToday + ' entries', sp: D.sent }; },
       sheet: function (D) {
-        var H = D.H, tot = sum(D.sent), best = 0; D.sent.forEach(function (v, i) { if (v > D.sent[best]) best = i; });
-        return { sub: 'Last 7 days · live from Work entries', html:
-          kg([kpi('Active TAE', H.actN, { c: COL.green }), kpi('Delayed', H.delayed.length, { c: COL.late }), kpi('Sent today', H.qty, { u: 'pcs' }), kpi('CBM finished', D.cbmDone, { d: 2, c: COL.blue }), kpi('Pending pcs', H.pendPcs, { c: COL.amber }), kpi('QC pending', H.qcPend, { c: COL.indigo })]) +
-          sec('📈 Sent vs Carpenter output', lineChart(D.lab, [{ n: 'Packed / sent', c: COL.green, v: D.sent }, { n: 'Carpenter done', c: COL.blue, v: D.bal }]), '7 days', 1) +
-          sec('🆕 New entries per day', cols(D.lab, D.ent, COL.indigo), '', 2) +
+        var H = D.H, B = D.B, tot = sum(B.sent), best = 0, PL = daPerLabel(D.per), PS = daPerShort(D.per); B.sent.forEach(function (v, i) { if (v > B.sent[best]) best = i; });
+        return { sub: PL + ' · live from Work entries', html:
+          perBar(D.per) +
+          kg([kpi('Active TAE', H.actN, { c: COL.green }), kpi('Delayed', H.delayed.length, { c: COL.late }), kpi('Sent today', H.qty, { u: 'pcs' }), kpi('Sent (' + PS + ')', tot, { u: 'pcs', c: COL.green }), kpi('Carpenter done (' + PS + ')', sum(B.bal), { u: 'pcs', c: COL.blue }), kpi('New entries (' + PS + ')', sum(B.ent), { c: COL.indigo }), kpi('CBM finished', D.cbmDone, { d: 2, c: COL.blue }), kpi('Pending pcs', H.pendPcs, { c: COL.amber }), kpi('QC pending', H.qcPend, { c: COL.indigo })]) +
+          sec('📈 Sent vs Carpenter output', lineChart(B.lab, [{ n: 'Packed / sent', c: COL.green, v: B.sent }, { n: 'Carpenter done', c: COL.blue, v: B.bal }]), PL, 1) +
+          sec('🆕 New entries per ' + B.unit, cols(B.lab, B.ent, COL.indigo), '', 2) +
           sec('🧮 Entries status', donut([{ l: 'Finished', v: D.done, c: COL.green }, { l: 'Active', v: D.active - D.delayed.length, c: COL.blue }, { l: 'Delayed', v: D.delayed.length, c: COL.late }], N(D.W.length), 'ENTRIES'), '', 3) +
-          (tot ? tip('7-day total <b>' + N(tot) + ' pcs</b>, average <b>' + N(tot / 7, 1) + '</b> per day. Best day: <b>' + esc(D.lab[best]) + '</b> (' + N(D.sent[best]) + ' pcs).') : tip('No packing recorded in the last 7 days.')) +
-          btns([{ t: '📋 Work List', a: 'data-go="workList"', p: 1 }, { t: '🏁 Production', a: 'data-go="production"' }]) };
+          (tot ? tip(PL + ' total <b>' + N(tot) + ' pcs</b>, average <b>' + N(tot / B.days, 1) + '</b> per day. Best ' + B.unit + ': <b>' + esc(B.lab[best]) + '</b> (' + N(B.sent[best]) + ' pcs).') : tip('No packing recorded in this period (' + PL.toLowerCase() + ').')) +
+          btns([{ t: '📋 Work List', a: 'data-go=\"workList\"', p: 1 }, { t: '🏁 Production', a: 'data-go=\"production\"' }]) };
       } },
     { id: 'stage', ic: '🪵', t: 'Stage Progress', c: COL.amber,
       card: function (D) { var S2 = D.stage, t = S2.sanding.t + S2.polish.t + S2.carpenter.t, d = S2.sanding.d + S2.polish.d + S2.carpenter.d; return { big: pct(d, t), u: '%', lb: 'sanding · polish · carpenter', sp: [pct(S2.sanding.d, S2.sanding.t), pct(S2.polish.d, S2.polish.t), pct(S2.carpenter.d, S2.carpenter.t)] }; },
@@ -13298,14 +13360,15 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
           btns([{ t: '⚠️ Open Delayed Work', a: 'data-act="delayed"', p: 1 }, { t: '📦 Order List', a: 'data-go="orderList"' }]) };
       } },
     { id: 'carp', ic: '🪚', t: 'Top Carpenters', c: COL.blue,
-      card: function (D) { var q = sum(D.c.list.map(function (c) { return c.qty; })); return { big: N(q), u: 'pcs', lb: D.c.list.length ? 'top: ' + D.c.list[0].name : 'last 7 days', sp: D.bal }; },
+      card: function (D) { var q = sum(D.c.list.map(function (c) { return c.qty; })); return { big: N(q), u: 'pcs', lb: D.c.list.length ? 'top: ' + D.c.list[0].name : daPerLabel(D.per).toLowerCase(), sp: D.bal }; },
       sheet: function (D) {
         var L = D.c.list, q = sum(L.map(function (c) { return c.qty; })), t5 = L.slice(0, 5), rest = q - sum(t5.map(function (c) { return c.qty; }));
         var items = t5.map(function (c, i) { return { l: c.name, v: c.qty, c: PAL[i] }; }); if (rest > 0) items.push({ l: 'Others', v: rest, c: COL.grey });
-        return { sub: 'Carpenter output · last 7 days', html:
+        return { sub: 'Carpenter output · ' + daPerLabel(D.per), html:
+          perBar(D.per) +
           kg([kpi('Carpenters', L.length), kpi('Pieces', q, { c: COL.blue }), kpi('CBM', D.c.cbm, { d: 2, c: COL.green })]) +
           sec('🏆 Ranking', hbar(L.slice(0, 8).map(function (c, i) { return { l: (i + 1) + '. ' + c.name, v: c.qty, c: PAL[i % PAL.length], find: c.name }; }), { u: ' pcs' }), 'tap to search', 1) +
-          sec('📈 Daily carpenter output', lineChart(D.lab, [{ n: 'Pieces done', c: COL.blue, v: D.bal }]), '', 2) +
+          sec('📈 Carpenter output per ' + D.B.unit, lineChart(D.B.lab, [{ n: 'Pieces done', c: COL.blue, v: D.B.bal }]), daPerLabel(D.per), 2) +
           sec('🥧 Share of output', donut(items, N(q), 'PCS'), '', 3) +
           (L.length ? tip('<b>' + esc(L[0].name) + '</b> leads with <b>' + N(L[0].qty) + ' pcs</b> (' + pct(L[0].qty, q) + '% of all output).') : '') +
           btns([{ t: '🏁 Full Production Ranking', a: 'data-go="production"', p: 1 }]) };
@@ -13319,6 +13382,31 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
           sec('📊 Pending by buyer', hbar(T.map(function (b, i) { return { l: b.l, v: b.v, c: PAL[i % PAL.length], find: b.l === 'N/A' ? '' : b.l }; }), { u: ' pcs' }), 'tap to search', 1) +
           sec('🥧 Share', donut(items, N(tot), 'PCS LEFT'), '', 2) +
           (T.length ? tip('<b>' + esc(T[0].l) + '</b> holds <b>' + pct(T[0].v, tot) + '%</b> of all pending pieces.') : '') };
+      } },
+    { id: 'topbuyer', ic: '🏅', t: 'Top Buyer', c: COL.indigo,
+      card: function (D) {
+        var L = Object.keys(D.buyerAll).map(function (k) { return D.buyerAll[k]; }).sort(function (a, b) { return b.pcs - a.pcs; });
+        return { big: L.length ? L[0].name : '—', u: '', lb: L.length ? N(L[0].pcs) + ' pcs · ' + N(L[0].cbm, 2) + ' CBM' : 'no entries in ' + daPerLabel(D.per).toLowerCase() + '', sp: L.slice(0, 7).map(function (b) { return b.pcs; }).reverse() };
+      },
+      sheet: function (D) {
+        var L = Object.keys(D.buyerAll).map(function (k) { return D.buyerAll[k]; }), tp = sum(L.map(function (b) { return b.pcs; })), tc = sum(L.map(function (b) { return b.cbm; }));
+        var byP = L.slice().sort(function (a, b) { return b.pcs - a.pcs || b.cbm - a.cbm; }), byC = L.slice().sort(function (a, b) { return b.cbm - a.cbm || b.pcs - a.pcs; });
+        function mk(arr, key, tot, d) {
+          var t5 = arr.slice(0, 5), items = t5.map(function (b, i) { return { l: b.name, v: b[key], c: PAL[i % PAL.length] }; }), rest = tot - sum(t5.map(function (b) { return b[key]; }));
+          if (rest > 0.0001) items.push({ l: 'Others', v: rest, c: COL.grey }); return items;
+        }
+        var rowsP = byP.slice(0, 10).map(function (b, i) { return { l: (i + 1) + '. ' + b.name + ' · ' + pct(b.pcs, tp) + '%', v: b.pcs, c: PAL[i % PAL.length], find: b.name === 'N/A' ? '' : b.name }; });
+        var rowsC = byC.slice(0, 10).map(function (b, i) { return { l: (i + 1) + '. ' + b.name + ' · ' + pct(b.cbm, tc) + '%', v: b.cbm, c: PAL[i % PAL.length], find: b.name === 'N/A' ? '' : b.name }; });
+        var table = lst(byP.slice(0, 15).map(function (b, i) { return { l: (i + 1) + '. ' + b.name, v: N(b.pcs) + ' pcs · ' + N(b.cbm, 2) + ' CBM · ' + pct(b.pcs, tp) + '%', find: b.name === 'N/A' ? '' : b.name }; }));
+        return { sub: 'Buyer-wise ranking · ' + daPerLabel(D.per) + (D.per === 'all' ? '' : ' (by entry date)') + ' · pieces & CBM', html:
+          perBar(D.per) +
+          kg([kpi('Buyers', L.length), kpi('Total pcs', tp, { c: COL.blue }), kpi('Total CBM', tc, { d: 2, c: COL.green })]) +
+          sec('🏆 Ranking by pieces', hbar(rowsP, { u: ' pcs' }), 'tap to search', 1) +
+          sec('🧊 Ranking by CBM', hbar(rowsC, { u: ' CBM', d: 2 }), 'tap to search', 2) +
+          sec('🥧 Share of pieces', donut(mk(byP, 'pcs', tp), N(tp), 'PCS'), '', 3) +
+          sec('🥧 Share of CBM', donut(mk(byC, 'cbm', tc), N(tc, 1), 'CBM'), '', 4) +
+          sec('📋 Buyer table', table, 'pcs · CBM · share', 5) +
+          (byP.length ? tip('<b>' + esc(byP[0].name) + '</b> is #1 with <b>' + N(byP[0].pcs) + ' pcs</b> (' + pct(byP[0].pcs, tp) + '% of all pieces)' + (byC[0] && byC[0] !== byP[0] ? ' · by CBM the leader is <b>' + esc(byC[0].name) + '</b> (' + N(byC[0].cbm, 2) + ' CBM).' : ' and <b>' + N(byP[0].cbm, 2) + ' CBM</b>.')) : '') };
       } },
     { id: 'orders', ic: '📦', t: 'Orders & Suppliers', c: COL.amber,
       card: function (D) { return { big: N(D.o.total), u: 'orders', lb: D.o.rec + ' received · ' + D.o.late + ' late', sp: [D.o.rec, D.o.wait, D.o.late] }; },
@@ -13472,7 +13560,7 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
     r.html = noEmo(r.html); r.sub = noEmo(r.sub);
     o.setAttribute('data-bo', document.body.style.overflow || '');
     o.innerHTML = '<div class="f105-sh" role="dialog" aria-label="' + esc(f.t) + '"><div class="f105-grab"></div><div class="f105-sh-h"><button type="button" class="f105-bk" ' + (id === 'look' ? 'data-x="1"' : 'data-list="1"') + ' aria-label="Back">‹</button><div><h3>' + esc(f.t) + '</h3><p>' + esc(r.sub || '') + '</p></div><button type="button" class="f105-x" data-x="1" aria-label="Close">✕</button></div>' + r.html + '</div>';
-    daApply(o); document.body.appendChild(o); document.body.style.overflow = 'hidden'; daSync(o);
+    daApply(o); document.body.appendChild(o); document.body.style.overflow = 'hidden'; daSync(o); o.setAttribute('data-fid', id);
     countUp(o);
   }
   window.openThemePanel = function () { try { open('look'); } catch (e) { console.error(e); } };
@@ -13510,6 +13598,7 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
     var ov = t.closest('#f105ov,#f105in');
     if (!ov) return;
     var inl = ov.id === 'f105in';
+    var pb = t.closest('[data-per]'); if (pb) { setPer(pb.getAttribute('data-per'), ov); return; }
     if (inl && (t.closest('[data-x]') || t.closest('[data-list]'))) { try { tab = window.DA_FROM || 'production'; render(); window.scrollTo(0, 0); } catch (e) { } return; }
     if (t === ov || t.closest('[data-x]')) { if (!inl) close(); return; }
     var da = t.closest('[data-da]'); if (da) { daClick(da, ov); return; }
@@ -13571,6 +13660,19 @@ html body .top .logo.ax-hlogo .ax-mark{filter:none!important;box-shadow:none!imp
     var D, r; try { D = calc(); r = f.sheet(D); } catch (e) { console.error('f105 sheet', e); r = { sub: '', html: empty('Could not load data') }; }
     var noEmo = function (t) { return String(t || '').replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/(<h4>|<button[^>]*>|<div class="f105-ti">)\s+/g, '$1').replace(/^\s+/, ''); };
     return { title: f.t, sub: noEmo(r.sub), html: '<div id="f105in" class="f105-in" style="--fc:' + ACC + '">' + noEmo(r.html) + '</div>' };
+  }
+  function noEmoG(t) { return String(t || '').replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/(<h4>|<button[^>]*>|<div class="f105-ti">)\s+/g, '$1').replace(/^\s+/, ''); }
+  function setPer(v, ov) {
+    daSetPer(v);
+    if (ov.id === 'f105in') { var sy = window.scrollY; try { render(); } catch (e) { } window.scrollTo(0, sy); return; }
+    var id = ov.getAttribute('data-fid'), f = list().filter(function (x) { return x.id === id; })[0], sh = ov.querySelector('.f105-sh'), hd = ov.querySelector('.f105-sh-h');
+    if (!f || !sh || !hd) return;
+    var keep = sh.scrollTop, r; try { r = f.sheet(calc()); } catch (e) { console.error('f105 period', e); return; }
+    while (hd.nextSibling) sh.removeChild(hd.nextSibling);
+    hd.insertAdjacentHTML('afterend', noEmoG(r.html));
+    var pp = hd.querySelector('p'); if (pp) pp.textContent = noEmoG(r.sub);
+    try { daApply(ov); daSync(ov); countUp(ov); } catch (e) { }
+    sh.scrollTop = keep;
   }
   window.THAR105 = { sheet: sheetInline, mount: mount, open: open, close: close, ver: VER, rows: function () { var D; try { D = calc(); } catch (e) { D = {}; } return '<div class="f105-rows">' + list().map(function (f, i) { return rowHtml(f, D, i); }).join('') + '</div>'; } };
 })();
@@ -14378,11 +14480,11 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
         db.peopleCodes = (db.peopleCodes || []).concat(add);
         window.__nr = null;
       }
-      if (d.attendance && typeof d.attendance === 'object') db.attendance = force ? Object.assign({}, d.attendance) : Object.assign({}, db.attendance || {}, d.attendance);
+      if (d.attendance && typeof d.attendance === 'object') { if (window.__attMerge) window.__attMerge(d, lu, force); else db.attendance = force ? Object.assign({}, d.attendance) : Object.assign({}, db.attendance || {}, d.attendance); }
       if (d.company !== undefined || d.address !== undefined) db.profile = Object.assign({}, db.profile || {}, { company: d.company || '', address: d.address || '' });
     } finally { window.__merging = false; }
     try {
-      cloudSig.meta = cloudHash(JSON.stringify({ company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '', buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, schema: 2 }));
+      cloudSig.meta = cloudHash(JSON.stringify({ company: (db.profile && db.profile.company) || '', address: (db.profile && db.profile.address) || '', buyers: db.buyers || [], peopleCodes: db.peopleCodes || [], attendance: db.attendance || {}, attDel: db.attDel || {}, schema: 2 }));
       localStorage.setItem('thar_meta_ts', String(lu));
     } catch (e) { }
     try { dataVer++; metaDirty = true; mir.meta = true; scheduleFlush(); } catch (e) { }
@@ -14794,5 +14896,54 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
   window.getSplitsFromDOM = function (stage) { if (stage === 'carpenter') syncSubs(); return _g.apply(this, arguments); };
 })();
 </script>
+<script>
+/* V1.0.143: deleted attendance stays deleted.
+   Cause: the cloud copy was written with set(..., {merge:true}), which never removes keys from the attendance map, and phones merged
+   the cloud copy back in. Now the cloud attendance map is replaced on every sync and deletions are remembered (db.attDel) so no phone can bring them back. */
+(function () {
+  'use strict';
+  var PREV = null, KEEP = 120 * 864e5;
+  function ready() { try { return typeof db !== 'undefined' && db && db.attendance && typeof db.attendance === 'object' && !window.__loadFailed; } catch (e) { return false; } }
+  function snap() { var o = {}, a = db.attendance || {}; Object.keys(a).forEach(function (k) { o[k] = 1; }); return o; }
+  window.__attSync = function () { if (ready()) PREV = snap(); };
+  window.__attTrack = function () {
+    if (!ready()) return;
+    var cur = db.attendance, del = db.attDel; if (!del || typeof del !== 'object') del = db.attDel = {};
+    var now = Date.now();
+    if (PREV) Object.keys(PREV).forEach(function (k) { if (!(k in cur) && !del[k]) del[k] = now; });
+    Object.keys(del).forEach(function (k) { if (k in cur || now - del[k] > KEEP) delete del[k]; });
+    PREV = snap();
+  };
+  window.__attMerge = function (d, lu, force) {
+    try { window.__attTrack(); } catch (e) { }
+    var cur = db.attendance || (db.attendance = {}), del = db.attDel || (db.attDel = {});
+    var cd = (d.attDel && typeof d.attDel === 'object') ? d.attDel : {}, ca = d.attendance || {};
+    if (force) {
+      var n = {}; Object.keys(ca).forEach(function (k) { if (!cd[k]) n[k] = ca[k]; });
+      db.attendance = n; db.attDel = Object.assign({}, cd);
+    } else {
+      Object.keys(cd).forEach(function (k) { if (k in cur) delete cur[k]; if (!(del[k] > cd[k])) del[k] = cd[k]; });
+      Object.keys(ca).forEach(function (k) { if (del[k] && del[k] > lu) return; cur[k] = ca[k]; if (del[k]) delete del[k]; });
+    }
+    window.__attSync();
+  };
+  var tries = 0, iv = setInterval(function () { if (PREV || ++tries > 120) return clearInterval(iv); if (ready()) { PREV = snap(); clearInterval(iv); } }, 500);
+  var _s = window.save;
+  if (typeof _s === 'function') window.save = function () { try { window.__attTrack(); } catch (e) { } return _s.apply(this, arguments); };
+})();
+</script>
+<style id="daPerCss">
+.da-per{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 12px}
+.da-per button{border:1px solid var(--line);background:var(--panel3);color:var(--text);border-radius:99px;padding:8px 12px;font:700 12.5px inherit;font-family:inherit;cursor:pointer;min-height:36px;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+.da-per button:active{transform:scale(.95)}
+.da-per button.on{background:rgba(255,255,255,.22);border-color:rgba(255,255,255,.6);color:#fff;font-weight:900}
+body.light .da-per button.on{background:rgba(47,111,143,.14);border-color:var(--blue);color:var(--blue)}
+.f105-cols.dense{gap:2px}
+.f105-cols.dense .f105-col{position:relative}
+.f105-cols.dense .f105-col em{display:none}
+.f105-cols.dense .f105-col.on em{display:block;position:absolute;top:0;left:50%;transform:translateX(-50%);background:var(--bg2);padding:1px 5px;border-radius:6px;z-index:2;white-space:nowrap}
+.f105-cols.dense .f105-col span{font-size:8.5px}
+.f105-cols.dense .f105-cb i{border-radius:3px 3px 1px 1px}
+</style>
 </body>
 </html>
