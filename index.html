@@ -247,7 +247,7 @@ body.light .item small{color:#475569}
   h3.pt { margin: 16px 0 6px; font-size: 12px; color: #111111; border-left: 4px solid #111111; padding-left: 8px; text-transform: uppercase; letter-spacing: .6px; }
   #printContainer table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 10.5px; } thead { display: table-header-group; } tr { break-inside: avoid; }
   #printContainer th { background: #fff; color: #111; font-weight: 700; text-align: left; font-size: 10px; padding: 6px 7px; text-transform: uppercase; letter-spacing: .4px; border: 1px solid #333; }
-  #printContainer td { border: 1px solid #333; padding: 6px 7px; vertical-align: top; } #printContainer tbody tr:nth-child(even) td { background: #f8fafc; } tfoot td { font-weight: 800; border: 1px solid #333; background: #eef2f7 !important; }
+  #printContainer td { border: 1px solid #333; padding: 6px 7px; vertical-align: middle; } #printContainer tbody tr:nth-child(even) td { background: #f8fafc; } tfoot td { font-weight: 800; border: 1px solid #333; background: #eef2f7 !important; }
   .mu { color: #64748b; } .nw { white-space: nowrap; } .rt { text-align: right; }
   #printContainer th.rt, #printContainer td.rt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   #printContainer th { vertical-align: bottom; }
@@ -1781,7 +1781,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.134';
+const APP_VER = 'V1.0.135';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -5588,14 +5588,14 @@ const RSC_K = [1, .95, .9, .85, .8];
 function rscCss(k, c) {
   const f = x => (x * k).toFixed(2) + 'px', p = '.' + c + ' ';
   return p + '.rst{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #333;font-family:Arial,Helvetica,sans-serif;color:#111;font-size:' + f(9) + ';line-height:1.2}' +
-    p + '.rst td{border:1px solid #333!important;padding:' + f(2.5) + ' ' + f(3) + '!important;text-align:center;vertical-align:middle;background:#fff!important;color:#111;font-size:' + f(9) + ';overflow-wrap:anywhere}' +
+    p + '.rst td{border:1px solid #333!important;padding:' + f(2.5) + ' ' + f(3) + '!important;text-align:center;vertical-align:middle!important;background:#fff!important;color:#111;font-size:' + f(9) + ';overflow-wrap:anywhere}' +
     p + '.rst td.l{text-align:left}' + p + '.rst b{font-weight:700}' + p + '.rst .sz{color:#333}' +
     p + '.rst tr.h1 td{height:' + f(32) + ';font-size:' + f(13) + '}' + p + '.rst tr.h1 img{display:block;width:' + f(84) + ';height:auto}' +
     p + '.rst .sp{display:flex;justify-content:space-between;gap:8px}' +
     p + '.rst tr.h2 td{height:' + f(22) + ';font-size:' + f(9.5) + '}' +
     p + '.rst tr.h3 td{height:' + f(26) + ';font-size:' + f(9) + ';font-weight:700;background:#efefef!important}' +
     p + '.rst tr.tt td{height:' + f(18) + ';font-size:' + f(10) + '}' +
-    p + '.rst tr.sg td{height:' + f(38) + ';vertical-align:bottom;font-size:' + f(9) + '}' +
+    p + '.rst tr.sg td{height:' + f(38) + ';vertical-align:bottom!important;font-size:' + f(9) + '}' +
     p + '.rst .sgd{display:table;width:100%;table-layout:fixed}' + p + '.rst .sgd>div{display:table-cell;width:33.33%;text-align:center;vertical-align:bottom}';
 }
 
@@ -5625,7 +5625,7 @@ function rscRow(it, first, span, raw) {
   const oth = ['sanding', 'polish', 'carpenter'].filter(x => x !== type).map(x => '<td>' + e(rsWho(w, x)) + '</td>').join('');
   const vend = [...new Set([String(r.source || '').trim(), String(w.woodSupplier || '').trim()].filter(Boolean))].join(' - ');
   return '<tr>' + (first ? '<td rowspan="' + span + '">' + it.sn + '</td>' : '') +
-    (first ? '<td rowspan="' + span + '" class="l"><b>' + e(g.name) + '</b><br><b>Total Pc : ' + prQ(g.qty) + '</b></td>' : '') +
+    (first ? '<td rowspan="' + span + '" class="l">' + e(g.name) + '<br><b>Total Pc : ' + prQ(g.qty) + '</b></td>' : '') +
     '<td>' + wb(r.item || '') + (r.buyer ? ' ' + e(r.buyer) : '') + '</td><td>' + wb(r.sub || r.tae || '') + '</td>' +
     '<td class="l"><b>' + e(r.itemName || '') + '</b>' + (r.size ? ' <span class="sz">· ' + e(r.size) + '</span>' : '') + '</td>' +
     '<td><b>' + prQ(r.done) + '</b></td><td>' + (pc ? pc.toFixed(3) : '-') + '</td><td>' + prC(r.cbm) + '</td>' +
