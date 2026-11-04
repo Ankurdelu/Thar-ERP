@@ -1570,6 +1570,7 @@ function startCloudListen() {
         var have = new Set((db.peopleCodes || []).map(function (p) { return [p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|'); }));
         var add = d.peopleCodes.filter(function (p) { return p && !have.has([p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|')); });
         db.peopleCodes = (db.peopleCodes || []).concat(add);
+        if (window.pcSyncLeft) window.pcSyncLeft(d.peopleCodes);
         window.__nr = null;
       }
       if (d.attendance && typeof d.attendance === 'object') db.attendance = d.attendance;
@@ -1783,7 +1784,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.149';
+const APP_VER = 'V1.0.152';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2504,14 +2505,14 @@ function dupCodes() {
   const d = new Map(); m.forEach((v, k) => { if (new Set(v.map(x => prNorm(x.name))).size > 1) d.set(k, v); }); return d;  
 }
 function nameReg() {
-  const list = db.peopleCodes || [], sig = list.map(p => p.type + '|' + p.name + '|' + p.code).join(';'), c = window.__nr;
+  const list = db.peopleCodes || [], sig = list.map(p => p.type + '|' + p.name + '|' + p.code + '|' + (pcIsLeft(p) ? 1 : 0)).join(';'), c = window.__nr;
   if (c && c.sig === sig) return c;
   const r = { sig }, cc = new Map();
   list.forEach(p => { const k = prNorm(p.code); if (k) { if (!cc.has(k)) cc.set(k, new Set()); cc.get(k).add(prNorm(p.name)); } });
   Object.keys(NAME_LBL).forEach(t => { r[t] = { names: new Map(), codes: new Map() }; });
   list.forEach(p => {
     const g = r[p.type], n = String(p.name || '').trim(); if (!g || !n) return;
-    const k = prNorm(n); if (!g.names.has(k)) g.names.set(k, { name: n, code: p.code || '' });
+    const k = prNorm(n); if (!g.names.has(k)) g.names.set(k, { name: n, code: p.code || '', left: pcIsLeft(p) });
     if (p.code && (cc.get(prNorm(p.code)) || { size: 0 }).size === 1) g.codes.set(prNorm(p.code), k);  
   });
   window.__nr = r; return r;
@@ -2545,6 +2546,7 @@ function fuzzyReg(type, raw) {
   const rt = tk(raw).filter(w => w.length > 1 || /\d/.test(w)); if (!rt.length) return out;
   const sc = [];
   g.names.forEach(v => {
+    if (v.left) return;   /* V1.0.150: a person who has left is never suggested for new entries */
     const nt = tk(v.name); let s = 0;
     const ok = rt.every(w => {
       if (nt.includes(w)) { s += 3; return true; }
@@ -2561,7 +2563,7 @@ function fuzzyReg(type, raw) {
 function nameSuggest(type, raw) {
   const g = nameReg()[type]; if (!g) return ''; const k = prNorm(raw), f = k.split(' ')[0]; if (!f) return '';
   { const fz = fuzzyReg(type, raw); if (fz.alts.length) return fz.alts[0]; }
-  for (const [key, v] of g.names) if (key.startsWith(f) || k.startsWith(key.split(' ')[0])) return v.name;
+  for (const [key, v] of g.names) if (!v.left && (key.startsWith(f) || k.startsWith(key.split(' ')[0]))) return v.name;
   return '';
 }
 function showNameFix(enc) { wl.q = decodeURIComponent(enc); wl.st = 'fixnames'; wl.tae = 'TAE/'; wl.buyer = ''; wlLim = 50; go('workList'); }
@@ -3083,6 +3085,7 @@ function prAgg(rows, factory) {
   return o;
 }
 function prPeople(C, R, sort) {
+  const SP = new Map(); (db.peopleCodes || []).filter(p => p.type === C.type).forEach(p => { const sp = pcSpans(p); if (sp.length) SP.set(prNorm(p.name), { sp, left: pcIsLeft(p) }); });
   const m = new Map(); C.reg.forEach(p => m.set(p.key, { key: p.key, name: p.name, code: p.code, cur: [], all: [], lastAll: '' }));
   C.rows.forEach(r => {
     const x = m.get(r.key); if (!x) return;
@@ -3092,7 +3095,7 @@ function prPeople(C, R, sort) {
   });
   const list = [...m.values()].map(x => {
     const a = prAgg(x.cur, false), pend = x.all.filter(prOpen), dn = prDn(C.type, x.name, R, a.days.size);
-    return { ...x, agg: a, qty: a.qty, cbm: a.cbm, entries: a.entries, dn, avg: dn ? a.qty / dn : 0, pendPcs: pend.reduce((t, r) => t + (r.alloc - r.done), 0), pendN: pend.length };
+    return { ...x, left: !!(SP.get(x.key) && SP.get(x.key).left), spans: SP.has(x.key) ? SP.get(x.key).sp : [], agg: a, qty: a.qty, cbm: a.cbm, entries: a.entries, dn, avg: dn ? a.qty / dn : 0, pendPcs: pend.reduce((t, r) => t + (r.alloc - r.done), 0), pendN: pend.length };
   });
   const cmp = { qty: (a, b) => b.qty - a.qty || b.cbm - a.cbm, cbm: (a, b) => b.cbm - a.cbm || b.qty - a.qty, pending: (a, b) => b.pendPcs - a.pendPcs || b.qty - a.qty }[sort] || ((a, b) => b.qty - a.qty);
   return list.sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
@@ -3166,7 +3169,7 @@ function productionPage() {
   if (PR.type === 'da') return card('▦ Overall', `<div class="stage-chips">${prTypeChips('da')}</div>`) + card('Data Analysis', `<p class="small muted" style="margin-top:-6px">Tap a report to open it</p>` + ((window.THAR105 && THAR105.rows) ? THAR105.rows() : ''));
   const A = getActiveDB(), type = PR.type, wood = type === 'woodSupplier', R = prRange(), P = prPrev(R);
   if (wood && PR.sort === 'pending') PR.sort = 'qty';
-  const C = prData(A, type), people = prPeople(C, R, PR.sort), inR = C.rows.filter(r => prIn(r, R));
+  const C = prData(A, type), people = prLeftFilter(prPeople(C, R, PR.sort), R), inR = C.rows.filter(r => prIn(r, R));
   const all = prAgg(inR, false), fac = prAgg(inR, true), pa = P ? prAgg(C.rows.filter(r => prIn(r, P)), false) : null;
   const activeP = people.filter(p => p.qty > 0);
   let dn = all.days.size;
@@ -3189,7 +3192,8 @@ function productionPage() {
     return `<div class="item" role="button" tabindex="0" style="cursor:pointer;${idle ? 'opacity:.62' : ''}" onclick="openPersonDetail('${type}','${prEnc(p.name)}')" onkeydown="if(event.key==='Enter')this.click()">
       <div style="min-width:0;flex:1"><strong>${rk} ${esc(p.name)}</strong>
       <small>${p.entries} entr${p.entries === 1 ? 'y' : 'ies'} · ${p.dn} active day${p.dn === 1 ? '' : 's'} · avg ${prQ(p.avg)} pcs/day · last active ${esc(prAgo(p.lastAll))}</small>
-      <div class="qchips" style="margin-top:6px">${idle ? '<span class="pill">No production in this period</span>' : `<span class="pill blue">${share}% of total</span>`}${p.pendPcs ? `<span class="pill amber">${prQ(p.pendPcs)} pcs pending · ${p.pendN} entr${p.pendN === 1 ? 'y' : 'ies'}</span>` : ''}${lbl.map(l => `<span class="pill">${esc(l)}</span>`).join('')}</div>
+      <div class="qchips" style="margin-top:6px">${p.left ? '<span class="pill">Left</span>' : ''}${idle ? '<span class="pill">No production in this period</span>' : `<span class="pill blue">${share}% of total</span>`}${p.pendPcs ? `<span class="pill amber">${prQ(p.pendPcs)} pcs pending · ${p.pendN} entr${p.pendN === 1 ? 'y' : 'ies'}</span>` : ''}${lbl.map(l => `<span class="pill">${esc(l)}</span>`).join('')}</div>
+      ${p.note ? `<div class="pr-warn">${esc(p.note)}</div>` : ''}
       <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${w}%"></div></div></div>
       <div class="right"><strong style="font-size:17px">${prQ(p.qty)} pcs</strong><small>${prC(p.cbm)} CBM</small></div></div>`;
   }).join('') || '<div class="empty">No names registered in this category. Add them in Settings → Names & Custom Codes.</div>';
@@ -3405,7 +3409,7 @@ function peopleCodePage(){
  const icons={carpenter:'',sanding:'',polish:'',woodSupplier:''};
  const type=types[peopleListCategory]?peopleListCategory:'carpenter';
  const people=(db.peopleCodes||[]).filter(p=>p.type===type).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
- return card('Names & Custom Codes',`<button class="btn smallbtn" onclick="moreSub='settings';render()">← Settings</button><p class="small muted">Choose a category to manage its separate list. Registered codes (letters or numbers) automatically expand in matching name fields. Every code must be unique.</p>${(()=>{const d=dupCodes();return d.size?`<div style="background:rgba(239,68,68,.15);border:1.5px solid var(--red);color:var(--red);padding:10px 12px;border-radius:10px;font-weight:700;font-size:13px;line-height:1.6;margin-top:10px">Duplicate codes found. These codes are not valid until each name has its own code:<br>${[...d.entries()].map(([k,v])=>'• <b>'+esc(v[0].code)+'</b> → '+v.map(x=>esc(x.name)+' ('+esc(types[x.type]||x.type)+')').join(', ')).join('<br>')}</div>`:''})()}<div class="people-category-grid">${Object.entries(types).map(([k,v])=>`<button type="button" class="people-category-btn ${k===type?'selected':''}" onclick="selectPeopleCategory('${k}')"><span>${icons[k]} ${v}</span><small>${(db.peopleCodes||[]).filter(p=>p.type===k).length} registered</small></button>`).join('')}</div><h3 style="margin-top:20px">${icons[type]} ${types[type]} · Add / Edit</h3><form id="peopleCodeForm"><input type="hidden" name="type" value="${type}">${field('Full Name','name','','text','required')}${field('Custom Code (e.g. 0001, WOOD, CP01)','code','','text','required maxlength="20"')}<div class="field"><label>Also add this same name &amp; code in (new entries only)</label><div class="grid">${Object.entries(types).filter(([k])=>k!==type).map(([k,v])=>`<label class="checkrow"><input type="checkbox" name="alsoType" value="${k}"> ${icons[k]} ${v}</label>`).join('')}</div></div><button class="btn primary" type="submit">＋ Save Name & Code</button></form><div class="section-title" style="margin-top:24px"><h3>${icons[type]} ${types[type]} List</h3><span class="pill">${people.length} names</span></div><input class="search" placeholder="Search ${types[type]} name or code..." oninput="filterPeopleList(this.value)"><div id="peopleCategoryList">${people.map(p=>`<div class="item people-person-row" data-person-search="${esc((p.name+' '+p.code).toLowerCase())}"><div style="min-width:0"><strong>${esc(p.name)}</strong><small>Code: ${esc(p.code)}${dupCodes().has(prNorm(p.code))?' <span class="pill red">Duplicate code</span>':''}</small></div><div class="actions" style="flex-wrap:nowrap"><button class="btn blue smallbtn" onclick="peopleEditAsk('${p.id}')">Edit</button><button class="btn danger smallbtn" onclick="removePeopleCode('${p.id}')">Delete</button></div></div>`).join('')||'<div class="empty">No names registered in this category yet.</div>'}</div>`);
+ return card('Names & Custom Codes',`<button class="btn smallbtn" onclick="moreSub='settings';render()">← Settings</button><p class="small muted">Choose a category to manage its separate list. Registered codes (letters or numbers) automatically expand in matching name fields. Every code must be unique.</p>${(()=>{const d=dupCodes();return d.size?`<div style="background:rgba(239,68,68,.15);border:1.5px solid var(--red);color:var(--red);padding:10px 12px;border-radius:10px;font-weight:700;font-size:13px;line-height:1.6;margin-top:10px">Duplicate codes found. These codes are not valid until each name has its own code:<br>${[...d.entries()].map(([k,v])=>'• <b>'+esc(v[0].code)+'</b> → '+v.map(x=>esc(x.name)+' ('+esc(types[x.type]||x.type)+')').join(', ')).join('<br>')}</div>`:''})()}<div class="people-category-grid">${Object.entries(types).map(([k,v])=>`<button type="button" class="people-category-btn ${k===type?'selected':''}" onclick="selectPeopleCategory('${k}')"><span>${icons[k]} ${v}</span><small>${(db.peopleCodes||[]).filter(p=>p.type===k).length} registered</small></button>`).join('')}</div><h3 style="margin-top:20px">${icons[type]} ${types[type]} · Add / Edit</h3><form id="peopleCodeForm"><input type="hidden" name="type" value="${type}">${field('Full Name','name','','text','required')}${field('Custom Code (e.g. 0001, WOOD, CP01)','code','','text','required maxlength="20"')}<div class="field"><label>Also add this same name &amp; code in (new entries only)</label><div class="grid">${Object.entries(types).filter(([k])=>k!==type).map(([k,v])=>`<label class="checkrow"><input type="checkbox" name="alsoType" value="${k}"> ${icons[k]} ${v}</label>`).join('')}</div></div><button class="btn primary" type="submit">＋ Save Name & Code</button></form><div class="section-title" style="margin-top:24px"><h3>${icons[type]} ${types[type]} List</h3><span class="pill">${people.length} names</span></div><input class="search" placeholder="Search ${types[type]} name or code..." oninput="filterPeopleList(this.value)"><div id="peopleCategoryList">${people.map(p=>`<div class="item people-person-row" data-person-search="${esc((p.name+' '+p.code).toLowerCase())}"><div style="min-width:0"><strong>${esc(p.name)}</strong><small>Code: ${esc(p.code)}${pcOpen(p)?' <span class="pill">Left from '+esc(pcSpans(p).find(x=>!x.back).from)+'</span>':''}${dupCodes().has(prNorm(p.code))?' <span class="pill red">Duplicate code</span>':''}</small></div><div class="actions" style="flex-wrap:wrap;justify-content:flex-end"><button class="btn blue smallbtn" onclick="peopleEditAsk('${p.id}')">Edit</button><button class="btn smallbtn" onclick="toggleLeftPerson('${p.id}')">${pcOpen(p)?'Re-activate':'Mark Left'}</button>${pcSpans(p).length?`<button class="btn smallbtn" onclick="editLeftDates('${p.id}')">Left Dates</button>`:''}<button class="btn danger smallbtn" onclick="removePeopleCode('${p.id}')">Delete</button></div></div>`).join('')||'<div class="empty">No names registered in this category yet.</div>'}</div>`);
 }
 function editPeopleCode(pid){
  const p=(db.peopleCodes||[]).find(x=>x.id===pid);if(!p)return;
@@ -3417,7 +3421,96 @@ function editPeopleCode(pid){
  f.scrollIntoView({behavior:'smooth',block:'center'});f.elements.name.focus();
 }
 async function peopleEditAsk(pid) { if (await window.mkAsk('Confirm: edit this name')) editPeopleCode(pid); }
-async function removePeopleCode(id){if(!(await window.mkAsk('Confirm: delete this name')))return;db.peopleCodes=(db.peopleCodes||[]).filter(p=>p.id!==id);save();render()}
+function nameHasRecords(p){try{const k=prNorm(p.name);return prData(getActiveDB(),p.type).rows.some(r=>r.key===k)}catch(e){return false}}
+/* V1.0.151: dated Left status. p.lp = [{from, back}] : he is away from `from` up to (not including) `back`; empty back = still away */
+function pcYmd(ts){const d=new Date(ts||Date.now());return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function pcSpans(p){if(!p)return[];if(Array.isArray(p.lp))return p.lp.filter(x=>x&&prValid(x.from));if(p.left)return[{from:pcYmd(p.lAt),back:''}];return[]}
+function pcOpen(p){return pcSpans(p).some(x=>!x.back)}
+function pcIsLeft(p,d){d=d||todayStr();return pcSpans(p).some(x=>x.from<=d&&(!x.back||d<x.back))}
+function pcActive(sps,lo,hi){
+ let segs=[[lo,hi]];
+ (sps||[]).forEach(sp=>{
+  const a=sp.from,b=sp.back?prAdd(sp.back,-1):'9999-12-31',out=[];
+  segs.forEach(([x,y])=>{if(b<x||a>y){out.push([x,y]);return}if(a>x)out.push([x,prAdd(a,-1)]);if(b<y)out.push([prAdd(b,1),y])});
+  segs=out;
+ });
+ return segs.filter(([x,y])=>x<=y);
+}
+/* Overall: hide a person who was away for the whole period (unless he has work in it); warn when he was away for part of it */
+function prLeftFilter(people,R){
+ const T=todayStr(),hi=R.to||T;
+ return people.filter(p=>{
+  p.note='';
+  if(!p.spans||!p.spans.length)return true;
+  const lo=R.from||(p.agg&&prValid(p.agg.first)?p.agg.first:''),has=p.qty>0||p.pendPcs>0,act=lo?pcActive(p.spans,lo,hi):[];
+  if(!act.length){if(has)p.note='Marked as left during this period';return has}
+  if(!(act.length===1&&act[0][0]===lo&&act[0][1]===hi))p.note='Active only: '+act.map(r=>r[0]===r[1]?r[0]:r[0]+' to '+r[1]).join(', ')+' in this period';
+  return true;
+ });
+}
+function pcSaveSpans(p,sp){sp.sort((a,b)=>a.from.localeCompare(b.from));p.lp=sp;p.left=sp.some(x=>!x.back);p.lAt=Date.now();window.__nr=null;save();render()}
+function pcDateAsk(title,note,def){
+ return new Promise(res=>{
+  try{const o=document.getElementById('pcDateBox');if(o)o.remove()}catch(e){}
+  const m=document.createElement('div');m.className='modal-backdrop';m.id='pcDateBox';m.style.zIndex='300';
+  m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>'+esc(title)+'</h3><p class="small muted">'+esc(note)+'</p><input type="date" id="pcDateIn" value="'+esc(def)+'" style="width:100%;min-height:46px;margin:8px 0 12px;font-weight:800;text-align:center;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:14px;padding:6px 8px"><div class="actions"><button type="button" class="btn blue" style="flex:1" id="pcDateOk">Continue</button><button type="button" class="btn" style="flex:1" id="pcDateNo">Cancel</button></div></section>';
+  document.body.appendChild(m);
+  const fin=v=>{try{m.remove()}catch(e){}res(v)};
+  document.getElementById('pcDateNo').onclick=()=>fin(null);
+  document.getElementById('pcDateOk').onclick=()=>{const v=document.getElementById('pcDateIn').value;if(!prValid(v)){toast('Please select a date');return}fin(v)};
+ });
+}
+async function pcMarkLeft(p,note){
+ const d=await pcDateAsk('Left from which date?',note||'Select the first day he is NOT working. Earlier days stay as they are.',todayStr());if(!d)return;
+ const sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''}));
+ if(sp.some(x=>!x.back||d<x.back))return toast('Cannot use this date: it overlaps an earlier left period. Use Left Dates to fix it.');
+ if(!(await window.mkAsk('Confirm: mark this name as Left from '+d)))return;
+ sp.push({from:d,back:''});pcSaveSpans(p,sp);toast('Marked as Left from '+d+'. Old records stay in Overall.');
+}
+async function toggleLeftPerson(id){
+ const p=(db.peopleCodes||[]).find(x=>x.id===id);if(!p)return;
+ if(!pcOpen(p))return pcMarkLeft(p);
+ const sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''})),o=sp.find(x=>!x.back),T=todayStr();
+ const d=await pcDateAsk('Back from which date?','Select the first day he works again. He will show in Overall from this date.',T<o.from?o.from:T);if(!d)return;
+ if(!(await window.mkAsk('Confirm: re-activate this name from '+d)))return;
+ if(d<=o.from)sp.splice(sp.indexOf(o),1);else o.back=d;
+ pcSaveSpans(p,sp);toast('Name re-activated from '+d);
+}
+function editLeftDates(id){
+ const p=(db.peopleCodes||[]).find(x=>x.id===id);if(!p)return;
+ let sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''}));
+ try{const o=document.getElementById('pcSpanBox');if(o)o.remove()}catch(e){}
+ const m=document.createElement('div');m.className='modal-backdrop';m.id='pcSpanBox';m.style.zIndex='300';document.body.appendChild(m);
+ const st='width:100%;min-height:42px;font-weight:800;text-align:center;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:12px;padding:4px 6px';
+ const draw=()=>{
+  m.innerHTML='<section class="card record-modal" style="width:min(380px,100%);max-height:88vh;overflow:auto"><h3>'+esc(p.name)+' · Left Dates</h3><p class="small muted">Overall hides this name from "Left from" up to the day before "Back from". Leave "Back from" empty if he has not returned.</p>'
+  +sp.map((x,i)=>'<div class="item" style="display:block"><div class="small muted" style="font-weight:800">Left from</div><input type="date" style="'+st+'" value="'+esc(x.from)+'" data-i="'+i+'" data-k="from"><div class="small muted" style="font-weight:800;margin-top:8px">Back from (empty = still left)</div><input type="date" style="'+st+'" value="'+esc(x.back)+'" data-i="'+i+'" data-k="back"><button type="button" class="btn danger smallbtn" style="margin-top:8px" data-rm="'+i+'">Remove this period</button></div>').join('')
+  +'<div class="actions" style="margin-top:10px"><button type="button" class="btn smallbtn" id="pcSpAdd">+ Add period</button></div><div class="actions" style="margin-top:12px"><button type="button" class="btn blue" style="flex:1" id="pcSpSave">Save</button><button type="button" class="btn" style="flex:1" id="pcSpNo">Cancel</button></div></section>';
+  m.querySelectorAll('input[data-i]').forEach(el=>{el.onchange=()=>{sp[+el.dataset.i][el.dataset.k]=el.value}});
+  m.querySelectorAll('[data-rm]').forEach(b=>{b.onclick=()=>{sp.splice(+b.dataset.rm,1);draw()}});
+  m.querySelector('#pcSpAdd').onclick=()=>{sp.push({from:todayStr(),back:''});draw()};
+  m.querySelector('#pcSpNo').onclick=()=>m.remove();
+  m.querySelector('#pcSpSave').onclick=async()=>{
+   if(sp.some(x=>!prValid(x.from)||(x.back&&(!prValid(x.back)||x.back<=x.from))))return toast('Invalid dates: "Back from" must be after "Left from".');
+   const so=sp.slice().sort((a,b)=>a.from.localeCompare(b.from));
+   for(let i=0;i<so.length-1;i++)if(!so[i].back||so[i].back>so[i+1].from)return toast('Invalid dates: periods overlap.');
+   if(!(await window.mkAsk('Confirm: save left dates')))return;
+   pcSaveSpans(p,so);m.remove();toast('Left dates saved');
+  };
+ };
+ draw();
+}
+async function removePeopleCode(id){
+ const p=(db.peopleCodes||[]).find(x=>x.id===id);if(!p)return;
+ if(nameHasRecords(p)){
+  if(pcOpen(p))return toast('Cannot delete: this name has old records and is already marked Left.');
+  return pcMarkLeft(p,'This name has old records, so it cannot be deleted. Select the first day he is NOT working to mark him as Left instead.');
+ }
+ if(!(await window.mkAsk('Confirm: delete this name')))return;
+ db.peopleCodes=(db.peopleCodes||[]).filter(x=>x.id!==id);save();render();
+}
+/* V1.0.151: Left dates travel with cloud sync (the newest change wins) */
+window.pcSyncLeft=function(cl){try{(cl||[]).forEach(function(c){if(!c||c.lAt==null)return;var key=function(q){return[q.type,String(q.name||'').trim().toLowerCase(),String(q.code||'').trim().toLowerCase()].join('|')};var k=key(c),l=(db.peopleCodes||[]).find(function(q){return key(q)===k});if(l&&(l.lAt||0)<c.lAt){l.lp=JSON.parse(JSON.stringify(pcSpans(c)));l.left=l.lp.some(function(x){return !x.back});l.lAt=c.lAt;window.__nr=null}})}catch(e){}};
 document.addEventListener('submit',e=>{if(e.target.id!=='peopleCodeForm')return;e.preventDefault();const f=new FormData(e.target),name=String(f.get('name')||'').trim(),code=String(f.get('code')||'').trim(),type=f.get('type'),editId=String(f.get('editPersonId')||'');if(!name||!/^[a-zA-Z0-9_-]{1,20}$/.test(code))return toast('Enter a name and a 1–20 character letter/number code');const nz=v=>String(v||'').trim().replace(/\s+/g,' ').toLowerCase();if((db.peopleCodes||[]).some(p=>p.id!==editId&&nz(p.code)===nz(code)&&nz(p.name)!==nz(name)))return toast('This code is already used by another name. One code = one person (same person may use the same code in different categories).');if((db.peopleCodes||[]).some(p=>p.id!==editId&&nz(p.name)===nz(code)))return toast('This code matches a registered name. Use a different code.');if((db.peopleCodes||[]).some(p=>p.id!==editId&&nz(p.code)===nz(name)))return toast('This name matches a registered code. Use a different name.');if((db.peopleCodes||[]).some(p=>p.id!==editId&&p.type===type&&p.name.trim().replace(/\s+/g,' ').toLowerCase()===name.replace(/\s+/g,' ').toLowerCase()))return toast('This name already exists in this category');if(!window.__pcPinOk){const fm=e.target;window.mkAsk(editId?'Confirm: update this name':'Confirm: save this name').then(ok=>{if(ok){window.__pcPinOk=true;fm.requestSubmit();}});return;}window.__pcPinOk=false;db.peopleCodes=db.peopleCodes||[];if(editId){const p=db.peopleCodes.find(x=>x.id===editId);if(!p)return toast('Record not found');Object.assign(p,{name,code,type});}else{db.peopleCodes.push({id:id(),name,code,type});f.getAll('alsoType').forEach(t=>{if(t!==type&&!db.peopleCodes.some(p=>p.type===t&&nz(p.name)===nz(name)))db.peopleCodes.push({id:id(),name,code,type:t});});}save();render();toast(editId?'Name & code updated':'Name & code saved')});
 function expandRegisteredCode(el){
  if(!el || !('value' in el) || el.tagName==='SELECT' || el.type==='password')return;
@@ -7372,7 +7465,7 @@ function dirListHtml() {
     if (!people.length) return;
     const by = dirRowsBy(type);
     out += `<h4 style="margin:14px 0 6px">${PR_ICON[type]} ${esc(PR_LABEL[type])} (${people.length})</h4>` + people.map(p => { const a = prAgg(by.get(prNorm(p.name)) || [], false);
-      return `<div class="sd-acc" onclick="DIR.sel='${prEnc(p.name)}';render();window.scrollTo(0,0)"><div style="min-width:0"><b>${esc(p.name)}</b><small>${p.code ? 'Code: ' + esc(p.code) + ' · ' : ''}${prQ(a.qty)} pcs · ${prC(a.cbm)} CBM · last work ${a.last ? prAgo(a.last) : 'none'}</small></div><span class="muted">›</span></div>`; }).join('');
+      return `<div class="sd-acc" onclick="DIR.sel='${prEnc(p.name)}';render();window.scrollTo(0,0)"><div style="min-width:0"><b>${esc(p.name)}</b><small>${pcOpen(p) ? 'Left · ' : ''}${p.code ? 'Code: ' + esc(p.code) + ' · ' : ''}${prQ(a.qty)} pcs · ${prC(a.cbm)} CBM · last work ${a.last ? prAgo(a.last) : 'none'}</small></div><span class="muted">›</span></div>`; }).join('');
   });
   return out || '<div class="empty">No names found. Add them in Names &amp; Custom Codes.</div>';
 }
@@ -11097,6 +11190,9 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.152: version update.
+  V1.0.151: Left now has dates. Mark Left asks the first day he is not working, Re-activate asks the day he is back, and Left Dates edits all periods (he can leave and return many times). Overall hides him on days he was away, shows him with an "Active only: date to date" warning when only part of the period was active, and this works for Carpenter, Sanding, Polish and Supplier.
+  V1.0.150: Names & Custom Codes: new Mark Left / Re-activate button. A person who has left keeps all old records in Overall, profile and reports, is hidden from the ranking only when he has no work in the period, and is not suggested in new entries. Delete on a name with old records now marks it Left instead of removing it.
   V1.0.149: Overall page order: Period / Sort controls, Ranking, Production Trend, and then the summary text, KPI cards and Ranking PDF / PNG buttons at the very end (Supplier, Sanding, Polish, Carpenter).
   V1.0.148: popups are now plain (no dot, no side bar): green text for success, red text for rejected / error / warning messages; light theme colours added.
   V1.0.147: all emoji removed from the whole file (bottom bar now uses line icons).
@@ -14484,6 +14580,7 @@ body:not(.tb-edit) #taeFab,body:not(.tb-edit) #taeSay{display:none!important}
         var have = new Set((db.peopleCodes || []).map(function (p) { return [p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|'); }));
         var add = d.peopleCodes.filter(function (p) { return p && !have.has([p.type, String(p.name || '').trim().toLowerCase(), String(p.code || '').trim().toLowerCase()].join('|')); });
         db.peopleCodes = (db.peopleCodes || []).concat(add);
+        if (window.pcSyncLeft) window.pcSyncLeft(d.peopleCodes);
         window.__nr = null;
       }
       if (d.attendance && typeof d.attendance === 'object') { if (window.__attMerge) window.__attMerge(d, lu, force); else db.attendance = force ? Object.assign({}, d.attendance) : Object.assign({}, db.attendance || {}, d.attendance); }
@@ -15144,6 +15241,8 @@ input,select,textarea{transition:none!important}
 .toast{display:block!important;background:var(--bg2,#1e293b)!important;border:1px solid rgba(74,222,128,.45)!important;padding:11px 18px!important;border-radius:12px!important;font-weight:700!important;font-size:13.5px!important;line-height:1.35;text-align:center;box-shadow:0 10px 28px rgba(0,0,0,.35)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;pointer-events:none;max-width:min(92%,420px);color:#4ade80!important}
 .toast.tk-ok{color:#4ade80!important;border-color:rgba(74,222,128,.45)!important}
 .toast.tk-warn,.toast.tk-err{color:#f87171!important;border-color:rgba(248,113,113,.5)!important}
+.pr-warn{margin-top:6px;font-size:12px;font-weight:700;line-height:1.4;color:#fbbf24}
+body.light .pr-warn{color:#b45309}
 body.light .toast{background:#ffffff!important}
 body.light .toast.tk-ok{color:#15803d!important;border-color:rgba(21,128,61,.4)!important}
 body.light .toast.tk-warn,body.light .toast.tk-err{color:#dc2626!important;border-color:rgba(220,38,38,.4)!important}
