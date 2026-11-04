@@ -1783,7 +1783,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.147';
+const APP_VER = 'V1.0.149';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -3209,12 +3209,12 @@ function productionPage() {
   return card('▦ Overall', `
     <div class="stage-chips">${prTypeChips(type)}</div>
     ${prControls(R, true)}
-    <div class="small muted" style="margin:4px 0 0">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)} (${esc(P.from)} to ${esc(P.to)})` : ''}</div>
+    ${prSec((wood ? 'Supplier Ranking' : 'Ranking'), 'Tap a name to open the full production profile', rankHtml)}
+    ${prSec('Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(prSeries(all.days, R), 'all'))}
+    <div class="small muted" style="margin:16px 0 0">Showing <b style="color:var(--text)">${esc(R.label)}</b>${P ? ` · compared with the ${esc(P.label)} (${esc(P.from)} to ${esc(P.to)})` : ''}</div>
     <div class="small muted" style="margin:4px 0 0">Ranking is filtered by <b style="color:var(--text)">${prDateNote(type)}</b>.${prDt({ est: true, target: '' }) === '' && type === 'woodSupplier' ? ' Entries without a target date show only in All Time.' : ''}</div>
     ${kpis}
     <div class="actions" style="margin-top:14px"><button class="btn blue smallbtn" onclick="prPrintRanking()">Ranking Report PDF</button><button class="btn blue smallbtn" onclick="prPrintRanking(true)">Ranking PNG</button></div>
-    ${prSec((wood ? 'Supplier Ranking' : 'Ranking'), 'Tap a name to open the full production profile', rankHtml)}
-    ${prSec('Production Trend', 'Total pieces per ' + (prSeries(all.days, R).unit === 'Daily' ? 'day' : 'month') + (' (by ' + prDateNote(type).toLowerCase() + ')'), prBars(prSeries(all.days, R), 'all'))}
   `);
 }
 
@@ -11097,6 +11097,8 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.149: Overall page order: Period / Sort controls, Ranking, Production Trend, and then the summary text, KPI cards and Ranking PDF / PNG buttons at the very end (Supplier, Sanding, Polish, Carpenter).
+  V1.0.148: popups are now plain (no dot, no side bar): green text for success, red text for rejected / error / warning messages; light theme colours added.
   V1.0.147: all emoji removed from the whole file (bottom bar now uses line icons).
   V1.0.146: themed short popups for every save/update/repair change (catch-all Saved popup, English only).
   V1.0.145: keyboard blink/jump fix (no keyboard restart on focus, single scroll check, no smooth scroll vs keyboard, no blur repaint while typing).
@@ -15139,12 +15141,12 @@ input,select,textarea{transition:none!important}
 </script>
 
 <style id="popCss">
-.toast{display:flex!important;align-items:center;gap:10px;background:var(--bg2,#1f1b18)!important;color:var(--text,#fff)!important;border:1px solid var(--line,rgba(255,255,255,.2))!important;border-left:4px solid var(--green2,#10b981)!important;padding:10px 16px 10px 12px!important;border-radius:14px!important;font-weight:700!important;font-size:13.5px!important;line-height:1.35;box-shadow:0 10px 28px rgba(0,0,0,.35)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;pointer-events:none;max-width:min(92%,420px)}
-.toast.tk-warn{border-left-color:var(--amber,#f59e0b)!important}
-.toast.tk-err{border-left-color:var(--red,#ef4444)!important}
-.toast .tk-ic{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:900;color:#fff;background:var(--green2,#10b981)}
-.toast.tk-warn .tk-ic{background:var(--amber,#f59e0b)}
-.toast.tk-err .tk-ic{background:var(--red,#ef4444)}
+.toast{display:block!important;background:var(--bg2,#1e293b)!important;border:1px solid rgba(74,222,128,.45)!important;padding:11px 18px!important;border-radius:12px!important;font-weight:700!important;font-size:13.5px!important;line-height:1.35;text-align:center;box-shadow:0 10px 28px rgba(0,0,0,.35)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;pointer-events:none;max-width:min(92%,420px);color:#4ade80!important}
+.toast.tk-ok{color:#4ade80!important;border-color:rgba(74,222,128,.45)!important}
+.toast.tk-warn,.toast.tk-err{color:#f87171!important;border-color:rgba(248,113,113,.5)!important}
+body.light .toast{background:#ffffff!important}
+body.light .toast.tk-ok{color:#15803d!important;border-color:rgba(21,128,61,.4)!important}
+body.light .toast.tk-warn,body.light .toast.tk-err{color:#dc2626!important;border-color:rgba(220,38,38,.4)!important}
 </style>
 <script>
 /* V1.0.146 popups: themed, short, English; catch-all "Saved" for actions that used to be silent */
@@ -15153,7 +15155,7 @@ input,select,textarea{transition:none!important}
   var lastToast = 0, lastUser = 0, lastNav = false, genT = 0;
   function esc(x) { return String(x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function kind(x) {
-    if (/\b(failed|error|cannot|can't|not allowed|read-only|exceed|more than|invalid|duplicate|already|rejected)\b/i.test(x)) return 'err';
+    if (/\b(failed|error|cannot|can't|not allowed|read-only|exceed|more than|invalid|duplicate|already|rejected|not supported|could not|couldn't|not possible|nothing to|must be|storage full|not ready|not available|locked)\b/i.test(x)) return 'err';
     if (/\b(please|enter |add at least|missing|required|first|unregistered|not found|select|waiting)\b/i.test(x)) return 'warn';
     return 'ok';
   }
@@ -15161,7 +15163,7 @@ input,select,textarea{transition:none!important}
     var t = document.getElementById('toast'); if (!t) return;
     var m = String(msg == null ? '' : msg), kd = k || kind(m);
     t.className = 'toast no-print tk-' + kd;
-    t.innerHTML = '<i class="tk-ic">' + (kd === 'ok' ? '✓' : kd === 'warn' ? '!' : '✕') + '</i><span>' + esc(m) + '</span>';
+    t.textContent = m;
     lastToast = Date.now();
     void t.offsetWidth; t.classList.add('on');
     clearTimeout(window._toastTimer);
