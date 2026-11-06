@@ -1784,7 +1784,7 @@ async function loadDB() {
 }
 function scheduleFlush() { clearTimeout(flushTimer); flushTimer = setTimeout(flushNow, 400); mirrorSoon(); }
 
-const APP_VER = 'V1.0.152';
+const APP_VER = 'V1.0.153';
 const tick = () => new Promise(r => setTimeout(r, 0));
 const mir = { work: new Map(), orders: new Map(), repairs: new Map(), gone: { work: new Set(), orders: new Set(), repairs: new Set() }, meta: false };
 function mirClear() { ['work', 'orders', 'repairs'].forEach(s => { mir[s].clear(); mir.gone[s].clear(); }); mir.meta = false; }
@@ -2570,14 +2570,17 @@ function showNameFix(enc) { wl.q = decodeURIComponent(enc); wl.st = 'fixnames'; 
 function formNameErrors(wf, mark) {
   const out = [];
   const flag = (m, el) => { out.push({ m, el }); if (mark !== false && el) el.classList.add('inv'); };
-  const check = (type, el, label) => {
+  const check = (type, el, label, dt) => {
     const v = (el && el.value || '').trim(); if (!v) return;
     const r = regLookup(type, v) || autoReg(type, v) || fuzzyReg(type, v).name;
-    if (r) { if (r !== v && mark !== false) el.value = r; } else flag(label + ': ' + v, el);
+    if (r) {
+      if (r !== v && mark !== false) el.value = r;
+      if (dt) { const pp = (db.peopleCodes || []).find(x => x.type === type && prNorm(x.name) === prNorm(r)); if (pp && pcIsLeft(pp, dt)) out.push({ m: r + ' was marked Left on ' + dt, el, away: true }); }
+    } else flag(label + ': ' + v, el);
   };
   NAME_STAGES.forEach(([k, l]) => wf.querySelectorAll('#splits-' + k + ' .split-row').forEach(row => {
     if (!(splitRowQty(row) > 0)) return;
-    check(k, row.querySelector('.split-name'), l);
+    check(k, row.querySelector('.split-name'), l, (row.querySelector('.split-date') || {}).value || '');
     if (k === 'carpenter') check('woodSupplier', row.querySelector('.split-supplier'), 'Wood Supplier (Stage 3)');
   }));
   check('woodSupplier', wf.elements.woodSupplier, 'Wood Supplier');
@@ -3402,14 +3405,19 @@ function selectPeopleCategory(type){
 }
 function filterPeopleList(q){
  const term=String(q||'').trim().toLowerCase();
- document.querySelectorAll('#peopleCategoryList [data-person-search]').forEach(el=>{el.style.display=el.getAttribute('data-person-search').includes(term)?'':'none'});
+ document.querySelectorAll('#peopleCategoryList [data-person-search],#peopleLeftList [data-person-search]').forEach(el=>{el.style.display=el.getAttribute('data-person-search').includes(term)?'':'none'});
+}
+function pcRowHtml(p){
+ const cur=pcCur(p),dup=dupCodes().has(prNorm(p.code)),many=pcSpans(p).length>0;
+ return `<div class="item people-person-row" style="${many?'flex-wrap:wrap':''}" data-person-search="${esc((p.name+' '+p.code).toLowerCase())}"><div style="min-width:0;${many?'flex:1 1 100%':''}"><strong>${esc(p.name)}</strong><small>Code: ${esc(p.code)}${cur?' <span class="pill">Left from '+esc(cur.from)+(cur.back?' · back '+esc(cur.back):'')+'</span>':''}${dup?' <span class="pill red">Duplicate code</span>':''}</small></div><div class="actions" style="flex-wrap:wrap;justify-content:${many?'flex-start':'flex-end'};${many?'flex:1 1 100%':''}"><button class="btn blue smallbtn" onclick="peopleEditAsk('${p.id}')">Edit</button><button class="btn smallbtn" onclick="toggleLeftPerson('${p.id}')">${cur?'Re-activate':'Mark Left'}</button>${pcSpans(p).length?`<button class="btn smallbtn" onclick="editLeftDates('${p.id}')">Left Dates</button>`:''}<button class="btn danger smallbtn" onclick="removePeopleCode('${p.id}')">Delete</button></div></div>`;
 }
 function peopleCodePage(){
  const types={carpenter:'Carpenter',sanding:'Sanding Contractor',polish:'Polish Contractor',woodSupplier:'Wood Supplier'};
  const icons={carpenter:'',sanding:'',polish:'',woodSupplier:''};
  const type=types[peopleListCategory]?peopleListCategory:'carpenter';
  const people=(db.peopleCodes||[]).filter(p=>p.type===type).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
- return card('Names & Custom Codes',`<button class="btn smallbtn" onclick="moreSub='settings';render()">← Settings</button><p class="small muted">Choose a category to manage its separate list. Registered codes (letters or numbers) automatically expand in matching name fields. Every code must be unique.</p>${(()=>{const d=dupCodes();return d.size?`<div style="background:rgba(239,68,68,.15);border:1.5px solid var(--red);color:var(--red);padding:10px 12px;border-radius:10px;font-weight:700;font-size:13px;line-height:1.6;margin-top:10px">Duplicate codes found. These codes are not valid until each name has its own code:<br>${[...d.entries()].map(([k,v])=>'• <b>'+esc(v[0].code)+'</b> → '+v.map(x=>esc(x.name)+' ('+esc(types[x.type]||x.type)+')').join(', ')).join('<br>')}</div>`:''})()}<div class="people-category-grid">${Object.entries(types).map(([k,v])=>`<button type="button" class="people-category-btn ${k===type?'selected':''}" onclick="selectPeopleCategory('${k}')"><span>${icons[k]} ${v}</span><small>${(db.peopleCodes||[]).filter(p=>p.type===k).length} registered</small></button>`).join('')}</div><h3 style="margin-top:20px">${icons[type]} ${types[type]} · Add / Edit</h3><form id="peopleCodeForm"><input type="hidden" name="type" value="${type}">${field('Full Name','name','','text','required')}${field('Custom Code (e.g. 0001, WOOD, CP01)','code','','text','required maxlength="20"')}<div class="field"><label>Also add this same name &amp; code in (new entries only)</label><div class="grid">${Object.entries(types).filter(([k])=>k!==type).map(([k,v])=>`<label class="checkrow"><input type="checkbox" name="alsoType" value="${k}"> ${icons[k]} ${v}</label>`).join('')}</div></div><button class="btn primary" type="submit">＋ Save Name & Code</button></form><div class="section-title" style="margin-top:24px"><h3>${icons[type]} ${types[type]} List</h3><span class="pill">${people.length} names</span></div><input class="search" placeholder="Search ${types[type]} name or code..." oninput="filterPeopleList(this.value)"><div id="peopleCategoryList">${people.map(p=>`<div class="item people-person-row" data-person-search="${esc((p.name+' '+p.code).toLowerCase())}"><div style="min-width:0"><strong>${esc(p.name)}</strong><small>Code: ${esc(p.code)}${pcOpen(p)?' <span class="pill">Left from '+esc(pcSpans(p).find(x=>!x.back).from)+'</span>':''}${dupCodes().has(prNorm(p.code))?' <span class="pill red">Duplicate code</span>':''}</small></div><div class="actions" style="flex-wrap:wrap;justify-content:flex-end"><button class="btn blue smallbtn" onclick="peopleEditAsk('${p.id}')">Edit</button><button class="btn smallbtn" onclick="toggleLeftPerson('${p.id}')">${pcOpen(p)?'Re-activate':'Mark Left'}</button>${pcSpans(p).length?`<button class="btn smallbtn" onclick="editLeftDates('${p.id}')">Left Dates</button>`:''}<button class="btn danger smallbtn" onclick="removePeopleCode('${p.id}')">Delete</button></div></div>`).join('')||'<div class="empty">No names registered in this category yet.</div>'}</div>`);
+ const leftP=people.filter(p=>pcIsLeft(p)),actP=people.filter(p=>!pcIsLeft(p));
+ return card('Names & Custom Codes',`<button class="btn smallbtn" onclick="moreSub='settings';render()">← Settings</button><p class="small muted">Choose a category to manage its separate list. Registered codes (letters or numbers) automatically expand in matching name fields. Every code must be unique.</p>${(()=>{const d=dupCodes();return d.size?`<div style="background:rgba(239,68,68,.15);border:1.5px solid var(--red);color:var(--red);padding:10px 12px;border-radius:10px;font-weight:700;font-size:13px;line-height:1.6;margin-top:10px">Duplicate codes found. These codes are not valid until each name has its own code:<br>${[...d.entries()].map(([k,v])=>'• <b>'+esc(v[0].code)+'</b> → '+v.map(x=>esc(x.name)+' ('+esc(types[x.type]||x.type)+')').join(', ')).join('<br>')}</div>`:''})()}<div class="people-category-grid">${Object.entries(types).map(([k,v])=>`<button type="button" class="people-category-btn ${k===type?'selected':''}" onclick="selectPeopleCategory('${k}')"><span>${icons[k]} ${v}</span><small>${(db.peopleCodes||[]).filter(p=>p.type===k).length} registered</small></button>`).join('')}</div><h3 style="margin-top:20px">${icons[type]} ${types[type]} · Add / Edit</h3><form id="peopleCodeForm"><input type="hidden" name="type" value="${type}">${field('Full Name','name','','text','required')}${field('Custom Code (e.g. 0001, WOOD, CP01)','code','','text','required maxlength="20"')}<div class="field"><label>Also add this same name &amp; code in (new entries only)</label><div class="grid">${Object.entries(types).filter(([k])=>k!==type).map(([k,v])=>`<label class="checkrow"><input type="checkbox" name="alsoType" value="${k}"> ${icons[k]} ${v}</label>`).join('')}</div></div><button class="btn primary" type="submit">＋ Save Name & Code</button></form><div class="section-title" style="margin-top:24px"><h3>${icons[type]} ${types[type]} List</h3><span class="pill">${actP.length} name${actP.length===1?'':'s'}</span></div><input class="search" placeholder="Search ${types[type]} name or code..." oninput="filterPeopleList(this.value)"><div id="peopleCategoryList">${actP.map(pcRowHtml).join('')||'<div class="empty">No active names in this category.</div>'}</div>${leftP.length?`<div class="section-title" style="margin-top:24px"><h3>Left List</h3><span class="pill">${leftP.length} name${leftP.length===1?'':'s'}</span></div><p class="small muted" style="margin-top:-4px">Old records of these names stay in Overall. Tap Re-activate to bring a name back from a date.</p><div id="peopleLeftList">${leftP.map(pcRowHtml).join('')}</div>`:''}`);
 }
 function editPeopleCode(pid){
  const p=(db.peopleCodes||[]).find(x=>x.id===pid);if(!p)return;
@@ -3449,30 +3457,40 @@ function prLeftFilter(people,R){
  });
 }
 function pcSaveSpans(p,sp){sp.sort((a,b)=>a.from.localeCompare(b.from));p.lp=sp;p.left=sp.some(x=>!x.back);p.lAt=Date.now();window.__nr=null;save();render()}
-function pcDateAsk(title,note,def){
+function pcCur(p,d){d=d||todayStr();return pcSpans(p).find(x=>x.from<=d&&(!x.back||d<x.back))||null}
+/* opt = {title, note, def, validate(v)->error text, confirm(v)->key-file prompt text}. The key-file prompt opens ON TOP of this dialog, so the phone back-button manager never closes it */
+function pcDateAsk(opt){
  return new Promise(res=>{
   try{const o=document.getElementById('pcDateBox');if(o)o.remove()}catch(e){}
   const m=document.createElement('div');m.className='modal-backdrop';m.id='pcDateBox';m.style.zIndex='300';
-  m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>'+esc(title)+'</h3><p class="small muted">'+esc(note)+'</p><input type="date" id="pcDateIn" value="'+esc(def)+'" style="width:100%;min-height:46px;margin:8px 0 12px;font-weight:800;text-align:center;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:14px;padding:6px 8px"><div class="actions"><button type="button" class="btn blue" style="flex:1" id="pcDateOk">Continue</button><button type="button" class="btn" style="flex:1" id="pcDateNo">Cancel</button></div></section>';
+  m.innerHTML='<section class="card record-modal" style="width:min(340px,100%)"><h3>'+esc(opt.title)+'</h3><p class="small muted">'+esc(opt.note||'')+'</p><input type="date" id="pcDateIn" value="'+esc(opt.def||'')+'" style="width:100%;min-height:46px;margin:8px 0 12px;font-weight:800;text-align:center;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:14px;padding:6px 8px"><div class="actions"><button type="button" class="btn blue" style="flex:1" id="pcDateOk">Continue</button><button type="button" class="btn" style="flex:1" id="pcDateNo">Cancel</button></div></section>';
   document.body.appendChild(m);
   const fin=v=>{try{m.remove()}catch(e){}res(v)};
-  document.getElementById('pcDateNo').onclick=()=>fin(null);
-  document.getElementById('pcDateOk').onclick=()=>{const v=document.getElementById('pcDateIn').value;if(!prValid(v)){toast('Please select a date');return}fin(v)};
+  m.querySelector('#pcDateNo').onclick=()=>fin(null);
+  m.querySelector('#pcDateOk').onclick=async()=>{
+   const v=m.querySelector('#pcDateIn').value;
+   if(!prValid(v)){toast('Please select a date');return}
+   const bad=opt.validate&&opt.validate(v);if(bad){toast(bad);return}
+   if(opt.confirm){if(!(await window.mkAsk(opt.confirm(v))))return;await new Promise(r=>setTimeout(r,320))}   /* let the key prompt finish closing before this dialog closes (phone back-button manager) */
+   fin(v);
+  };
  });
 }
 async function pcMarkLeft(p,note){
- const d=await pcDateAsk('Left from which date?',note||'Select the first day he is NOT working. Earlier days stay as they are.',todayStr());if(!d)return;
  const sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''}));
- if(sp.some(x=>!x.back||d<x.back))return toast('Cannot use this date: it overlaps an earlier left period. Use Left Dates to fix it.');
- if(!(await window.mkAsk('Confirm: mark this name as Left from '+d)))return;
+ const d=await pcDateAsk({title:'Left from which date?',note:note||'Select the first day he is NOT working. Earlier days stay as they are.',def:todayStr(),
+  validate:v=>sp.some(x=>!x.back||v<x.back)?'Cannot use this date: it overlaps an earlier left period. Use Left Dates to fix it.':'',
+  confirm:v=>'Confirm: mark this name as Left from '+v});
+ if(!d)return;
  sp.push({from:d,back:''});pcSaveSpans(p,sp);toast('Marked as Left from '+d+'. Old records stay in Overall.');
 }
 async function toggleLeftPerson(id){
  const p=(db.peopleCodes||[]).find(x=>x.id===id);if(!p)return;
- if(!pcOpen(p))return pcMarkLeft(p);
- const sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''})),o=sp.find(x=>!x.back),T=todayStr();
- const d=await pcDateAsk('Back from which date?','Select the first day he works again. He will show in Overall from this date.',T<o.from?o.from:T);if(!d)return;
- if(!(await window.mkAsk('Confirm: re-activate this name from '+d)))return;
+ if(!pcCur(p))return pcMarkLeft(p);
+ const sp=pcSpans(p).map(x=>({from:x.from,back:x.back||''})),T=todayStr(),o=sp.find(x=>x.from<=T&&(!x.back||T<x.back));
+ const d=await pcDateAsk({title:'Back from which date?',note:'Select the first day he works again. Entry, attendance and ranking start from this date; the gap stays empty.',def:T<o.from?o.from:T,
+  confirm:v=>'Confirm: re-activate this name from '+v});
+ if(!d)return;
  if(d<=o.from)sp.splice(sp.indexOf(o),1);else o.back=d;
  pcSaveSpans(p,sp);toast('Name re-activated from '+d);
 }
@@ -3483,7 +3501,7 @@ function editLeftDates(id){
  const m=document.createElement('div');m.className='modal-backdrop';m.id='pcSpanBox';m.style.zIndex='300';document.body.appendChild(m);
  const st='width:100%;min-height:42px;font-weight:800;text-align:center;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:12px;padding:4px 6px';
  const draw=()=>{
-  m.innerHTML='<section class="card record-modal" style="width:min(380px,100%);max-height:88vh;overflow:auto"><h3>'+esc(p.name)+' · Left Dates</h3><p class="small muted">Overall hides this name from "Left from" up to the day before "Back from". Leave "Back from" empty if he has not returned.</p>'
+  m.innerHTML='<section class="card record-modal" style="width:min(380px,100%);max-height:88vh;overflow:auto"><h3>'+esc(p.name)+' · Left Dates</h3><p class="small muted">Overall, attendance and entries skip this name from "Left from" up to the day before "Back from". Leave "Back from" empty if he has not returned.</p>'
   +sp.map((x,i)=>'<div class="item" style="display:block"><div class="small muted" style="font-weight:800">Left from</div><input type="date" style="'+st+'" value="'+esc(x.from)+'" data-i="'+i+'" data-k="from"><div class="small muted" style="font-weight:800;margin-top:8px">Back from (empty = still left)</div><input type="date" style="'+st+'" value="'+esc(x.back)+'" data-i="'+i+'" data-k="back"><button type="button" class="btn danger smallbtn" style="margin-top:8px" data-rm="'+i+'">Remove this period</button></div>').join('')
   +'<div class="actions" style="margin-top:10px"><button type="button" class="btn smallbtn" id="pcSpAdd">+ Add period</button></div><div class="actions" style="margin-top:12px"><button type="button" class="btn blue" style="flex:1" id="pcSpSave">Save</button><button type="button" class="btn" style="flex:1" id="pcSpNo">Cancel</button></div></section>';
   m.querySelectorAll('input[data-i]').forEach(el=>{el.onchange=()=>{sp[+el.dataset.i][el.dataset.k]=el.value}});
@@ -3495,6 +3513,7 @@ function editLeftDates(id){
    const so=sp.slice().sort((a,b)=>a.from.localeCompare(b.from));
    for(let i=0;i<so.length-1;i++)if(!so[i].back||so[i].back>so[i+1].from)return toast('Invalid dates: periods overlap.');
    if(!(await window.mkAsk('Confirm: save left dates')))return;
+   await new Promise(r=>setTimeout(r,320));
    pcSaveSpans(p,so);m.remove();toast('Left dates saved');
   };
  };
@@ -3503,7 +3522,7 @@ function editLeftDates(id){
 async function removePeopleCode(id){
  const p=(db.peopleCodes||[]).find(x=>x.id===id);if(!p)return;
  if(nameHasRecords(p)){
-  if(pcOpen(p))return toast('Cannot delete: this name has old records and is already marked Left.');
+  if(pcCur(p))return toast('Cannot delete: this name has old records and is already marked Left.');
   return pcMarkLeft(p,'This name has old records, so it cannot be deleted. Select the first day he is NOT working to mark him as Left instead.');
  }
  if(!(await window.mkAsk('Confirm: delete this name')))return;
@@ -4022,8 +4041,8 @@ function validateWorkForm(wf, o) {
       subMsg = `Invalid Sub Order (${sub}). Please correct it: ${orderNo}/1 or ${orderNo}/12 (a 1 or 2 digit number is required at the end)`;
     }
   }
-  const nameWarn = formNameErrors(wf, false);
-  if (nameWarn.length && typeof toast === 'function') { try { toast('Saved. Fix needed on Home: unregistered name(s) ' + nameWarn.map(n => n.m).join('; ')); } catch (e) {} }
+  const nameWarn = formNameErrors(wf, false), unregW = nameWarn.filter(n => !n.away), awayW = nameWarn.filter(n => n.away);
+  if ((unregW.length || awayW.length) && typeof toast === 'function') { try { toast('Saved. ' + (unregW.length ? 'Fix needed on Home: unregistered name(s) ' + unregW.map(n => n.m).join('; ') : '') + (unregW.length && awayW.length ? '. ' : '') + (awayW.length ? 'Check date: ' + awayW.map(n => n.m).join('; ') : '')); } catch (e) {} }
   const nameErr = [];
   const box = document.getElementById('workFormError');
   if (!bad.length && !nameErr.length) { if (box) { box.innerHTML = ''; box.classList.add('hidden'); } return true; }
@@ -5095,9 +5114,13 @@ let attAnim = '', attPop = '';
 function attShift(n) { attAnim = n > 0 ? 'r' : 'l'; let [y, m] = attMonth.split('-').map(Number); m += n; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } attMonth = y + '-' + String(m).padStart(2, '0'); render(); }
 function attPick() { attAnim = 'r'; const y = document.getElementById('attY').value, m = document.getElementById('attM').value; attMonth = y + '-' + String(m).padStart(2, '0'); render(); }
 function attSetMode(k) { attPaint = k; attAnim = ''; render(); }
+/* V1.0.153: a worker whose name is marked Left on a date is hidden from attendance for that date */
+function attAway(w, d) { if (!w) return false; const k = prNorm(w.name), m = (db.peopleCodes || []).filter(p => prNorm(p.name) === k); return m.length > 0 && m.every(p => pcIsLeft(p, d)); }
+function attAwayId(id, d) { return attAway((db.workers || []).find(x => x.id === id), d); }
 function attDayTap(date) {
   if (!attPaint) return openDayAttendanceModal(date);
-  const ids = attSelectedWorker === 'all' ? (db.workers || []).map(w => w.id) : [attSelectedWorker];
+  if (attSelectedWorker !== 'all' && attAwayId(attSelectedWorker, date)) return toast('Cannot mark attendance: this person is marked Left on ' + date);
+  const ids = attSelectedWorker === 'all' ? (db.workers || []).filter(w => !attAway(w, date)).map(w => w.id) : [attSelectedWorker];
   if (!ids.length) return toast('Add workers in Settings first!');
   const same = ids.every(id => db.attendance[id + '|' + date] === attPaint);
   ids.forEach(id => { const k = id + '|' + date; if (same) delete db.attendance[k]; else db.attendance[k] = attPaint; });
@@ -5132,7 +5155,8 @@ function attendancePage() {
   for (let d = 1; d <= days; d++) {
     let date = `${attMonth}-${String(d).padStart(2, '0')}`; let v = getAtt(attSelectedWorker, date);
     let today = date === todayStr(); let cls = ATT_DAYCLS[v] || '';
-    cells += `<button class="day ${cls} ${today ? 'today' : ''} ${attPop === date ? 'pop' : ''}" style="--i:${d}" onclick="attDayTap('${date}')"><span>${d}</span><span class="tag">${esc(v === 'Unmarked' ? '+' : (ATT_TAG[v] || v))}</span></button>`;
+    const gone = attSelectedWorker !== 'all' && attAwayId(attSelectedWorker, date);
+    cells += `<button class="day ${gone ? '' : cls} ${today ? 'today' : ''} ${attPop === date ? 'pop' : ''}" style="--i:${d}${gone ? ';opacity:.45' : ''}" onclick="attDayTap('${date}')"><span>${d}</span><span class="tag">${gone ? 'Left' : esc(v === 'Unmarked' ? '+' : (ATT_TAG[v] || v))}</span></button>`;
   }
   const yr = new Date().getFullYear(), y0 = Math.min(yr - 4, y), y1 = Math.max(yr + 2, y);
   let yOpts = ''; for (let i = y0; i <= y1; i++) yOpts += `<option value="${i}" ${i === y ? 'selected' : ''}>${i}</option>`;
@@ -5196,7 +5220,7 @@ function attWorker(wid) {
     <div class="dsec" style="margin-top:0"><h4>Last 5 days</h4>${attDays5().reverse().map(d => attRow(attDate(d), attFull(attVal(wid, d)), attVal(wid, d), `attCell('${wid}','${d}','w')`)).join('')}</div>`);
 }
 function attDay(d) {
-  const W = db.workers || [], c = {}; W.forEach(w => { const v = attVal(w.id, d); c[v] = (c[v] || 0) + 1; });
+  const W = (db.workers || []).filter(w => !attAway(w, d)), c = {}; W.forEach(w => { const v = attVal(w.id, d); c[v] = (c[v] || 0) + 1; });
   const here = W.filter(w => ATT_OK.includes(attVal(w.id, d))).length;
   attModal(esc(attDate(d)), `${attKpis([['PRESENT', here, 'var(--green2)'], ['ABSENT', c['Absent'] || 0, 'var(--red)'], ['NOT MARKED', c['Unmarked'] || 0]])}
     ${W.map(w => attRow(w.name, attFull(attVal(w.id, d)), attVal(w.id, d), `attCell('${w.id}','${d}','d')`)).join('')}
@@ -5208,19 +5232,19 @@ function attStatus(i) {
   attModal(`${attChip(key)} ${esc(ATT_FULL[i])}`, `<div class="small muted">Last 5 days · ${n} entr${n === 1 ? 'y' : 'ies'} · paid day value ${ATT_PAID[i]}</div>${body}`);
 }
 function carpenterAttCard() {
-  const W = db.workers || [], t = todayStr();
-  if (!W.length) return `<div class="empty">No workers added. Go to Settings > Workers.</div>`;
-  const days = attDays5();
+  const W0 = db.workers || [], t = todayStr();
+  if (!W0.length) return `<div class="empty">No workers added. Go to Settings > Workers.</div>`;
+  const days = attDays5(), W = W0.filter(w => days.some(d => !attAway(w, d))), Wt = W.filter(w => !attAway(w, t));
   const todayOf = w => attVal(w.id, t);
-  const here = W.filter(w => ATT_OK.includes(todayOf(w)));
-  const head = `<div class="att-sum" style="cursor:pointer" onclick="attDay('${t}')"><b>${here.length}</b> / ${W.length} present today</div><div class="att-names">${here.length ? here.map(w => `<span class="ac ${attCls(todayOf(w))}" style="cursor:pointer" onclick="attWorker('${w.id}')">${esc(w.name)}</span>`).join('') : '<span class="muted small">Nobody marked present yet</span>'}</div>`;
+  const here = Wt.filter(w => ATT_OK.includes(todayOf(w)));
+  const head = `<div class="att-sum" style="cursor:pointer" onclick="attDay('${t}')"><b>${here.length}</b> / ${Wt.length} present today</div><div class="att-names">${here.length ? here.map(w => `<span class="ac ${attCls(todayOf(w))}" style="cursor:pointer" onclick="attWorker('${w.id}')">${esc(w.name)}</span>`).join('') : '<span class="muted small">Nobody marked present yet</span>'}</div>`;
   const hd = `<div class="att-row att-hd"><div class="an"></div><div class="a5">${days.map(d => `<span style="cursor:pointer" onclick="attDay('${d}')">${d.slice(8)}</span>`).join('')}</div></div>`;
-  const rows = W.map(w => `<div class="att-row"><div class="an" style="cursor:pointer" onclick="attWorker('${w.id}')"><strong>${esc(w.name)}</strong></div><div class="a5">${days.map(d => { const v = attVal(w.id, d); return `<span class="ac ${attCls(v)} sel2" style="cursor:pointer" title="${esc(d + ' · ' + v)}" onclick="attCell('${w.id}','${d}')">${v === 'Unmarked' ? '–' : ATT_SHORT[v]}</span>`; }).join('')}</div></div>`).join('');
+  const rows = W.map(w => `<div class="att-row"><div class="an" style="cursor:pointer" onclick="attWorker('${w.id}')"><strong>${esc(w.name)}</strong></div><div class="a5">${days.map(d => { if (attAway(w, d)) return `<span class="ac a-un" style="opacity:.5" title="${esc(d + ' · Left')}">L</span>`; const v = attVal(w.id, d); return `<span class="ac ${attCls(v)} sel2" style="cursor:pointer" title="${esc(d + ' · ' + v)}" onclick="attCell('${w.id}','${d}')">${v === 'Unmarked' ? '–' : ATT_SHORT[v]}</span>`; }).join('')}</div></div>`).join('');
   return head + hd + rows + `<div class="att-leg">${ATT_KEYS.map((k, i) => `<span class="ac ${attCls(k)}" style="cursor:pointer" onclick="attStatus(${i})">${ATT_SHORT[k]}</span>`).join('')}</div>`;
 }
 function markAllPresent(date) {
     
-    db.workers.forEach(w => {
+    db.workers.filter(w => !attAway(w, date)).forEach(w => {
         let key = w.id + '|' + date;
         if (!db.attendance[key] || db.attendance[key] === 'Unmarked') {
             db.attendance[key] = 'P';
@@ -5232,11 +5256,12 @@ function openDayAttendanceModal(date) {
   
   if (!db.workers.length) return toast('Add workers in Settings first!');
   const st = ATT_KEYS;
-  let rows = db.workers.map(w => {
+  const gone = db.workers.filter(w => attAway(w, date));
+  let rows = db.workers.filter(w => !attAway(w, date)).map(w => {
     let cur = getAtt(w.id, date);
     return `<div class="item" style="flex-direction:column;align-items:stretch;gap:10px"><div style="display:flex;justify-content:space-between;align-items:center"><strong>${esc(w.name)}</strong><span class="pill ac ${attCls(cur)} sel" id="pill-${w.id}">${esc(cur)}</span></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">${st.map(s => `<button type="button" class="btn smallbtn ac attpick ${attCls(s)} ${cur === s ? 'sel' : ''}" style="padding:8px 2px;font-size:11px" onclick="setSingleAtt('${w.id}','${date}','${s}',this)">${s === 'Half Day' ? '½ Day' : (ATT_TAG[s] || s)}</button>`).join('')}</div></div>`;
   }).join('');
-  let html = `<div class="modal-backdrop" id="attModal" onclick="if(event.target===this) {document.getElementById('attModal')?.remove(); render();}"><section class="card record-modal"><div class="section-title"><div><h3>Date: ${esc(date)}</h3></div><div style="display:flex;gap:6px"><button class="btn smallbtn primary" onclick="markAllPresent('${date}')">All Present</button><button class="btn smallbtn" onclick="document.getElementById('attModal')?.remove(); render();">✕ Close</button></div></div><div>${rows}</div></section></div>`;
+  let html = `<div class="modal-backdrop" id="attModal" onclick="if(event.target===this) {document.getElementById('attModal')?.remove(); render();}"><section class="card record-modal"><div class="section-title"><div><h3>Date: ${esc(date)}</h3></div><div style="display:flex;gap:6px"><button class="btn smallbtn primary" onclick="markAllPresent('${date}')">All Present</button><button class="btn smallbtn" onclick="document.getElementById('attModal')?.remove(); render();">✕ Close</button></div></div>${gone.length ? `<p class="small muted" style="margin:-4px 0 10px">Not listed (marked Left on this date): ${gone.map(w => esc(w.name)).join(', ')}</p>` : ''}<div>${rows}</div></section></div>`;
   document.getElementById('attModal')?.remove(); document.body.insertAdjacentHTML('beforeend', html);
 }
 function setSingleAtt(wId, d, s, btn) { db.attendance[wId + '|' + d] = s; save(); btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('sel')); btn.classList.add('sel'); let p = document.getElementById('pill-' + wId); if (p) { p.textContent = s; p.className = 'pill ac sel ' + attCls(s); } }
@@ -7464,8 +7489,11 @@ function dirListHtml() {
     const people = (db.peopleCodes || []).filter(p => p.type === type && String(p.name || '').trim() && (!q || prNorm(p.name).includes(q) || prNorm(p.code).includes(q))).sort((a, b) => String(a.name).localeCompare(String(b.name)));
     if (!people.length) return;
     const by = dirRowsBy(type);
-    out += `<h4 style="margin:14px 0 6px">${PR_ICON[type]} ${esc(PR_LABEL[type])} (${people.length})</h4>` + people.map(p => { const a = prAgg(by.get(prNorm(p.name)) || [], false);
-      return `<div class="sd-acc" onclick="DIR.sel='${prEnc(p.name)}';render();window.scrollTo(0,0)"><div style="min-width:0"><b>${esc(p.name)}</b><small>${pcOpen(p) ? 'Left · ' : ''}${p.code ? 'Code: ' + esc(p.code) + ' · ' : ''}${prQ(a.qty)} pcs · ${prC(a.cbm)} CBM · last work ${a.last ? prAgo(a.last) : 'none'}</small></div><span class="muted">›</span></div>`; }).join('');
+    const row = p => { const a = prAgg(by.get(prNorm(p.name)) || [], false);
+      return `<div class="sd-acc" onclick="DIR.sel='${prEnc(p.name)}';render();window.scrollTo(0,0)"><div style="min-width:0"><b>${esc(p.name)}</b><small>${pcCur(p) ? 'Left from ' + esc(pcCur(p).from) + ' · ' : ''}${p.code ? 'Code: ' + esc(p.code) + ' · ' : ''}${prQ(a.qty)} pcs · ${prC(a.cbm)} CBM · last work ${a.last ? prAgo(a.last) : 'none'}</small></div><span class="muted">›</span></div>`; };
+    const actD = people.filter(p => !pcIsLeft(p)), lefD = people.filter(p => pcIsLeft(p));
+    out += `<h4 style="margin:14px 0 6px">${PR_ICON[type]} ${esc(PR_LABEL[type])} (${actD.length})</h4>` + actD.map(row).join('');
+    if (lefD.length) out += `<h4 style="margin:12px 0 6px;color:var(--muted)">Left · ${esc(PR_LABEL[type])} (${lefD.length})</h4>` + lefD.map(row).join('');
   });
   return out || '<div class="empty">No names found. Add them in Names &amp; Custom Codes.</div>';
 }
@@ -11190,6 +11218,7 @@ try{Object.defineProperty(window,'TAE_FMT',{configurable:true,get:function(){ret
 
 <!-- ===================================================================
   AI PRO ASSISTANT  (added in V1.0.82-live, integrated into the robot button in V1.0.83-live,
+  V1.0.153: Mark Left / Re-activate / Left Dates now open their key-file confirmation properly (it used to close at once). Left names get their own Left List in Names & Custom Codes and in People Directory. A worker marked Left on a date is not listed for attendance on that date (All Present skips him, calendar shows Left). Saving a work entry for a name that was Left on the entry date shows a Check date warning.
   V1.0.152: version update.
   V1.0.151: Left now has dates. Mark Left asks the first day he is not working, Re-activate asks the day he is back, and Left Dates edits all periods (he can leave and return many times). Overall hides him on days he was away, shows him with an "Active only: date to date" warning when only part of the period was active, and this works for Carpenter, Sanding, Polish and Supplier.
   V1.0.150: Names & Custom Codes: new Mark Left / Re-activate button. A person who has left keeps all old records in Overall, profile and reports, is hidden from the ranking only when he has no work in the period, and is not suggested in new entries. Delete on a name with old records now marks it Left instead of removing it.
